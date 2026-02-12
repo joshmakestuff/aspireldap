@@ -1,60 +1,89 @@
 using Aspire.Hosting.ApplicationModel;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting;
 
 public static class OpenLdapResourceBuilderExtensions
 {
+    /// <summary>
+    /// Adds an OpenLDAP container resource built from the local Dockerfile.
+    /// </summary>
     public static IResourceBuilder<OpenLdapResource> AddOpenLdap(
-        this IDistributedApplicationBuilder builder,
-        [ResourceName] string name,
-        int? ldapPort = null,
-        int? ldapsPort = null,
-        string imageName = OpenLdapResource.DefaultImageName,
-        string imageTag = OpenLdapResource.DefaultImageTag,
-        string adminUsername = OpenLdapResource.DefaultAdminUsername,
-        string? adminPassword = null,
-        IResourceBuilder<ParameterResource>? adminPasswordParameter = null,
-        string users = OpenLdapResource.DefaultUsers,
-        string userPasswords = OpenLdapResource.DefaultUserPasswords)
-    {
-        ValidateCommonArguments(builder, name, adminUsername, users, userPasswords);
-        ValidateAdminPasswordArguments(adminPassword, adminPasswordParameter);
-        ArgumentException.ThrowIfNullOrWhiteSpace(imageName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(imageTag);
-
-        var openLdap = builder
-            .AddResource(new OpenLdapResource(name, adminPasswordParameter?.Resource))
-            .WithImage(imageName, imageTag);
-
-        return ConfigureCommon(openLdap, ldapPort, ldapsPort, adminUsername, adminPassword, adminPasswordParameter, users, userPasswords);
-    }
-
-    public static IResourceBuilder<OpenLdapResource> AddOpenLdapFromDockerProject(
         this IDistributedApplicationBuilder builder,
         [ResourceName] string name,
         int? ldapPort = null,
         int? ldapsPort = null,
         string dockerContextPath = OpenLdapResource.DefaultDockerContextPath,
         string dockerfilePath = OpenLdapResource.DefaultDockerfilePath,
+        string ldapRoot = OpenLdapResource.DefaultLdapRoot,
         string adminUsername = OpenLdapResource.DefaultAdminUsername,
         string? adminPassword = null,
         IResourceBuilder<ParameterResource>? adminPasswordParameter = null,
         string users = OpenLdapResource.DefaultUsers,
         string userPasswords = OpenLdapResource.DefaultUserPasswords)
     {
-        ValidateCommonArguments(builder, name, adminUsername, users, userPasswords);
-        ValidateAdminPasswordArguments(adminPassword, adminPasswordParameter);
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(dockerContextPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(dockerfilePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ldapRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adminUsername);
+        ArgumentException.ThrowIfNullOrWhiteSpace(users);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userPasswords);
+
+        if (adminPasswordParameter is not null && adminPassword is not null)
+        {
+            throw new DistributedApplicationException(
+                "Specify either adminPassword or adminPasswordParameter, but not both.");
+        }
+
+        var resource = new OpenLdapResource(
+            name,
+            ldapRoot: ldapRoot,
+            adminUsername: adminUsername,
+            adminPasswordParameter: adminPasswordParameter?.Resource,
+            adminPassword: adminPassword);
 
         var openLdap = builder
-            .AddResource(new OpenLdapResource(name, adminPasswordParameter?.Resource))
+            .AddResource(resource)
             .WithImage(name, "latest")
-            .WithDockerfile(dockerContextPath, dockerfilePath);
+            .WithDockerfile(dockerContextPath, dockerfilePath)
+            .WithEndpoint(port: ldapPort, targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName)
+            .WithEndpoint(port: ldapsPort, targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName)
+            .WithEnvironment("LDAP_ROOT", ldapRoot)
+            .WithEnvironment("LDAP_ADMIN_USERNAME", adminUsername)
+            .WithEnvironment("LDAP_USERS", users)
+            .WithEnvironment("LDAP_PASSWORDS", userPasswords);
 
-        return ConfigureCommon(openLdap, ldapPort, ldapsPort, adminUsername, adminPassword, adminPasswordParameter, users, userPasswords);
+        if (adminPasswordParameter is not null)
+        {
+            openLdap.WithEnvironment(context =>
+            {
+                context.EnvironmentVariables["LDAP_ADMIN_PASSWORD"] = adminPasswordParameter.Resource;
+            });
+        }
+        else
+        {
+            openLdap.WithEnvironment("LDAP_ADMIN_PASSWORD", adminPassword ?? OpenLdapResource.DefaultAdminPassword);
+        }
+
+        // Register LDAP root DSE health check
+        var healthCheckName = $"openldap-{name}";
+        builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
+            healthCheckName,
+            sp => new OpenLdapHealthCheck(resource),
+            failureStatus: HealthStatus.Unhealthy,
+            tags: null));
+
+        openLdap.WithHealthCheck(healthCheckName);
+
+        return openLdap;
     }
 
+    /// <summary>
+    /// Adds a named data volume for the OpenLDAP data directory.
+    /// </summary>
     public static IResourceBuilder<OpenLdapResource> WithDataVolume(
         this IResourceBuilder<OpenLdapResource> builder,
         string? name = null,
@@ -66,6 +95,9 @@ public static class OpenLdapResourceBuilderExtensions
         return builder.WithVolume(volumeName, OpenLdapResource.DataPath, isReadOnly);
     }
 
+    /// <summary>
+    /// Adds a bind mount for the OpenLDAP data directory.
+    /// </summary>
     public static IResourceBuilder<OpenLdapResource> WithDataBindMount(
         this IResourceBuilder<OpenLdapResource> builder,
         string source,
@@ -77,6 +109,9 @@ public static class OpenLdapResourceBuilderExtensions
         return builder.WithBindMount(source, OpenLdapResource.DataPath, isReadOnly);
     }
 
+    /// <summary>
+    /// Adds a bind mount for custom LDIF files loaded during initialization.
+    /// </summary>
     public static IResourceBuilder<OpenLdapResource> WithCustomLdifsBindMount(
         this IResourceBuilder<OpenLdapResource> builder,
         string source,
@@ -88,59 +123,15 @@ public static class OpenLdapResourceBuilderExtensions
         return builder.WithBindMount(source, "/ldifs", isReadOnly);
     }
 
-    private static IResourceBuilder<OpenLdapResource> ConfigureCommon(
-        IResourceBuilder<OpenLdapResource> openLdap,
-        int? ldapPort,
-        int? ldapsPort,
-        string adminUsername,
-        string? adminPassword,
-        IResourceBuilder<ParameterResource>? adminPasswordParameter,
-        string users,
-        string userPasswords)
-    {
-        openLdap
-            .WithEndpoint(port: ldapPort, targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName)
-            .WithEndpoint(port: ldapsPort, targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName)
-            .WithEnvironment("LDAP_ADMIN_USERNAME", adminUsername)
-            .WithEnvironment("LDAP_USERS", users)
-            .WithEnvironment("LDAP_PASSWORDS", userPasswords)
-            .WithDataVolume();
-
-        if (adminPasswordParameter is not null)
-        {
-            openLdap.WithEnvironment(context =>
-            {
-                context.EnvironmentVariables["LDAP_ADMIN_PASSWORD"] = adminPasswordParameter.Resource;
-            });
-
-            return openLdap;
-        }
-
-        openLdap.WithEnvironment("LDAP_ADMIN_PASSWORD", adminPassword ?? OpenLdapResource.DefaultAdminPassword);
-        return openLdap;
-    }
-
-    private static void ValidateCommonArguments(
-        IDistributedApplicationBuilder builder,
-        string name,
-        string adminUsername,
-        string users,
-        string userPasswords)
+    /// <summary>
+    /// Enables anonymous LDAP binding on the container.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithAnonymousBinding(
+        this IResourceBuilder<OpenLdapResource> builder,
+        bool allow = true)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(adminUsername);
-        ArgumentException.ThrowIfNullOrWhiteSpace(users);
-        ArgumentException.ThrowIfNullOrWhiteSpace(userPasswords);
-    }
 
-    private static void ValidateAdminPasswordArguments(
-        string? adminPassword,
-        IResourceBuilder<ParameterResource>? adminPasswordParameter)
-    {
-        if (adminPasswordParameter is not null && adminPassword is not null)
-        {
-            throw new DistributedApplicationException("Specify either adminPassword or adminPasswordParameter, but not both.");
-        }
+        return builder.WithEnvironment("LDAP_ALLOW_ANON_BINDING", allow ? "yes" : "no");
     }
 }

@@ -3,8 +3,6 @@ using Aspire.Hosting.ApplicationModel;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-builder
-    .AddOpenLdap("openldap")
-    .WithLifetime(ContainerLifetime.Persistent);
+builder.AddOpenLdap("openldap");
 
 builder.Build().Run();

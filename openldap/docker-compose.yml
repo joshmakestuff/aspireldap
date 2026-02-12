@@ -1,9 +1,11 @@
-# Copyright Broadcom, Inc. All Rights Reserved.
-# SPDX-License-Identifier: APACHE-2.0
+# OpenLDAP Docker Compose — builds from local Dockerfile
+# SPDX-License-Identifier: Apache-2.0
 
 services:
   openldap:
-    image: docker.io/bitnami/openldap:2.6
+    build:
+      context: ./2.6/debian-12
+      dockerfile: Dockerfile
     ports:
       - '1389:1389'
       - '1636:1636'
@@ -13,7 +15,7 @@ services:
       - LDAP_USERS=user01,user02
       - LDAP_PASSWORDS=password1,password2
     volumes:
-      - 'openldap_data:/bitnami/openldap'
+      - 'openldap_data:/data/openldap'
 
 volumes:
   openldap_data:
