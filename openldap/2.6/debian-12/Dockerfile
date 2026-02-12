@@ -22,6 +22,8 @@ ENV HOME="/" \
 
 COPY prebuildfs /
 SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
+# Normalize script line endings when building from Windows checkouts.
+RUN sed -i 's/\r$//' /usr/sbin/install_packages /usr/sbin/run-script /usr/sbin/uninstall_packages
 # Install required system packages and dependencies
 RUN install_packages ca-certificates curl libargon2-1 libcap2-bin libcom-err2 libcrypt1 libgssapi-krb5-2 libk5crypto3 libkeyutils1 libkrb5-3 libkrb5support0 libltdl7 libnsl2 libnss3-tools libodbc2 libperl5.36 libsasl2-2 libssl3 libtirpc3 libwrap0 mdbtools procps psmisc
 RUN --mount=type=secret,id=downloads_url,env=SECRET_DOWNLOADS_URL \
@@ -46,6 +48,7 @@ RUN find / -perm /6000 -type f -exec chmod a-s {} \; || true
 RUN uninstall_packages curl
 
 COPY rootfs /
+RUN find /opt/bitnami/scripts -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
 RUN /opt/bitnami/scripts/openldap/postunpack.sh
 ENV APP_VERSION="2.6.12" \
     BITNAMI_APP_NAME="openldap" \

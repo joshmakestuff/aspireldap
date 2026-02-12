@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Aspire.Hosting.OpenLdap/Aspire.Hosting.OpenLdap.csproj" />
+  <Project Path="AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj" />
+</Solution>
