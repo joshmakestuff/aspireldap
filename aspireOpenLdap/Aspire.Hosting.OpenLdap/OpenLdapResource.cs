@@ -9,7 +9,7 @@ public sealed class OpenLdapResource(string name, ParameterResource? adminPasswo
     internal const string LdapsEndpointName = "ldaps";
     internal const int DefaultLdapTargetPort = 1389;
     internal const int DefaultLdapsTargetPort = 1636;
-    internal const string DefaultImageName = "testthing/openldap";
+    internal const string DefaultImageName = "bitnamilegacy/openldap";
     internal const string DefaultImageTag = "2.6";
     internal const string DefaultDockerContextPath = "../../openldap/2.6/debian-12";
     internal const string DefaultDockerfilePath = "Dockerfile";
