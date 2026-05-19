@@ -11,6 +11,8 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     internal const string LdapsEndpointName = "ldaps";
     internal const int DefaultLdapTargetPort = 1389;
     internal const int DefaultLdapsTargetPort = 1636;
+    internal const string DefaultImageName = "aspire-openldap";
+    internal const string DefaultImageTag = "2.6";
     internal const string DefaultDockerContextPath = "../../openldap/2.6/debian-12";
     internal const string DefaultDockerfilePath = "Dockerfile";
     internal const string DefaultAdminUsername = "admin";

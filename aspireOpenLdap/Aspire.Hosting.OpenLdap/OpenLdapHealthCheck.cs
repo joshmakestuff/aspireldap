@@ -5,37 +5,39 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 namespace Aspire.Hosting.ApplicationModel;
 
 /// <summary>
-/// Health check that performs an anonymous root DSE query against the OpenLDAP server.
-/// A successful response indicates that the LDAP server is accepting connections.
+/// Health check that performs an authenticated root DSE query against the OpenLDAP server
+/// using the resource's admin credentials.
 /// </summary>
 internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCheck
 {
+    // LDAP result code for invalid credentials (RFC 4511).
+    private const int InvalidCredentialsResultCode = 49;
+
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var endpoint = resource.LdapEndpoint;
-            var host = endpoint.Resource.Name; // container name for inter-container communication
-            var port = resource.LdapEndpoint.Port;
-
-            // Use the allocated host endpoint for health checks from the host machine.
             var allocatedEndpoint = resource.GetEndpoint(OpenLdapResource.LdapEndpointName);
             if (allocatedEndpoint is null || !allocatedEndpoint.IsAllocated)
             {
                 return HealthCheckResult.Unhealthy("LDAP endpoint is not allocated.");
             }
 
-            var ldapHost = allocatedEndpoint.Host;
-            var ldapPort = allocatedEndpoint.Port;
+            var password = resource.AdminPasswordParameter?.Value
+                ?? resource.AdminPassword
+                ?? OpenLdapResource.DefaultAdminPassword;
+            var bindDn = $"cn={resource.AdminUsername},{resource.LdapRoot}";
 
             using var connection = new LdapConnection(
-                new LdapDirectoryIdentifier(ldapHost, ldapPort, fullyQualifiedDnsHostName: false, connectionless: false));
-
-            connection.AuthType = AuthType.Anonymous;
+                new LdapDirectoryIdentifier(allocatedEndpoint.Host, allocatedEndpoint.Port, fullyQualifiedDnsHostName: false, connectionless: false))
+            {
+                AuthType = AuthType.Basic,
+                Credential = new NetworkCredential(bindDn, password),
+                Timeout = TimeSpan.FromSeconds(5),
+            };
             connection.SessionOptions.ProtocolVersion = 3;
-            connection.Timeout = TimeSpan.FromSeconds(5);
 
             // Root DSE query: base DN = "", scope = Base
             var request = new SearchRequest(
@@ -55,6 +57,10 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
 
             return HealthCheckResult.Unhealthy(
                 $"LDAP root DSE query returned unexpected result: {response.ResultCode}");
+        }
+        catch (LdapException ex) when (ex.ErrorCode == InvalidCredentialsResultCode)
+        {
+            return HealthCheckResult.Unhealthy("LDAP authentication failed.", ex);
         }
         catch (LdapException ex)
         {

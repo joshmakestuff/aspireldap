@@ -47,7 +47,7 @@ public static class OpenLdapResourceBuilderExtensions
 
         var openLdap = builder
             .AddResource(resource)
-            .WithImage(name, "latest")
+            .WithImage(OpenLdapResource.DefaultImageName, OpenLdapResource.DefaultImageTag)
             .WithDockerfile(dockerContextPath, dockerfilePath)
             .WithEndpoint(port: ldapPort, targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName, isProxied: false)
             .WithEndpoint(port: ldapsPort, targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName, isProxied: false)
