@@ -219,6 +219,19 @@ public static class OpenLdapResourceBuilderExtensions
     /// Adds a phpLDAPadmin web UI container that targets this OpenLDAP resource.
     /// The admin container connects to the parent over the Aspire-managed container network.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Login expects the seeded user's <c>uid</c> (e.g. <c>user01</c>), not a full DN.
+    /// phpLDAPadmin v2 searches for entries matching <c>(&amp;(uid={input})(objectClass=posixAccount))</c>
+    /// and binds with the matched entry's DN — so OpenLDAP's <c>rootDN</c>
+    /// (<c>cn=admin,...</c>) cannot log in here, since it's a config-only credential rather than
+    /// a real directory entry.
+    /// </para>
+    /// <para>
+    /// To change the login-attribute behavior (e.g. <c>uid</c> → full <c>dn</c>), set
+    /// <c>LDAP_LOGIN_ATTR</c> via the <paramref name="configureContainer"/> callback.
+    /// </para>
+    /// </remarks>
     /// <param name="builder">The parent OpenLDAP builder.</param>
     /// <param name="configureContainer">Optional callback to further configure the admin container.</param>
     /// <param name="containerName">Override the admin resource name. Defaults to <c>{parent}-admin</c>.</param>
