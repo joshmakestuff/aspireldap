@@ -486,9 +486,13 @@ $RECYCLE.BIN/
 
 # playwright
 .playwright/
+.playwright-cli/
+phpldapadmin-logged-in.png
 
 # .vscode
 .vscode/
 
 # agents
 .agents/
+
+#
