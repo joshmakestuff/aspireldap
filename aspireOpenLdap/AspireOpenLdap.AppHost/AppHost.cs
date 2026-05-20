@@ -5,6 +5,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 builder.AddOpenLdap("openldap")
     .WithTls()
-    .WithRequiredTls();
+    .WithRequiredTls()
+    .WithPhpLdapAdmin();
 
 builder.Build().Run();

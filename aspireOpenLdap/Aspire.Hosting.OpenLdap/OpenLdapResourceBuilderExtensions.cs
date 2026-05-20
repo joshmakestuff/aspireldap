@@ -80,7 +80,9 @@ public static class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
-    /// Adds a named data volume for the OpenLDAP data directory.
+    /// Adds a named data volume for the OpenLDAP data directory (<c>/data/openldap</c>).
+    /// On subsequent starts, the container detects existing data and skips reinitialization
+    /// (including re-applying seed LDIFs), making startup fast even with large seed data.
     /// </summary>
     public static IResourceBuilder<OpenLdapResource> WithDataVolume(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -94,7 +96,8 @@ public static class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
-    /// Adds a bind mount for the OpenLDAP data directory.
+    /// Bind-mounts a host directory at the OpenLDAP data path (<c>/data/openldap</c>).
+    /// Same reinit-skipping behavior as <see cref="WithDataVolume"/>.
     /// </summary>
     public static IResourceBuilder<OpenLdapResource> WithDataBindMount(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -108,8 +111,82 @@ public static class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
+    /// Adds a custom LDAP schema from a single LDIF file. The file is mounted into the container
+    /// and loaded via <c>slapadd</c> during initialization.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithSchema(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string ldifFile)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ldifFile);
+
+        var fullPath = Path.GetFullPath(ldifFile);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException($"Schema LDIF file not found: {fullPath}", fullPath);
+        }
+
+        return builder.WithBindMount(fullPath, "/schema/custom.ldif", isReadOnly: true);
+    }
+
+    /// <summary>
+    /// Adds a directory of custom LDAP schema LDIF files. Files with the <c>.ldif</c> extension
+    /// are loaded alphabetically via <c>slapadd</c> during initialization.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithSchemas(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string directory)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+
+        var fullPath = Path.GetFullPath(directory);
+        if (!Directory.Exists(fullPath))
+        {
+            throw new DirectoryNotFoundException($"Schema directory not found: {fullPath}");
+        }
+
+        return builder.WithBindMount(fullPath, "/schemas", isReadOnly: true);
+    }
+
+    /// <summary>
+    /// Seeds the directory with one or more LDIF files loaded via <c>ldapadd</c> after
+    /// initialization completes. Accepts either a single LDIF file or a directory of LDIF files.
+    /// </summary>
+    /// <remarks>
+    /// When seed data is present the container's default tree (the <c>LDAP_USERS</c>/<c>LDAP_PASSWORDS</c>
+    /// users) is NOT created — your seed becomes the entire initial dataset. Pair with
+    /// <see cref="WithDataVolume"/> to amortize the cost of large seeds across restarts.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithSeedData(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string ldifFileOrDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ldifFileOrDirectory);
+
+        var fullPath = Path.GetFullPath(ldifFileOrDirectory);
+
+        if (Directory.Exists(fullPath))
+        {
+            return builder.WithBindMount(fullPath, "/ldifs", isReadOnly: true);
+        }
+
+        if (File.Exists(fullPath))
+        {
+            var fileName = Path.GetFileName(fullPath);
+            return builder.WithBindMount(fullPath, $"/ldifs/{fileName}", isReadOnly: true);
+        }
+
+        throw new FileNotFoundException(
+            $"Seed data path not found: {fullPath}", fullPath);
+    }
+
+    /// <summary>
     /// Adds a bind mount for custom LDIF files loaded during initialization.
     /// </summary>
+    [Obsolete("Use WithSeedData(...) instead. This method will be removed in a future release.")]
     public static IResourceBuilder<OpenLdapResource> WithCustomLdifsBindMount(
         this IResourceBuilder<OpenLdapResource> builder,
         string source,
@@ -137,6 +214,51 @@ public static class OpenLdapResourceBuilderExtensions
     private const string ContainerServerCertPath = "/tls/server.crt";
     private const string ContainerServerKeyPath = "/tls/server.key";
     private const string ContainerCaCertPath = "/tls/ca.crt";
+
+    /// <summary>
+    /// Adds a phpLDAPadmin web UI container that targets this OpenLDAP resource.
+    /// The admin container connects to the parent over the Aspire-managed container network.
+    /// </summary>
+    /// <param name="builder">The parent OpenLDAP builder.</param>
+    /// <param name="configureContainer">Optional callback to further configure the admin container.</param>
+    /// <param name="containerName">Override the admin resource name. Defaults to <c>{parent}-admin</c>.</param>
+    /// <returns>The parent OpenLDAP builder (admin runs alongside as a sibling resource).</returns>
+    public static IResourceBuilder<OpenLdapResource> WithPhpLdapAdmin(
+        this IResourceBuilder<OpenLdapResource> builder,
+        Action<IResourceBuilder<PhpLdapAdminResource>>? configureContainer = null,
+        string? containerName = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var parent = builder.Resource;
+        var adminName = containerName ?? $"{parent.Name}-admin";
+        var adminResource = new PhpLdapAdminResource(adminName, parent);
+
+        // Inside the container network the admin connects to the parent by resource name.
+        // If TLS is required we point at the LDAPS target port; otherwise plain LDAP.
+        var ldapHost = parent.Name;
+        var ldapPort = parent.TlsRequired
+            ? OpenLdapResource.DefaultLdapsTargetPort
+            : OpenLdapResource.DefaultLdapTargetPort;
+
+        var admin = builder.ApplicationBuilder
+            .AddResource(adminResource)
+            .WithImage(PhpLdapAdminResource.DefaultImageName, PhpLdapAdminResource.DefaultImageTag)
+            .WithHttpEndpoint(targetPort: PhpLdapAdminResource.ContainerHttpPort, name: PhpLdapAdminResource.HttpEndpointName)
+            .WithEnvironment("LDAP_HOST", ldapHost)
+            .WithEnvironment("LDAP_PORT", ldapPort.ToString())
+            .WithEnvironment("LDAP_BASE_DN", parent.LdapRoot)
+            .WaitFor(builder);
+
+        if (parent.TlsRequired)
+        {
+            // Self-signed CA isn't trusted inside the admin container — skip verification for local dev.
+            admin.WithEnvironment("LDAP_TLS_VERIFY_CERT", "never");
+        }
+
+        configureContainer?.Invoke(admin);
+        return builder;
+    }
 
     /// <summary>
     /// Enables TLS using an auto-generated self-signed CA and server certificate.
