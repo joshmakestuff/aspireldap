@@ -16,7 +16,6 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     internal const string DefaultDockerContextPath = "../../openldap/2.6/debian-12";
     internal const string DefaultDockerfilePath = "Dockerfile";
     internal const string DefaultAdminUsername = "admin";
-    internal const string DefaultAdminPassword = "adminpassword";
     internal const string DefaultLdapRoot = "dc=example,dc=org";
     internal const string DefaultUsers = "user01,user02";
     internal const string DefaultUserPasswords = "password1,password2";
@@ -29,14 +28,13 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
         string name,
         string ldapRoot,
         string adminUsername,
-        ParameterResource? adminPasswordParameter = null,
-        string? adminPassword = null)
+        ParameterResource adminPasswordParameter)
         : base(name)
     {
+        ArgumentNullException.ThrowIfNull(adminPasswordParameter);
         LdapRoot = ldapRoot;
         AdminUsername = adminUsername;
         AdminPasswordParameter = adminPasswordParameter;
-        AdminPassword = adminPassword;
     }
 
     /// <summary>The base DN / suffix (e.g. dc=example,dc=org).</summary>
@@ -45,11 +43,17 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// <summary>The admin username (CN component). Admin DN = cn={AdminUsername},{LdapRoot}.</summary>
     public string AdminUsername { get; }
 
-    /// <summary>Optional parameter resource for the admin password (supports Aspire secrets).</summary>
-    public ParameterResource? AdminPasswordParameter { get; }
+    /// <summary>Parameter resource backing the admin password. Auto-generated when the caller does not supply one.</summary>
+    public ParameterResource AdminPasswordParameter { get; }
 
-    /// <summary>Literal admin password (used when AdminPasswordParameter is null).</summary>
-    internal string? AdminPassword { get; }
+    /// <summary>True when TLS has been enabled via <c>WithTls</c>.</summary>
+    internal bool TlsEnabled { get; set; }
+
+    /// <summary>True when LDAPS is required (<c>WithRequiredTls</c>). Switches the connection string scheme to <c>ldaps://</c>.</summary>
+    internal bool TlsRequired { get; set; }
+
+    /// <summary>Host filesystem path to the CA certificate (PEM) trusted by the server, when TLS is enabled.</summary>
+    internal string? CaCertHostPath { get; set; }
 
     public EndpointReference LdapEndpoint =>
         _ldapEndpoint ??= new EndpointReference(this, LdapEndpointName);
@@ -60,19 +64,20 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// <summary>
     /// Connection string in the format:
     /// Endpoint=ldap://host:port;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=secret
+    /// When TLS is required the scheme switches to <c>ldaps://</c> and <c>CaCertFile=</c> is appended.
     /// </summary>
     public ReferenceExpression ConnectionStringExpression
     {
         get
         {
-            if (AdminPasswordParameter is not null)
-            {
-                return ReferenceExpression.Create(
-                    $"Endpoint=ldap://{LdapEndpoint.Property(EndpointProperty.HostAndPort)};BaseDN={LdapRoot};BindDN=cn={AdminUsername},{LdapRoot};BindPassword={AdminPasswordParameter}");
-            }
+            var scheme = TlsRequired ? "ldaps" : "ldap";
+            var endpoint = TlsRequired ? LdapsEndpoint : LdapEndpoint;
+            var caSuffix = TlsEnabled && CaCertHostPath is not null
+                ? $";CaCertFile={CaCertHostPath}"
+                : string.Empty;
 
             return ReferenceExpression.Create(
-                $"Endpoint=ldap://{LdapEndpoint.Property(EndpointProperty.HostAndPort)};BaseDN={LdapRoot};BindDN=cn={AdminUsername},{LdapRoot};BindPassword={AdminPassword ?? DefaultAdminPassword}");
+                $"Endpoint={scheme}://{endpoint.Property(EndpointProperty.HostAndPort)};BaseDN={LdapRoot};BindDN=cn={AdminUsername},{LdapRoot};BindPassword={AdminPasswordParameter}{caSuffix}");
         }
     }
 }
