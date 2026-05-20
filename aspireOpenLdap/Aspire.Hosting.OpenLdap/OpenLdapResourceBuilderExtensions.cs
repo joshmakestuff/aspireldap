@@ -253,6 +253,10 @@ public static class OpenLdapResourceBuilderExtensions
             {
                 context.EnvironmentVariables["LDAP_PASSWORD"] = parent.AdminPasswordParameter;
             })
+            // The login page only renders 200 when the LDAP bind succeeds (it does a root-DSE
+            // query during page construction), so this also doubles as an end-to-end connectivity
+            // probe between the admin container and the LDAP server.
+            .WithHttpHealthCheck(path: "/", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)
             .WaitFor(builder);
 
         if (parent.TlsRequired)
