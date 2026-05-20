@@ -248,12 +248,20 @@ public static class OpenLdapResourceBuilderExtensions
             .WithEnvironment("LDAP_HOST", ldapHost)
             .WithEnvironment("LDAP_PORT", ldapPort.ToString())
             .WithEnvironment("LDAP_BASE_DN", parent.LdapRoot)
+            .WithEnvironment("LDAP_USERNAME", $"cn={parent.AdminUsername},{parent.LdapRoot}")
+            .WithEnvironment(context =>
+            {
+                context.EnvironmentVariables["LDAP_PASSWORD"] = parent.AdminPasswordParameter;
+            })
             .WaitFor(builder);
 
         if (parent.TlsRequired)
         {
-            // Self-signed CA isn't trusted inside the admin container — skip verification for local dev.
-            admin.WithEnvironment("LDAP_TLS_VERIFY_CERT", "never");
+            // Use the image's preconfigured 'ldaps' connection (use_ssl=true). Self-signed CA isn't
+            // trusted inside the admin container so disable libldap's cert verification for local dev.
+            admin.WithEnvironment("LDAP_CONNECTION", "ldaps")
+                 .WithEnvironment("LDAP_SSL", "true")
+                 .WithEnvironment("LDAPTLS_REQCERT", "never");
         }
 
         configureContainer?.Invoke(admin);
