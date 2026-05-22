@@ -23,7 +23,7 @@ public static class OpenLdapResourceBuilderExtensions
         [ResourceName] string name,
         int? ldapPort = null,
         int? ldapsPort = null,
-        string dockerContextPath = OpenLdapResource.DefaultDockerContextPath,
+        string? dockerContextPath = null,
         string dockerfilePath = OpenLdapResource.DefaultDockerfilePath,
         string ldapRoot = OpenLdapResource.DefaultLdapRoot,
         string adminUsername = OpenLdapResource.DefaultAdminUsername,
@@ -33,8 +33,10 @@ public static class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(dockerContextPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(dockerfilePath);
+
+        dockerContextPath ??= OpenLdapResource.DefaultDockerContextPath;
+        ArgumentException.ThrowIfNullOrWhiteSpace(dockerContextPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldapRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminUsername);
         ArgumentException.ThrowIfNullOrWhiteSpace(users);

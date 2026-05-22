@@ -1,0 +1,23 @@
+<Project>
+
+  <PropertyGroup>
+    <Authors>Joshua Toon</Authors>
+    <Company>Joshua Toon</Company>
+    <Copyright>Copyright (c) Joshua Toon</Copyright>
+    <Version>0.1.0-preview.1</Version>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/joshmakestuff/aspireldap</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/joshmakestuff/aspireldap</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+</Project>

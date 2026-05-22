@@ -4,7 +4,31 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <IsPackable>true</IsPackable>
+    <PackageId>Aspire.Hosting.OpenLdap</PackageId>
+    <Description>.NET Aspire hosting integration for OpenLDAP. Adds an OpenLDAP container resource (with optional TLS, health checks, and phpLDAPadmin sidecar) to your AppHost.</Description>
+    <PackageTags>aspire;hosting;openldap;ldap;directory</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    Bundle the OpenLDAP docker build context (Dockerfile + rootfs scripts) so the
+    integration works for NuGet consumers without requiring them to clone this repo.
+    Files are copied to the consumer's build output and packed into contentFiles/ of
+    the nupkg with copyToOutput=true so a PackageReference produces the same layout.
+  -->
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\openldap\2.6\debian-12\**\*"
+             Link="openldap\2.6\debian-12\%(RecursiveDir)%(Filename)%(Extension)"
+             Pack="true"
+             PackagePath="contentFiles/any/any/openldap/2.6/debian-12/"
+             PackageCopyToOutput="true"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" Version="13.3.4" />
