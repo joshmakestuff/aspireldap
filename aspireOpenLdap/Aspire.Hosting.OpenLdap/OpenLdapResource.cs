@@ -13,8 +13,20 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     internal const int DefaultLdapsTargetPort = 1636;
     internal const string DefaultImageName = "aspire-openldap";
     internal const string DefaultImageTag = "2.6";
-    internal const string DefaultDockerContextPath = "../../openldap/2.6/debian-12";
+    /// <summary>
+    /// Relative path of the docker build context inside the consumer's build output.
+    /// The context (Dockerfile + rootfs scripts) is shipped as contentFiles in the
+    /// Aspire.Hosting.OpenLdap nupkg and copied here at build time.
+    /// </summary>
+    internal const string DefaultDockerContextRelativePath = "openldap/2.6/debian-12";
     internal const string DefaultDockerfilePath = "Dockerfile";
+
+    /// <summary>
+    /// Absolute default docker build context path, resolved against the AppHost's
+    /// build output (where the bundled Dockerfile/scripts land via contentFiles).
+    /// </summary>
+    internal static string DefaultDockerContextPath { get; } =
+        Path.Combine(AppContext.BaseDirectory, DefaultDockerContextRelativePath);
     internal const string DefaultAdminUsername = "admin";
     internal const string DefaultLdapRoot = "dc=example,dc=org";
     internal const string DefaultUsers = "user01,user02";

@@ -4,7 +4,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <IsPackable>true</IsPackable>
+    <PackageId>Aspire.OpenLdap</PackageId>
+    <Description>.NET Aspire client integration for OpenLDAP. Registers an LdapConnection with DI, configuration binding, and health checks.</Description>
+    <PackageTags>aspire;client;openldap;ldap;directory</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.0" />
