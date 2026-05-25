@@ -34,7 +34,7 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
             var password = await resource.AdminPasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("Admin password parameter resolved to null.");
 
-            var bindDn = $"cn={resource.AdminUsername},{resource.LdapRoot}";
+            var bindDn = $"cn={resource.AdminUsername},{resource.BaseDn}";
 
             using var connection = new LdapConnection(
                 new LdapDirectoryIdentifier(allocatedEndpoint.Host, allocatedEndpoint.Port, fullyQualifiedDnsHostName: false, connectionless: false))

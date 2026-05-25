@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ApplicationModel.Seeding;
 
 namespace Aspire.Hosting.ApplicationModel;
 
@@ -28,9 +29,7 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     internal static string DefaultDockerContextPath { get; } =
         Path.Combine(AppContext.BaseDirectory, DefaultDockerContextRelativePath);
     internal const string DefaultAdminUsername = "admin";
-    internal const string DefaultLdapRoot = "dc=example,dc=org";
-    internal const string DefaultUsers = "user01,user02";
-    internal const string DefaultUserPasswords = "password1,password2";
+    internal const string DefaultBaseDn = "dc=example,dc=org";
     internal const string DataPath = "/data/openldap";
 
     private EndpointReference? _ldapEndpoint;
@@ -38,22 +37,22 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
 
     public OpenLdapResource(
         string name,
-        string ldapRoot,
+        string baseDn,
         string adminUsername,
         ParameterResource adminPasswordParameter)
         : base(name)
     {
         ArgumentNullException.ThrowIfNull(adminPasswordParameter);
-        LdapRoot = ldapRoot;
+        BaseDn = baseDn;
         AdminUsername = adminUsername;
         AdminPasswordParameter = adminPasswordParameter;
     }
 
-    /// <summary>The base DN / suffix (e.g. dc=example,dc=org).</summary>
-    public string LdapRoot { get; }
+    /// <summary>The base DN / suffix (e.g. <c>dc=example,dc=org</c>). Override with <c>WithBaseDn(...)</c>.</summary>
+    public string BaseDn { get; internal set; }
 
-    /// <summary>The admin username (CN component). Admin DN = cn={AdminUsername},{LdapRoot}.</summary>
-    public string AdminUsername { get; }
+    /// <summary>The admin username (CN component). Admin DN = <c>cn={AdminUsername},{BaseDn}</c>. Override with <c>WithAdminUsername(...)</c>.</summary>
+    public string AdminUsername { get; internal set; }
 
     /// <summary>Parameter resource backing the admin password. Auto-generated when the caller does not supply one.</summary>
     public ParameterResource AdminPasswordParameter { get; }
@@ -66,6 +65,15 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
 
     /// <summary>Host filesystem path to the CA certificate (PEM) trusted by the server, when TLS is enabled.</summary>
     internal string? CaCertHostPath { get; set; }
+
+    /// <summary>
+    /// Accumulated seed declarations (OUs, users, groups) emitted as a generated LDIF
+    /// at <c>BeforeResourceStarted</c> time. Null until the first seed builder call.
+    /// </summary>
+    internal LdapSeedModel? SeedModel { get; set; }
+
+    /// <summary>Host filesystem path of the generated seed LDIF. Set alongside <see cref="SeedModel"/>.</summary>
+    internal string? SeedFilePath { get; set; }
 
     public EndpointReference LdapEndpoint =>
         _ldapEndpoint ??= new EndpointReference(this, LdapEndpointName);
@@ -89,7 +97,7 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
                 : string.Empty;
 
             return ReferenceExpression.Create(
-                $"Endpoint={scheme}://{endpoint.Property(EndpointProperty.HostAndPort)};BaseDN={LdapRoot};BindDN=cn={AdminUsername},{LdapRoot};BindPassword={AdminPasswordParameter}{caSuffix}");
+                $"Endpoint={scheme}://{endpoint.Property(EndpointProperty.HostAndPort)};BaseDN={BaseDn};BindDN=cn={AdminUsername},{BaseDn};BindPassword={AdminPasswordParameter}{caSuffix}");
         }
     }
 }
