@@ -22,16 +22,11 @@
     the nupkg with copyToOutput=true so a PackageReference produces the same layout.
   -->
   <ItemGroup>
-    <Content Include="$(MSBuildThisFileDirectory)..\..\openldap\2.6\debian-12\**\*"
-             Link="openldap\2.6\debian-12\%(RecursiveDir)%(Filename)%(Extension)"
-             Pack="true"
-             PackagePath="contentFiles/any/any/openldap/2.6/debian-12/"
-             PackageCopyToOutput="true"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)..\..\openldap\2.6\debian-12\**\*" Link="openldap\2.6\debian-12\%(RecursiveDir)%(Filename)%(Extension)" Pack="true" PackagePath="contentFiles/any/any/openldap/2.6/debian-12/" PackageCopyToOutput="true" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting" Version="13.3.4" />
+    <PackageReference Include="Aspire.Hosting" Version="13.3.5" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0-preview.5.25277.114" />
     <PackageReference Include="System.DirectoryServices.Protocols" Version="9.0.5" />
   </ItemGroup>
