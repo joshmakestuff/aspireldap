@@ -1,0 +1,67 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compute package version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            BASE=$(grep -oP '(?<=<Version>)[^<]+' aspireOpenLdap/Directory.Build.props)
+            VERSION="${BASE}.ci.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Computed version: ${VERSION}"
+
+      - name: Restore
+        working-directory: aspireOpenLdap
+        run: dotnet restore AspireOpenLdap.slnx
+
+      - name: Pack
+        working-directory: aspireOpenLdap
+        run: |
+          dotnet pack AspireOpenLdap.slnx \
+            --configuration Release \
+            --no-restore \
+            -p:Version=${{ steps.ver.outputs.version }} \
+            -p:ContinuousIntegrationBuild=true \
+            --output ../artifacts
+
+      - name: Upload nupkg artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+
+      - name: Push to GitHub Packages
+        if: github.event_name != 'pull_request'
+        run: |
+          dotnet nuget push 'artifacts/*.nupkg' \
+            --source https://nuget.pkg.github.com/joshmakestuff/index.json \
+            --api-key ${{ secrets.GITHUB_TOKEN }} \
+            --skip-duplicate
