@@ -70,11 +70,12 @@ internal sealed class OpenLdapClientHealthCheck(OpenLdapClientFactory factory) :
         try
         {
             using var connection = factory.CreateConnection();
+            // "aspire-healthcheck" sentinel — see OpenLdapHealthCheck for why.
             var request = new SearchRequest(
                 distinguishedName: "",
                 ldapFilter: "(objectClass=*)",
                 searchScope: SearchScope.Base,
-                attributeList: ["namingContexts"]);
+                attributeList: ["namingContexts", "aspire-healthcheck"]);
 
             var response = await Task.Run(
                 () => (SearchResponse)connection.SendRequest(request),

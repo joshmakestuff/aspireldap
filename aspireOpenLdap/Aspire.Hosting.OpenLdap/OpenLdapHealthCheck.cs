@@ -56,12 +56,15 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
                 }
             }
 
-            // Root DSE query: base DN = "", scope = Base
+            // Root DSE query: base DN = "", scope = Base.
+            // The "aspire-healthcheck" attribute is a sentinel — slapd logs the attribute list
+            // verbatim, so a downstream log parser can drop healthcheck probes by matching this
+            // name. slapd returns nothing for it since it's not a real attribute.
             var request = new SearchRequest(
                 distinguishedName: "",
                 ldapFilter: "(objectClass=*)",
                 searchScope: SearchScope.Base,
-                attributeList: ["namingContexts"]);
+                attributeList: ["namingContexts", "aspire-healthcheck"]);
 
             var response = await Task.Run(
                 () => (SearchResponse)connection.SendRequest(request),
