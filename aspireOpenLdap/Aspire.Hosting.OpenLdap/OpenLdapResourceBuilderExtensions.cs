@@ -224,7 +224,7 @@ public static class OpenLdapResourceBuilderExtensions
     /// <remarks>
     /// <para>
     /// Login expects the seeded user's <c>uid</c> (e.g. <c>user01</c>), not a full DN.
-    /// phpLDAPadmin v2 searches for entries matching <c>(&amp;(uid={input})(objectClass=posixAccount))</c>
+    /// phpLDAPadmin v2 searches for entries matching <c>(&amp;(uid={input})(objectClass=inetOrgPerson))</c>
     /// and binds with the matched entry's DN — so OpenLDAP's <c>rootDN</c>
     /// (<c>cn=admin,...</c>) cannot log in here, since it's a config-only credential rather than
     /// a real directory entry.
@@ -232,6 +232,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <para>
     /// To change the login-attribute behavior (e.g. <c>uid</c> → full <c>dn</c>), set
     /// <c>LDAP_LOGIN_ATTR</c> via the <paramref name="configureContainer"/> callback.
+    /// The login object class filter is set to <c>inetOrgPerson</c> via
+    /// <c>LDAP_LOGIN_OBJECTCLASS</c>; override the same way if you need a different class.
     /// </para>
     /// </remarks>
     /// <param name="builder">The parent OpenLDAP builder.</param>
@@ -263,6 +265,7 @@ public static class OpenLdapResourceBuilderExtensions
             .WithEnvironment("LDAP_HOST", ldapHost)
             .WithEnvironment("LDAP_PORT", ldapPort.ToString())
             .WithEnvironment("LDAP_BASE_DN", parent.LdapRoot)
+            .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", "inetOrgPerson")
             .WithEnvironment("LDAP_USERNAME", $"cn={parent.AdminUsername},{parent.LdapRoot}")
             .WithEnvironment(context =>
             {

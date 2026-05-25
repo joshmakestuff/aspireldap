@@ -4,11 +4,7 @@ OpenLDAP 2.6 container image based on stock Debian Bookworm packages. Forked fro
 
 ## Quick Start
 
-```bash
-docker compose up -d
-```
-
-Or build and run directly:
+Build and run directly:
 
 ```bash
 docker build -t openldap ./2.6/debian-12
