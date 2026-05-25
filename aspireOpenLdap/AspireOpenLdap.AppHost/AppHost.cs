@@ -4,6 +4,7 @@ using Aspire.Hosting.ApplicationModel;
 var builder = DistributedApplication.CreateBuilder(args);
 
 builder.AddOpenLdap("openldap")
+    .WithDataVolume()
     .WithTls()
     .WithRequiredTls()
     .WithOrganizationalUnit("people")
