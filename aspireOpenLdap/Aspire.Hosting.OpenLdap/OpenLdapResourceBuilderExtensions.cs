@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
 using Microsoft.Extensions.DependencyInjection;
@@ -124,6 +125,52 @@ public static class OpenLdapResourceBuilderExtensions
             });
 
         builder.WithCommand(
+            name: "export-ldif",
+            displayName: "Export LDIF",
+            executeCommand: async ctx =>
+            {
+                var containerId = TryGetContainerId(ctx);
+                if (containerId is null)
+                {
+                    return new ExecuteCommandResult
+                    {
+                        Success = false,
+                        Message = "Container is not running.",
+                    };
+                }
+
+                var (exitCode, stdout, stderr) = await RunProcessAsync(
+                    "docker",
+                    ["exec", containerId, "slapcat", "-b", resource.BaseDn],
+                    ctx.CancellationToken).ConfigureAwait(false);
+
+                if (exitCode != 0)
+                {
+                    return new ExecuteCommandResult
+                    {
+                        Success = false,
+                        Message = $"slapcat failed (exit {exitCode}): {stderr.Trim()}",
+                    };
+                }
+
+                return new ExecuteCommandResult
+                {
+                    Success = true,
+                    Data = new CommandResultData
+                    {
+                        Value = $"```ldif\n{stdout}\n```",
+                        Format = CommandResultFormat.Markdown,
+                        DisplayImmediately = true,
+                    },
+                };
+            },
+            commandOptions: new CommandOptions
+            {
+                Description = "Dump the directory contents as LDIF (via slapcat).",
+                IconName = "ArrowDownload",
+            });
+
+        builder.WithCommand(
             name: "copy-admin-password",
             displayName: "Show admin password",
             executeCommand: async ctx =>
@@ -221,7 +268,94 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
 
         var volumeName = name ?? $"{builder.Resource.Name}-data";
-        return builder.WithVolume(volumeName, OpenLdapResource.DataPath, isReadOnly);
+        builder.WithVolume(volumeName, OpenLdapResource.DataPath, isReadOnly);
+        RegisterResetDataVolumeCommand(builder, volumeName);
+        return builder;
+    }
+
+    private static void RegisterResetDataVolumeCommand(
+        IResourceBuilder<OpenLdapResource> builder,
+        string volumeName)
+    {
+        builder.WithCommand(
+            name: "reset-data-volume",
+            displayName: "Reset data volume",
+            executeCommand: async ctx =>
+            {
+                var commandService = ctx.ServiceProvider.GetRequiredService<ResourceCommandService>();
+
+                var stopResult = await commandService
+                    .ExecuteCommandAsync(ctx.ResourceName, KnownResourceCommands.StopCommand, ctx.CancellationToken)
+                    .ConfigureAwait(false);
+                if (!stopResult.Success)
+                {
+                    return stopResult;
+                }
+
+                var (rmExit, _, rmErr) = await RunProcessAsync(
+                    "docker",
+                    ["volume", "rm", volumeName],
+                    ctx.CancellationToken).ConfigureAwait(false);
+                // Treat "volume not found" as success — the user wanted it gone.
+                if (rmExit != 0 && !rmErr.Contains("no such volume", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new ExecuteCommandResult
+                    {
+                        Success = false,
+                        Message = $"docker volume rm failed (exit {rmExit}): {rmErr.Trim()}",
+                    };
+                }
+
+                return await commandService
+                    .ExecuteCommandAsync(ctx.ResourceName, KnownResourceCommands.StartCommand, ctx.CancellationToken)
+                    .ConfigureAwait(false);
+            },
+            commandOptions: new CommandOptions
+            {
+                Description = "Stop the container, delete the data volume, and start fresh.",
+                IconName = "Delete",
+                ConfirmationMessage = $"Delete the '{volumeName}' volume and restart? All directory data will be lost.",
+            });
+    }
+
+    private static string? TryGetContainerId(ExecuteCommandContext ctx)
+    {
+        var notify = ctx.ServiceProvider.GetRequiredService<ResourceNotificationService>();
+        if (!notify.TryGetCurrentState(ctx.ResourceName, out var evt) || evt is null)
+        {
+            return null;
+        }
+        var prop = evt.Snapshot.Properties.FirstOrDefault(p => p.Name == "container.id");
+        return prop?.Value as string;
+    }
+
+    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunProcessAsync(
+        string fileName,
+        IEnumerable<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in arguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start '{fileName}'.");
+
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = proc.StandardError.ReadToEndAsync(cancellationToken);
+        await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+        return (proc.ExitCode, stdout, stderr);
     }
 
     /// <summary>
