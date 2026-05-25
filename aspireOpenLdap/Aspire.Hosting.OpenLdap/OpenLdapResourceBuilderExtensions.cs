@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ApplicationModel.Seeding;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -7,48 +8,34 @@ namespace Aspire.Hosting;
 public static class OpenLdapResourceBuilderExtensions
 {
     /// <summary>
-    /// Adds an OpenLDAP container resource built from the local Dockerfile.
+    /// Adds an OpenLDAP container resource built from the integration's bundled Dockerfile.
     /// </summary>
-    /// <param name="dockerContextPath">
-    /// Docker build context. Relative paths are resolved against the AppHost project directory
-    /// (Aspire's <c>IDistributedApplicationBuilder.AppHostDirectory</c>), not the runtime working directory.
-    /// </param>
+    /// <param name="builder">The distributed application builder.</param>
+    /// <param name="name">Resource name. Surfaces on the dashboard and is the connection-string key.</param>
     /// <param name="adminPassword">
     /// Optional parameter resource backing the admin password. When omitted, a 22-character random
     /// password is auto-generated via <see cref="ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter"/>
     /// and surfaced in the Aspire dashboard as a secret parameter named <c>{name}-password</c>.
     /// </param>
+    /// <remarks>
+    /// Defaults: base DN <c>dc=example,dc=org</c>, admin username <c>admin</c>, auto-allocated host ports.
+    /// Override via <c>WithBaseDn</c>, <c>WithAdminUsername</c>, <c>WithLdapPort</c>, <c>WithLdapsPort</c>.
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> AddOpenLdap(
         this IDistributedApplicationBuilder builder,
         [ResourceName] string name,
-        int? ldapPort = null,
-        int? ldapsPort = null,
-        string? dockerContextPath = null,
-        string dockerfilePath = OpenLdapResource.DefaultDockerfilePath,
-        string ldapRoot = OpenLdapResource.DefaultLdapRoot,
-        string adminUsername = OpenLdapResource.DefaultAdminUsername,
-        IResourceBuilder<ParameterResource>? adminPassword = null,
-        string users = OpenLdapResource.DefaultUsers,
-        string userPasswords = OpenLdapResource.DefaultUserPasswords)
+        IResourceBuilder<ParameterResource>? adminPassword = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(dockerfilePath);
-
-        dockerContextPath ??= OpenLdapResource.DefaultDockerContextPath;
-        ArgumentException.ThrowIfNullOrWhiteSpace(dockerContextPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(ldapRoot);
-        ArgumentException.ThrowIfNullOrWhiteSpace(adminUsername);
-        ArgumentException.ThrowIfNullOrWhiteSpace(users);
-        ArgumentException.ThrowIfNullOrWhiteSpace(userPasswords);
 
         var passwordParameter = adminPassword?.Resource
             ?? ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder, $"{name}-password");
 
         var resource = new OpenLdapResource(
             name,
-            ldapRoot: ldapRoot,
-            adminUsername: adminUsername,
+            baseDn: OpenLdapResource.DefaultBaseDn,
+            adminUsername: OpenLdapResource.DefaultAdminUsername,
             adminPasswordParameter: passwordParameter);
 
         var openLdap = builder
@@ -56,15 +43,14 @@ public static class OpenLdapResourceBuilderExtensions
             // Sets the publish-time image name. The local docker build tag is content-hash-addressed
             // by Aspire's WithDockerfile and not affected by this call.
             .WithImage(OpenLdapResource.DefaultImageName, OpenLdapResource.DefaultImageTag)
-            .WithDockerfile(dockerContextPath, dockerfilePath)
-            .WithEndpoint(port: ldapPort, targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName, isProxied: false)
-            .WithEndpoint(port: ldapsPort, targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName, isProxied: false)
-            .WithEnvironment("LDAP_ROOT", ldapRoot)
-            .WithEnvironment("LDAP_ADMIN_USERNAME", adminUsername)
-            .WithEnvironment("LDAP_USERS", users)
-            .WithEnvironment("LDAP_PASSWORDS", userPasswords)
+            .WithDockerfile(OpenLdapResource.DefaultDockerContextPath, OpenLdapResource.DefaultDockerfilePath)
+            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName, isProxied: false)
+            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName, isProxied: false)
+            // Late-binding env values so fluent overrides (e.g. WithBaseDn) take effect when the container starts.
             .WithEnvironment(context =>
             {
+                context.EnvironmentVariables["LDAP_ROOT"] = resource.BaseDn;
+                context.EnvironmentVariables["LDAP_ADMIN_USERNAME"] = resource.AdminUsername;
                 context.EnvironmentVariables["LDAP_ADMIN_PASSWORD"] = passwordParameter;
             });
 
@@ -77,8 +63,149 @@ public static class OpenLdapResourceBuilderExtensions
             tags: null));
 
         openLdap.WithHealthCheck(healthCheckName);
+        RegisterDashboardCommands(openLdap);
+
+        // Surface the base DN next to the endpoint URL on the dashboard so users don't have to
+        // click through env vars. Lambdas read resource.BaseDn lazily, so WithBaseDn(...) overrides
+        // are picked up.
+        openLdap
+            .WithUrlForEndpoint(OpenLdapResource.LdapEndpointName, url =>
+            {
+                url.DisplayText = $"ldap (base={resource.BaseDn})";
+            })
+            .WithUrlForEndpoint(OpenLdapResource.LdapsEndpointName, url =>
+            {
+                url.DisplayText = $"ldaps (base={resource.BaseDn})";
+            });
 
         return openLdap;
+    }
+
+    private static void RegisterDashboardCommands(IResourceBuilder<OpenLdapResource> builder)
+    {
+        var resource = builder.Resource;
+
+        builder.WithCommand(
+            name: "copy-base-dn",
+            displayName: "Show base DN",
+            executeCommand: _ => Task.FromResult(new ExecuteCommandResult
+            {
+                Success = true,
+                Data = new CommandResultData
+                {
+                    Value = resource.BaseDn,
+                    Format = CommandResultFormat.Text,
+                    DisplayImmediately = true,
+                },
+            }),
+            commandOptions: new CommandOptions
+            {
+                Description = "Show the directory's base DN.",
+                IconName = "Copy",
+            });
+
+        builder.WithCommand(
+            name: "copy-bind-dn",
+            displayName: "Show admin bind DN",
+            executeCommand: _ => Task.FromResult(new ExecuteCommandResult
+            {
+                Success = true,
+                Data = new CommandResultData
+                {
+                    Value = $"cn={resource.AdminUsername},{resource.BaseDn}",
+                    Format = CommandResultFormat.Text,
+                    DisplayImmediately = true,
+                },
+            }),
+            commandOptions: new CommandOptions
+            {
+                Description = "Show the admin bind DN.",
+                IconName = "Copy",
+            });
+
+        builder.WithCommand(
+            name: "copy-admin-password",
+            displayName: "Show admin password",
+            executeCommand: async ctx =>
+            {
+                var pw = await resource.AdminPasswordParameter.GetValueAsync(ctx.CancellationToken).ConfigureAwait(false);
+                return new ExecuteCommandResult
+                {
+                    Success = true,
+                    Data = new CommandResultData
+                    {
+                        Value = pw ?? string.Empty,
+                        Format = CommandResultFormat.Text,
+                        DisplayImmediately = true,
+                    },
+                };
+            },
+            commandOptions: new CommandOptions
+            {
+                Description = "Reveal the admin password (sensitive).",
+                IconName = "Key",
+                ConfirmationMessage = "Reveal the admin password? It will be shown in a dialog.",
+            });
+    }
+
+    /// <summary>
+    /// Overrides the directory's base DN (a.k.a. suffix / root). Default <c>dc=example,dc=org</c>.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithBaseDn(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string baseDn)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseDn);
+        builder.Resource.BaseDn = baseDn;
+        return builder;
+    }
+
+    /// <summary>
+    /// Overrides the admin username. Bind DN becomes <c>cn={username},{baseDn}</c>. Default <c>admin</c>.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithAdminUsername(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string username)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(username);
+        builder.Resource.AdminUsername = username;
+        return builder;
+    }
+
+    /// <summary>
+    /// Pins the host port for the plain LDAP endpoint. By default Aspire allocates a random port.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithLdapPort(
+        this IResourceBuilder<OpenLdapResource> builder,
+        int port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        SetEndpointPort(builder, OpenLdapResource.LdapEndpointName, port);
+        return builder;
+    }
+
+    /// <summary>
+    /// Pins the host port for the LDAPS endpoint. By default Aspire allocates a random port.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithLdapsPort(
+        this IResourceBuilder<OpenLdapResource> builder,
+        int port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        SetEndpointPort(builder, OpenLdapResource.LdapsEndpointName, port);
+        return builder;
+    }
+
+    private static void SetEndpointPort(IResourceBuilder<OpenLdapResource> builder, string endpointName, int port)
+    {
+        var annotation = builder.Resource.Annotations
+            .OfType<EndpointAnnotation>()
+            .FirstOrDefault(e => string.Equals(e.Name, endpointName, StringComparison.OrdinalIgnoreCase))
+            ?? throw new DistributedApplicationException(
+                $"Endpoint '{endpointName}' not found on OpenLDAP resource '{builder.Resource.Name}'.");
+        annotation.Port = port;
     }
 
     /// <summary>
@@ -185,6 +312,130 @@ public static class OpenLdapResourceBuilderExtensions
             $"Seed data path not found: {fullPath}", fullPath);
     }
 
+    private const string GeneratedSeedContainerPath = "/ldifs/00-aspire-seed.ldif";
+
+    /// <summary>
+    /// Declares an organizational unit under the base DN. Other seed builder calls
+    /// (<see cref="WithUser"/>, <see cref="WithGroup"/>) reference it by name.
+    /// </summary>
+    /// <remarks>
+    /// Names must match <c>[A-Za-z0-9._-]+</c>. References to undeclared OUs throw a
+    /// <see cref="DistributedApplicationException"/> with a "did you mean" suggestion
+    /// when the resource starts.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithOrganizationalUnit(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string name)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var model = GetOrInitializeSeedModel(builder);
+        model.OrganizationalUnits.Add(new OrganizationalUnitEntry(name));
+        return builder;
+    }
+
+    /// <summary>
+    /// Declares a user entry (objectClass <c>inetOrgPerson</c>) seeded into the directory.
+    /// </summary>
+    /// <param name="uid">The user's <c>uid</c>. Becomes the RDN. Must match <c>[A-Za-z0-9._-]+</c>.</param>
+    /// <param name="password">Password stored as <c>userPassword</c>. OpenLDAP hashes it on add when configured to do so.</param>
+    /// <param name="ou">Optional organizational unit. Must match a name passed to <see cref="WithOrganizationalUnit"/>.</param>
+    /// <param name="cn">Common name. Defaults to <paramref name="uid"/>.</param>
+    /// <param name="sn">Surname (required for <c>inetOrgPerson</c>). Defaults to <paramref name="uid"/>.</param>
+    /// <param name="mail">Optional <c>mail</c> attribute.</param>
+    public static IResourceBuilder<OpenLdapResource> WithUser(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string uid,
+        string password,
+        string? ou = null,
+        string? cn = null,
+        string? sn = null,
+        string? mail = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(uid);
+        ArgumentException.ThrowIfNullOrWhiteSpace(password);
+
+        var model = GetOrInitializeSeedModel(builder);
+        model.Users.Add(new SeedUserEntry(
+            Uid: uid,
+            Password: password,
+            OrganizationalUnit: string.IsNullOrWhiteSpace(ou) ? null : ou,
+            Cn: string.IsNullOrWhiteSpace(cn) ? uid : cn,
+            Sn: string.IsNullOrWhiteSpace(sn) ? uid : sn,
+            Mail: string.IsNullOrWhiteSpace(mail) ? null : mail));
+        return builder;
+    }
+
+    /// <summary>
+    /// Declares a group entry (objectClass <c>groupOfNames</c>) seeded into the directory.
+    /// </summary>
+    /// <param name="cn">Group's <c>cn</c>. Becomes the RDN.</param>
+    /// <param name="members">
+    /// Members. Each entry is either a previously-declared user <c>uid</c> (resolved to its DN
+    /// at LDIF emission) or a literal DN (any string containing <c>=</c>). At least one member is required.
+    /// </param>
+    /// <param name="ou">Optional organizational unit; must match a <see cref="WithOrganizationalUnit"/> declaration.</param>
+    public static IResourceBuilder<OpenLdapResource> WithGroup(
+        this IResourceBuilder<OpenLdapResource> builder,
+        string cn,
+        IEnumerable<string> members,
+        string? ou = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cn);
+        ArgumentNullException.ThrowIfNull(members);
+
+        var memberList = members.ToList();
+        var model = GetOrInitializeSeedModel(builder);
+        model.Groups.Add(new SeedGroupEntry(
+            Cn: cn,
+            Members: memberList,
+            OrganizationalUnit: string.IsNullOrWhiteSpace(ou) ? null : ou));
+        return builder;
+    }
+
+    private static LdapSeedModel GetOrInitializeSeedModel(IResourceBuilder<OpenLdapResource> builder)
+    {
+        var resource = builder.Resource;
+        if (resource.SeedModel is { } existing)
+        {
+            return existing;
+        }
+
+        var model = new LdapSeedModel();
+        resource.SeedModel = model;
+
+        // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
+        var seedDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-seed");
+        Directory.CreateDirectory(seedDir);
+        var seedPath = Path.Combine(seedDir, $"{resource.Name}-seed.ldif");
+        resource.SeedFilePath = seedPath;
+
+        // Bind-mount needs an existing file at start time; the real content is written
+        // by the OnBeforeResourceStarted handler below.
+        if (!File.Exists(seedPath))
+        {
+            File.WriteAllText(seedPath, string.Empty);
+        }
+
+        builder.WithBindMount(seedPath, GeneratedSeedContainerPath, isReadOnly: true);
+
+        builder.OnBeforeResourceStarted((res, _, ct) =>
+        {
+            if (res.SeedModel is not { } m || m.IsEmpty || res.SeedFilePath is null)
+            {
+                return Task.CompletedTask;
+            }
+            LdapSeedValidator.Validate(res, m);
+            var ldif = LdapSeedLdifGenerator.Generate(res, m);
+            return File.WriteAllTextAsync(res.SeedFilePath, ldif, ct);
+        });
+
+        return model;
+    }
+
     /// <summary>
     /// Adds a bind mount for custom LDIF files loaded during initialization.
     /// </summary>
@@ -264,9 +515,9 @@ public static class OpenLdapResourceBuilderExtensions
             .WithHttpEndpoint(targetPort: PhpLdapAdminResource.ContainerHttpPort, name: PhpLdapAdminResource.HttpEndpointName)
             .WithEnvironment("LDAP_HOST", ldapHost)
             .WithEnvironment("LDAP_PORT", ldapPort.ToString())
-            .WithEnvironment("LDAP_BASE_DN", parent.LdapRoot)
+            .WithEnvironment("LDAP_BASE_DN", parent.BaseDn)
             .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", "inetOrgPerson")
-            .WithEnvironment("LDAP_USERNAME", $"cn={parent.AdminUsername},{parent.LdapRoot}")
+            .WithEnvironment("LDAP_USERNAME", $"cn={parent.AdminUsername},{parent.BaseDn}")
             .WithEnvironment(context =>
             {
                 context.EnvironmentVariables["LDAP_PASSWORD"] = parent.AdminPasswordParameter;
