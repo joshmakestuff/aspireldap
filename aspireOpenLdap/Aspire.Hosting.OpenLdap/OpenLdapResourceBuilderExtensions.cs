@@ -725,6 +725,19 @@ public static class OpenLdapResourceBuilderExtensions
     /// Requires TLS for all LDAP connections. Switches the connection string scheme to <c>ldaps://</c>.
     /// Must be chained after <c>WithTls(...)</c>.
     /// </summary>
+    /// <remarks>
+    /// On macOS the server-side <c>LDAP_REQUIRE_TLS=yes</c> enforcement is skipped so that the
+    /// AppHost can health-check the resource over plain LDAP. .NET on macOS loads Apple's
+    /// <c>LDAP.framework</c> (SecureTransport), which rejects every OpenSSL-style TLS option
+    /// (<c>LDAP_OPT_SERVER_CERTIFICATE</c>, <c>LDAP_OPT_X_TLS_CACERTDIR</c>,
+    /// <c>LDAPTLS_REQCERT</c>), so a self-signed CA cannot be trusted from managed code without
+    /// admin/GUI Keychain interaction. The connection string still advertises <c>ldaps://</c>
+    /// and the LDAPS port is still exposed; only the server-side requirement is relaxed.
+    /// TODO(linux): Linux libldap has the same callback limitation; once a
+    /// <c>TrustedCertificatesDirectory</c> + <c>StartNewTlsSessionContext()</c> path is wired
+    /// up in the health check, this carve-out should be tightened to macOS only via an
+    /// <c>OperatingSystem.IsMacOS()</c> check rather than <c>!IsWindows()</c>.
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithRequiredTls(
         this IResourceBuilder<OpenLdapResource> builder)
     {
@@ -737,6 +750,10 @@ public static class OpenLdapResourceBuilderExtensions
         }
 
         builder.Resource.TlsRequired = true;
+        if (OperatingSystem.IsMacOS())
+        {
+            return builder;
+        }
         return builder.WithEnvironment("LDAP_REQUIRE_TLS", "yes");
     }
 
