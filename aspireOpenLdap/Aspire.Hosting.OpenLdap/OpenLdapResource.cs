@@ -75,6 +75,9 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// <summary>Host filesystem path of the generated seed LDIF. Set alongside <see cref="SeedModel"/>.</summary>
     internal string? SeedFilePath { get; set; }
 
+    /// <summary>True when <c>WithOpenTelemetry()</c> has been called. Drives the slapd log parser.</summary>
+    internal bool OpenTelemetryEnabled { get; set; }
+
     public EndpointReference LdapEndpoint =>
         _ldapEndpoint ??= new EndpointReference(this, LdapEndpointName);
 

@@ -1,8 +1,13 @@
 using System.Diagnostics;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
+using Aspire.Hosting.ApplicationModel.Tracing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace Aspire.Hosting;
 
@@ -194,6 +199,60 @@ public static class OpenLdapResourceBuilderExtensions
                 ConfirmationMessage = "Reveal the admin password? It will be shown in a dialog.",
             });
     }
+
+    /// <summary>
+    /// Enables OpenTelemetry tracing of slapd operations. The AppHost subscribes to the
+    /// resource's log stream, parses each <c>conn=N op=M ...</c> line, and emits a span per
+    /// LDAP operation (BIND/SRCH/ADD/MOD/DEL/CMP) under <see cref="OpenLdapDiagnostics.SourceName"/>.
+    /// Operations carrying the <c>aspire-healthcheck</c> sentinel attribute are dropped.
+    /// </summary>
+    /// <remarks>
+    /// Requires slapd's <c>olcLogLevel</c> to include <c>stats</c> (256), which is the default
+    /// for this integration's container. If you've lowered it, the parser will see no events.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithOpenTelemetry(
+        this IResourceBuilder<OpenLdapResource> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.Resource.OpenTelemetryEnabled = true;
+        EnsureOpenTelemetryRegistered(builder.ApplicationBuilder);
+        return builder;
+    }
+
+    private static void EnsureOpenTelemetryRegistered(IDistributedApplicationBuilder applicationBuilder)
+    {
+        var services = applicationBuilder.Services;
+        if (services.Any(d => d.ServiceType == typeof(OpenLdapTracingMarker)))
+        {
+            return;
+        }
+        services.AddSingleton<OpenLdapTracingMarker>();
+
+        services
+            .AddOpenTelemetry()
+            .ConfigureResource(r => r.AddService(OpenLdapDiagnostics.SourceName))
+            .WithTracing(t => t
+                .AddSource(OpenLdapDiagnostics.SourceName)
+                .AddConsoleExporter()
+                .AddOtlpExporter(opts =>
+                {
+                    var explicitEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+                    var dashboardEndpoint = Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL");
+                    var endpoint = explicitEndpoint ?? dashboardEndpoint;
+                    if (!string.IsNullOrEmpty(endpoint))
+                    {
+                        opts.Endpoint = new Uri(endpoint);
+                    }
+                }));
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, OpenLdapLogParserHost>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, OpenTelemetryDiagnosticsListener>());
+    }
+
+    private sealed class OpenLdapTracingMarker { }
 
     /// <summary>
     /// Overrides the directory's base DN (a.k.a. suffix / root). Default <c>dc=example,dc=org</c>.

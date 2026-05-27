@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
 
     <IsPackable>true</IsPackable>
+    <!-- See note on OpenTelemetry.* PackageReferences below. -->
+    <NoWarn>$(NoWarn);NU1902</NoWarn>
     <PackageId>Aspire.Hosting.OpenLdap</PackageId>
     <Description>.NET Aspire hosting integration for OpenLDAP. Adds an OpenLDAP container resource (with optional TLS, health checks, and phpLDAPadmin sidecar) to your AppHost.</Description>
     <PackageTags>aspire;hosting;openldap;ldap;directory</PackageTags>
@@ -29,6 +31,15 @@
     <PackageReference Include="Aspire.Hosting" Version="13.3.5" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0-preview.5.25277.114" />
     <PackageReference Include="System.DirectoryServices.Protocols" Version="9.0.5" />
+    <!--
+      NU1902 warnings on these two packages refer to recent OTLP/gRPC wire-parsing
+      advisories. They don't apply to the AppHost's threat model (we emit to the
+      local Aspire dashboard, no untrusted OTLP server responses). Revisit once
+      patched releases ship.
+    -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" NoWarn="NU1902" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.14.0" NoWarn="NU1902" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.14.0" NoWarn="NU1902" />
   </ItemGroup>
 
 </Project>
