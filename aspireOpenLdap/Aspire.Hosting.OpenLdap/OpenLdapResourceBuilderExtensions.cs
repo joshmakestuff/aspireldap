@@ -284,12 +284,35 @@ public static class OpenLdapResourceBuilderExtensions
             {
                 var commandService = ctx.ServiceProvider.GetRequiredService<ResourceCommandService>();
 
+                // Capture the container ID before Stop — once stopped, the snapshot's
+                // container.id property is gone.
+                var containerId = TryGetContainerId(ctx);
+
                 var stopResult = await commandService
                     .ExecuteCommandAsync(ctx.ResourceName, KnownResourceCommands.StopCommand, ctx.CancellationToken)
                     .ConfigureAwait(false);
                 if (!stopResult.Success)
                 {
                     return stopResult;
+                }
+
+                // Aspire's Stop only `docker stop`s the container; the volume stays bound
+                // until the container is removed. Force-remove by ID so `docker volume rm`
+                // can succeed. No-op if the container is already gone.
+                if (containerId is not null)
+                {
+                    var (containerRmExit, _, containerRmErr) = await RunProcessAsync(
+                        "docker",
+                        ["rm", "-f", containerId],
+                        ctx.CancellationToken).ConfigureAwait(false);
+                    if (containerRmExit != 0 && !containerRmErr.Contains("no such container", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new ExecuteCommandResult
+                        {
+                            Success = false,
+                            Message = $"docker rm -f failed (exit {containerRmExit}): {containerRmErr.Trim()}",
+                        };
+                    }
                 }
 
                 var (rmExit, _, rmErr) = await RunProcessAsync(
