@@ -398,8 +398,17 @@ public static class OpenLdapResourceBuilderExtensions
 
     /// <summary>
     /// Adds a custom LDAP schema from a single LDIF file. The file is mounted into the container
-    /// and loaded via <c>slapadd</c> during initialization.
+    /// and loaded via <c>slapadd -n 0</c> during initialization.
     /// </summary>
+    /// <remarks>
+    /// The file must be in OpenLDAP <c>cn=config</c> form — a <c>dn: cn=NAME,cn=schema,cn=config</c>
+    /// entry with <c>objectClass: olcSchemaConfig</c> and <c>olcAttributeTypes</c>/<c>olcObjectClasses</c>
+    /// values. Legacy slapd.conf-style <c>.schema</c> files are NOT accepted. Convert one with
+    /// <c>slaptest -f slapd.conf -F out</c>, then take the generated
+    /// <c>out/cn=config/cn=schema/cn={N}NAME.ldif</c>, rewrite its relative <c>dn:</c>/<c>cn:</c> to the
+    /// full <c>cn=NAME,cn=schema,cn=config</c>, and drop the trailing operational attributes
+    /// (everything from <c>structuralObjectClass</c> onward).
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithSchema(
         this IResourceBuilder<OpenLdapResource> builder,
         string ldifFile)
@@ -418,8 +427,16 @@ public static class OpenLdapResourceBuilderExtensions
 
     /// <summary>
     /// Adds a directory of custom LDAP schema LDIF files. Files with the <c>.ldif</c> extension
-    /// are loaded alphabetically via <c>slapadd</c> during initialization.
+    /// are loaded in sorted (alphabetical) order via <c>slapadd -n 0</c> during initialization.
     /// </summary>
+    /// <remarks>
+    /// Each file must be in OpenLDAP <c>cn=config</c> form (see <see cref="WithSchema"/> for the format
+    /// and a conversion recipe). Because files load alphabetically, prefix them to honor inter-schema
+    /// dependencies (e.g. <c>10-foo.ldif</c> before <c>20-bar.ldif</c>). Note the image already loads
+    /// <c>core</c> plus the <see cref="WithExtraSchemas"/> set (default <c>cosine,inetorgperson,nis</c>)
+    /// before these — supplying your own copies of those here causes duplicate-OID errors, so disable
+    /// the overlap with <see cref="WithExtraSchemas"/> or <see cref="WithDefaultSchemas"/>.
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithSchemas(
         this IResourceBuilder<OpenLdapResource> builder,
         string directory)
@@ -434,6 +451,48 @@ public static class OpenLdapResourceBuilderExtensions
         }
 
         return builder.WithBindMount(fullPath, "/schemas", isReadOnly: true);
+    }
+
+    /// <summary>
+    /// Controls whether the image loads its bundled default schemas during initialization
+    /// (<c>LDAP_ADD_SCHEMAS</c>). Enabled by default. The schemas loaded are governed by
+    /// <see cref="WithExtraSchemas"/> (default <c>cosine,inetorgperson,nis</c>).
+    /// </summary>
+    /// <remarks>
+    /// Disable this (<c>WithDefaultSchemas(false)</c>) when you supply the full schema set yourself via
+    /// <see cref="WithSchemas"/> and want to avoid duplicate-OID collisions. Note <c>core</c> is always
+    /// bootstrapped by the image regardless of this setting, so don't also mount a <c>core</c> schema.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithDefaultSchemas(
+        this IResourceBuilder<OpenLdapResource> builder,
+        bool enabled = true)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder.WithEnvironment("LDAP_ADD_SCHEMAS", enabled ? "yes" : "no");
+    }
+
+    /// <summary>
+    /// Selects which image-bundled schemas are loaded before any <see cref="WithSchemas"/> files
+    /// (<c>LDAP_EXTRA_SCHEMAS</c>). Replaces the default set (<c>cosine,inetorgperson,nis</c>).
+    /// </summary>
+    /// <param name="schemas">
+    /// Schema names matching files under the image's <c>/etc/ldap/schema/{name}.ldif</c>
+    /// (e.g. <c>cosine</c>, <c>inetorgperson</c>, <c>nis</c>, <c>dyngroup</c>). Pass none to load only
+    /// the always-bootstrapped <c>core</c>.
+    /// </param>
+    /// <remarks>
+    /// Use this to keep the image's vetted copies of standard schemas while dropping the ones you ship
+    /// yourself via <see cref="WithSchemas"/> — supplying a name both here and as a mounted file causes
+    /// duplicate-OID errors. Has no effect unless default schemas are enabled (see
+    /// <see cref="WithDefaultSchemas"/>).
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithExtraSchemas(
+        this IResourceBuilder<OpenLdapResource> builder,
+        params string[] schemas)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(schemas);
+        return builder.WithEnvironment("LDAP_EXTRA_SCHEMAS", string.Join(",", schemas));
     }
 
     /// <summary>
@@ -638,20 +697,28 @@ public static class OpenLdapResourceBuilderExtensions
     /// a real directory entry.
     /// </para>
     /// <para>
-    /// To change the login-attribute behavior (e.g. <c>uid</c> → full <c>dn</c>), set
-    /// <c>LDAP_LOGIN_ATTR</c> via the <paramref name="configureContainer"/> callback.
-    /// The login object class filter is set to <c>inetOrgPerson</c> via
-    /// <c>LDAP_LOGIN_OBJECTCLASS</c>; override the same way if you need a different class.
+    /// Login users are matched with <c>(&amp;(uid={input})(objectClass={loginObjectClass}))</c>, defaulting
+    /// to <c>inetOrgPerson</c>. If your directory's people use a different structural/auxiliary class
+    /// (e.g. <c>eduPerson</c>, <c>posixAccount</c>, or a site-specific class) and are NOT also
+    /// <c>inetOrgPerson</c>, logins fail with otherwise-valid credentials — set
+    /// <paramref name="loginObjectClass"/> to a class those entries actually have. To change the
+    /// login attribute itself (e.g. <c>uid</c> → full <c>dn</c>), set <c>LDAP_LOGIN_ATTR</c> via the
+    /// <paramref name="configureContainer"/> callback.
     /// </para>
     /// </remarks>
     /// <param name="builder">The parent OpenLDAP builder.</param>
     /// <param name="configureContainer">Optional callback to further configure the admin container.</param>
     /// <param name="containerName">Override the admin resource name. Defaults to <c>{parent}-admin</c>.</param>
+    /// <param name="loginObjectClass">
+    /// Object class used to find login users (<c>LDAP_LOGIN_OBJECTCLASS</c>). Defaults to
+    /// <c>inetOrgPerson</c>.
+    /// </param>
     /// <returns>The parent OpenLDAP builder (admin runs alongside as a sibling resource).</returns>
     public static IResourceBuilder<OpenLdapResource> WithPhpLdapAdmin(
         this IResourceBuilder<OpenLdapResource> builder,
         Action<IResourceBuilder<PhpLdapAdminResource>>? configureContainer = null,
-        string? containerName = null)
+        string? containerName = null,
+        string? loginObjectClass = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
@@ -673,7 +740,7 @@ public static class OpenLdapResourceBuilderExtensions
             .WithEnvironment("LDAP_HOST", ldapHost)
             .WithEnvironment("LDAP_PORT", ldapPort.ToString())
             .WithEnvironment("LDAP_BASE_DN", parent.BaseDn)
-            .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", "inetOrgPerson")
+            .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", loginObjectClass ?? "inetOrgPerson")
             .WithEnvironment("LDAP_USERNAME", $"cn={parent.AdminUsername},{parent.BaseDn}")
             .WithEnvironment(context =>
             {
