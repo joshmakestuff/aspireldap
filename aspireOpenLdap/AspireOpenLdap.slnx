@@ -2,4 +2,6 @@
   <Project Path="Aspire.Hosting.OpenLdap/Aspire.Hosting.OpenLdap.csproj" />
   <Project Path="Aspire.OpenLdap/Aspire.OpenLdap.csproj" />
   <Project Path="AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj" />
+  <Project Path="AspireOpenLdap.TestAppHost/AspireOpenLdap.TestAppHost.csproj" />
+  <Project Path="Aspire.Hosting.OpenLdap.Tests/Aspire.Hosting.OpenLdap.Tests.csproj" />
 </Solution>

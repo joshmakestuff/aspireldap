@@ -30,6 +30,35 @@ public static class OpenLdapClientExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionName);
 
+        return AddOpenLdapClientCore(builder, connectionName, serviceKey: null, configureSettings);
+    }
+
+    /// <summary>
+    /// Registers a keyed <see cref="OpenLdapClientFactory"/> (singleton) and a keyed transient
+    /// <see cref="LdapConnection"/> under the service key <paramref name="name"/>, allowing multiple
+    /// OpenLDAP directories in one app. Resolve with <c>[FromKeyedServices(name)]</c> or
+    /// <c>GetRequiredKeyedService&lt;LdapConnection&gt;(name)</c>. By default also registers a health check.
+    /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="name">The connection string name, also used as the DI service key.</param>
+    /// <param name="configureSettings">Optional callback to tweak settings.</param>
+    public static IHostApplicationBuilder AddKeyedOpenLdapClient(
+        this IHostApplicationBuilder builder,
+        string name,
+        Action<OpenLdapClientSettings>? configureSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        return AddOpenLdapClientCore(builder, connectionName: name, serviceKey: name, configureSettings);
+    }
+
+    private static IHostApplicationBuilder AddOpenLdapClientCore(
+        IHostApplicationBuilder builder,
+        string connectionName,
+        string? serviceKey,
+        Action<OpenLdapClientSettings>? configureSettings)
+    {
         var settings = new OpenLdapClientSettings();
         builder.Configuration.GetSection(DefaultConfigSectionName).Bind(settings);
         settings.ConnectionString ??= builder.Configuration.GetConnectionString(connectionName);
@@ -45,14 +74,27 @@ public static class OpenLdapClientExtensions
         var parsed = OpenLdapConnectionStringBuilder.Parse(settings.ConnectionString);
         var factory = new OpenLdapClientFactory(parsed, settings);
 
-        builder.Services.TryAddSingleton(factory);
-        builder.Services.TryAddTransient(sp => sp.GetRequiredService<OpenLdapClientFactory>().CreateConnection());
+        if (serviceKey is null)
+        {
+            builder.Services.TryAddSingleton(factory);
+            builder.Services.TryAddTransient(sp => sp.GetRequiredService<OpenLdapClientFactory>().CreateConnection());
+        }
+        else
+        {
+            builder.Services.TryAddKeyedSingleton(serviceKey, factory);
+            builder.Services.TryAddKeyedTransient<LdapConnection>(
+                serviceKey,
+                (sp, key) => sp.GetRequiredKeyedService<OpenLdapClientFactory>(key).CreateConnection());
+        }
 
         if (!settings.DisableHealthChecks)
         {
             builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
-                $"openldap_{connectionName}",
-                sp => new OpenLdapClientHealthCheck(sp.GetRequiredService<OpenLdapClientFactory>()),
+                serviceKey is null ? $"openldap_{connectionName}" : $"openldap_{serviceKey}",
+                sp => new OpenLdapClientHealthCheck(
+                    serviceKey is null
+                        ? sp.GetRequiredService<OpenLdapClientFactory>()
+                        : sp.GetRequiredKeyedService<OpenLdapClientFactory>(serviceKey)),
                 failureStatus: HealthStatus.Unhealthy,
                 tags: null));
         }
