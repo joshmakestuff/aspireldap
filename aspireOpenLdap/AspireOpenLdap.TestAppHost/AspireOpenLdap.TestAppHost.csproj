@@ -1,0 +1,20 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.3.5">
+
+  <!--
+    Minimal AppHost used only by the test project: a plain OpenLDAP resource with no TLS,
+    seeding, or phpLDAPadmin. Kept separate from the sample AppHost so the smoke test boots
+    fast and isn't subject to the sample's required-TLS health-check behavior on Linux CI.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aspire.Hosting.OpenLdap\Aspire.Hosting.OpenLdap.csproj" IsAspireProjectResource="false" />
+  </ItemGroup>
+
+</Project>

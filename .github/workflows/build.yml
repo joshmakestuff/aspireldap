@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
@@ -39,6 +38,13 @@ jobs:
         working-directory: aspireOpenLdap
         run: dotnet restore AspireOpenLdap.slnx
 
+      # Skipped on tag (publish) runs — the smoke test builds the bundled OpenLDAP
+      # image via Docker and is slow; it gates merges to master and PRs instead.
+      - name: Test
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        working-directory: aspireOpenLdap
+        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-restore
+
       - name: Pack
         working-directory: aspireOpenLdap
         run: |
@@ -58,10 +64,11 @@ jobs:
             artifacts/*.snupkg
           if-no-files-found: error
 
-      - name: Push to GitHub Packages
-        if: github.event_name != 'pull_request'
+      - name: Push to nuget.org
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: artifacts
         run: |
-          dotnet nuget push 'artifacts/*.nupkg' \
-            --source https://nuget.pkg.github.com/joshmakestuff/index.json \
-            --api-key ${{ secrets.GITHUB_TOKEN }} \
+          dotnet nuget push '*.nupkg' \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
             --skip-duplicate
