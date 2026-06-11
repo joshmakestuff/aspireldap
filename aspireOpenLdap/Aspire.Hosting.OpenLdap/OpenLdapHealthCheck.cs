@@ -10,6 +10,13 @@ namespace Aspire.Hosting.ApplicationModel;
 /// Health check that performs an authenticated root DSE query against the OpenLDAP server
 /// using the resource's admin credentials. Uses LDAPS when the resource requires TLS.
 /// </summary>
+/// <remarks>
+/// macOS path: <see cref="OpenLdapResourceBuilderExtensions.WithRequiredTls"/> skips the
+/// server-side <c>LDAP_REQUIRE_TLS</c> enforcement on macOS, so the health check connects
+/// to the plain LDAP port with the admin bind. See that method's remarks for the full
+/// rationale (Apple's <c>LDAP.framework</c> can't trust our self-signed CA from managed
+/// code). The Linux carve-out lives in the same place.
+/// </remarks>
 internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCheck
 {
     // LDAP result code for invalid credentials (RFC 4511).
@@ -19,9 +26,11 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
+        var useTls = resource.TlsRequired && !OperatingSystem.IsMacOS();
+
         try
         {
-            var endpointName = resource.TlsRequired
+            var endpointName = useTls
                 ? OpenLdapResource.LdapsEndpointName
                 : OpenLdapResource.LdapEndpointName;
 
@@ -45,7 +54,7 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
             };
             connection.SessionOptions.ProtocolVersion = 3;
 
-            if (resource.TlsRequired)
+            if (useTls)
             {
                 connection.SessionOptions.SecureSocketLayer = true;
                 if (resource.CaCertHostPath is { } caPath)
