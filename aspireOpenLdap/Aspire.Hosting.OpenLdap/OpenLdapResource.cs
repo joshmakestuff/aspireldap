@@ -32,6 +32,16 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     internal const string DefaultBaseDn = "dc=example,dc=org";
     internal const string DataPath = "/data/openldap";
 
+    /// <summary>Container path of the generated overlay LDIF the init script folds into slapd.ldif.</summary>
+    internal const string GeneratedOverlayContainerPath = "/overlays.ldif";
+
+    /// <summary>
+    /// cn=config DN of the main data database. The bootstrap slapd.ldif defines databases in a
+    /// fixed order (frontend={-1}, config={0}, monitor={1}, mdb={2}), so the mdb index is stable.
+    /// Overlays are attached here.
+    /// </summary>
+    internal const string MdbDatabaseDn = "olcDatabase={2}mdb,cn=config";
+
     private EndpointReference? _ldapEndpoint;
     private EndpointReference? _ldapsEndpoint;
 
@@ -74,6 +84,12 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
 
     /// <summary>Host filesystem path of the generated seed LDIF. Set alongside <see cref="SeedModel"/>.</summary>
     internal string? SeedFilePath { get; set; }
+
+    /// <summary>Opt-in overlays declared via <c>WithOverlay(...)</c>, emitted as cn=config at start. Null until the first call.</summary>
+    internal List<OpenLdapOverlay>? Overlays { get; set; }
+
+    /// <summary>Host filesystem path of the generated overlay LDIF. Set alongside <see cref="Overlays"/>.</summary>
+    internal string? OverlayFilePath { get; set; }
 
     public EndpointReference LdapEndpoint =>
         _ldapEndpoint ??= new EndpointReference(this, LdapEndpointName);

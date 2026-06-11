@@ -612,6 +612,83 @@ public static class OpenLdapResourceBuilderExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Enables an OpenLDAP <paramref name="overlay"/> (opt-in). The overlay's <c>cn=config</c>
+    /// entries (module load + config) are folded into the slapd bootstrap before the data load,
+    /// so e.g. <c>memberof</c> populates as the seed loads. Call once per overlay.
+    /// </summary>
+    /// <remarks>
+    /// Overlays are part of the seed-once bootstrap: enabling one on an already-seeded data
+    /// volume requires resetting the volume so the bootstrap (and any seed-time population) re-runs.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithOverlay(
+        this IResourceBuilder<OpenLdapResource> builder,
+        OpenLdapOverlay overlay)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(overlay);
+
+        var resource = builder.Resource;
+        if (resource.Overlays is null)
+        {
+            resource.Overlays = [];
+
+            // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
+            var overlayDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-overlays");
+            Directory.CreateDirectory(overlayDir);
+            var overlayPath = Path.Combine(overlayDir, $"{resource.Name}-overlays.ldif");
+            resource.OverlayFilePath = overlayPath;
+
+            // Bind-mount needs an existing file at start time; real content is written by the handler below.
+            if (!File.Exists(overlayPath))
+            {
+                File.WriteAllText(overlayPath, string.Empty);
+            }
+
+            builder.WithBindMount(overlayPath, OpenLdapResource.GeneratedOverlayContainerPath, isReadOnly: true);
+
+            builder.OnBeforeResourceStarted((res, _, ct) =>
+            {
+                if (res.Overlays is not { Count: > 0 } overlays || res.OverlayFilePath is null)
+                {
+                    return Task.CompletedTask;
+                }
+                return File.WriteAllTextAsync(res.OverlayFilePath, GenerateOverlayLdif(overlays), ct);
+            });
+        }
+
+        resource.Overlays.Add(overlay);
+        return builder;
+    }
+
+    private static string GenerateOverlayLdif(IReadOnlyList<OpenLdapOverlay> overlays)
+    {
+        var blocks = new List<string>();
+
+        // A single extra module list ({0} is the bootstrap one) carrying every overlay's modules.
+        var modules = overlays
+            .SelectMany(o => o.ModuleLoads)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (modules.Count > 0)
+        {
+            var moduleLines = new List<string>
+            {
+                "dn: cn=module{1},cn=config",
+                "objectClass: olcModuleList",
+                "cn: module{1}",
+                "olcModulePath: /usr/lib/ldap",
+            };
+            moduleLines.AddRange(modules.Select(m => $"olcModuleLoad: {m}"));
+            blocks.Add(string.Join('\n', moduleLines));
+        }
+
+        blocks.AddRange(overlays.Select(o => o.ToOverlayEntryLdif(OpenLdapResource.MdbDatabaseDn).TrimEnd('\n')));
+
+        // Blank line between entries; trailing newline so a clean append to slapd.ldif.
+        return string.Join("\n\n", blocks) + "\n";
+    }
+
     private static LdapSeedModel GetOrInitializeSeedModel(IResourceBuilder<OpenLdapResource> builder)
     {
         var resource = builder.Resource;
