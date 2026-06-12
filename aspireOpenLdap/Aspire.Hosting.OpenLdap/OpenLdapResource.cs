@@ -35,6 +35,9 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// <summary>Container path of the generated overlay LDIF the init script folds into slapd.ldif.</summary>
     internal const string GeneratedOverlayContainerPath = "/overlays.ldif";
 
+    /// <summary>Container path of the generated access-control LDIF the init script applies online (ldapmodify).</summary>
+    internal const string GeneratedAccessContainerPath = "/access.ldif";
+
     /// <summary>
     /// cn=config DN of the main data database. The bootstrap slapd.ldif defines databases in a
     /// fixed order (frontend={-1}, config={0}, monitor={1}, mdb={2}), so the mdb index is stable.
@@ -90,6 +93,16 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
 
     /// <summary>Host filesystem path of the generated overlay LDIF. Set alongside <see cref="Overlays"/>.</summary>
     internal string? OverlayFilePath { get; set; }
+
+    /// <summary>
+    /// Access-control rules declared via <c>WithAccessControl(...)</c> — each a full <c>olcAccess</c>
+    /// rule body (without the <c>{N}</c> ordering prefix). Emitted as an <c>olcAccess</c> modify on the
+    /// mdb database and applied online at start. Null until the first call.
+    /// </summary>
+    internal List<string>? AccessRules { get; set; }
+
+    /// <summary>Host filesystem path of the generated access-control LDIF. Set alongside <see cref="AccessRules"/>.</summary>
+    internal string? AccessFilePath { get; set; }
 
     public EndpointReference LdapEndpoint =>
         _ldapEndpoint ??= new EndpointReference(this, LdapEndpointName);
