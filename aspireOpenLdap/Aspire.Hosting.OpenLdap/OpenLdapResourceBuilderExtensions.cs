@@ -661,6 +661,79 @@ public static class OpenLdapResourceBuilderExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Grants <c>olcAccess</c> rules on the main (mdb) database so non-root principals — e.g. a
+    /// dedicated service account — can read or write chosen subtrees. Each <paramref name="rules"/>
+    /// entry is a full <c>olcAccess</c> rule body <em>without</em> the <c>{N}</c> ordering prefix,
+    /// for example:
+    /// <code>to dn.subtree="ou=entity,dc=umd,dc=edu" by dn.exact="uid=svc,..." write by * break</code>
+    /// Rules are prepended (indices <c>{0}</c>, <c>{1}</c>, …) ahead of the server defaults, so end
+    /// each with <c>by * break</c> to let the remaining ACLs still apply. Applied online at start.
+    /// </summary>
+    /// <remarks>
+    /// Like overlays, access rules are part of the seed-once bootstrap (they configure the database,
+    /// not the data): applying new rules to an already-seeded data volume requires resetting the volume.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithAccessControl(
+        this IResourceBuilder<OpenLdapResource> builder,
+        params string[] rules)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(rules);
+
+        var resource = builder.Resource;
+        if (resource.AccessRules is null)
+        {
+            resource.AccessRules = [];
+
+            // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
+            var accessDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-access");
+            Directory.CreateDirectory(accessDir);
+            var accessPath = Path.Combine(accessDir, $"{resource.Name}-access.ldif");
+            resource.AccessFilePath = accessPath;
+
+            // Bind-mount needs an existing file at start time; real content is written by the handler below.
+            if (!File.Exists(accessPath))
+            {
+                File.WriteAllText(accessPath, string.Empty);
+            }
+
+            builder.WithBindMount(accessPath, OpenLdapResource.GeneratedAccessContainerPath, isReadOnly: true);
+
+            builder.OnBeforeResourceStarted((res, _, ct) =>
+            {
+                if (res.AccessRules is not { Count: > 0 } accessRules || res.AccessFilePath is null)
+                {
+                    return Task.CompletedTask;
+                }
+                return File.WriteAllTextAsync(res.AccessFilePath, GenerateAccessLdif(accessRules), ct);
+            });
+        }
+
+        foreach (var rule in rules)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(rule);
+            resource.AccessRules.Add(rule.Trim());
+        }
+        return builder;
+    }
+
+    // A single olcAccess modify on the mdb database, prepending the declared rules ({0}, {1}, …).
+    private static string GenerateAccessLdif(IReadOnlyList<string> rules)
+    {
+        var lines = new List<string>
+        {
+            $"dn: {OpenLdapResource.MdbDatabaseDn}",
+            "changetype: modify",
+            "add: olcAccess",
+        };
+        for (var i = 0; i < rules.Count; i++)
+        {
+            lines.Add($"olcAccess: {{{i}}}{rules[i]}");
+        }
+        return string.Join('\n', lines) + "\n";
+    }
+
     private static string GenerateOverlayLdif(IReadOnlyList<OpenLdapOverlay> overlays)
     {
         var blocks = new List<string>();
