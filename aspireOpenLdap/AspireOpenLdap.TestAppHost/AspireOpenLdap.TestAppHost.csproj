@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
+<Project Sdk="Aspire.AppHost.Sdk">
 
   <!--
     Minimal AppHost used only by the test project: a plain OpenLDAP resource with no TLS,
