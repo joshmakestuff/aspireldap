@@ -65,6 +65,8 @@ dotnet build AspireOpenLdap.slnx
 
 Running the sample AppHost or the tests requires a running Docker daemon (the OpenLDAP image is built on first run).
 
+On **Linux**, the client and the hosting health check use `System.DirectoryServices.Protocols`, which loads the native `libldap-2.5.so.0` — present by default on Windows but not on most Linux distros (especially those shipping OpenLDAP 2.6, e.g. Ubuntu 24.04+ and Fedora). See [Requirements on Linux](aspireOpenLdap/Aspire.OpenLdap/README.md#requirements-on-linux) for the one-time `libldap` install/symlink steps.
+
 ## License
 
 [MIT](LICENSE). Icon from [iconoir](https://iconoir.com/), MIT licensed.
