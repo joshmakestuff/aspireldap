@@ -10,7 +10,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned to 22.04: System.DirectoryServices.Protocols (used by the health check and
+    # client) P/Invokes the native libldap-2.5 soname on Linux, which Jammy provides.
+    # Ubuntu 24.04 ships libldap-2.6 and the load fails. See the "Install OpenLDAP client
+    # libraries" step below.
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       id-token: write   # required for OIDC trusted publishing to nuget.org
@@ -20,6 +24,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      # The integration tests' health check loads libldap on the runner host (not in the
+      # container). Skipped on tag/publish runs, which don't run tests.
+      - name: Install OpenLDAP client libraries
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: sudo apt-get update && sudo apt-get install -y libldap-2.5-0
 
       - name: Compute package version
         id: ver
