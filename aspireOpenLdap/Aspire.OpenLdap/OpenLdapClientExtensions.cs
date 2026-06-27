@@ -5,6 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -78,6 +81,8 @@ public static class OpenLdapClientExtensions
         {
             builder.Services.TryAddSingleton(factory);
             builder.Services.TryAddTransient(sp => sp.GetRequiredService<OpenLdapClientFactory>().CreateConnection());
+            builder.Services.TryAddTransient(sp =>
+                new OpenLdapClient(sp.GetRequiredService<OpenLdapClientFactory>().CreateConnection(), settings, parsed));
         }
         else
         {
@@ -85,6 +90,27 @@ public static class OpenLdapClientExtensions
             builder.Services.TryAddKeyedTransient<LdapConnection>(
                 serviceKey,
                 (sp, key) => sp.GetRequiredKeyedService<OpenLdapClientFactory>(key).CreateConnection());
+            builder.Services.TryAddKeyedTransient<OpenLdapClient>(
+                serviceKey,
+                (sp, key) => new OpenLdapClient(
+                    sp.GetRequiredKeyedService<OpenLdapClientFactory>(key).CreateConnection(), settings, parsed));
+        }
+
+        // Register the Aspire.OpenLdap activity source / meter with the app's OpenTelemetry
+        // pipeline so spans and metrics from OpenLdapClient flow to whatever exporter the app
+        // configured (e.g. via Aspire's AddServiceDefaults). AddOpenTelemetry is additive and
+        // idempotent — no exporter is registered here.
+        if (!settings.DisableTracing || !settings.DisableMetrics)
+        {
+            var openTelemetry = builder.Services.AddOpenTelemetry();
+            if (!settings.DisableTracing)
+            {
+                openTelemetry.WithTracing(tracing => tracing.AddSource(OpenLdapInstrumentation.Name));
+            }
+            if (!settings.DisableMetrics)
+            {
+                openTelemetry.WithMetrics(metrics => metrics.AddMeter(OpenLdapInstrumentation.Name));
+            }
         }
 
         if (!settings.DisableHealthChecks)

@@ -13,6 +13,18 @@ public sealed class OpenLdapClientSettings
     public bool DisableHealthChecks { get; set; }
 
     /// <summary>
+    /// Disables OpenTelemetry tracing (the <c>Aspire.OpenLdap</c> activity source) for operations
+    /// issued through <see cref="OpenLdapClient"/> when true.
+    /// </summary>
+    public bool DisableTracing { get; set; }
+
+    /// <summary>
+    /// Disables OpenTelemetry metrics (the <c>Aspire.OpenLdap</c> meter) for operations issued
+    /// through <see cref="OpenLdapClient"/> when true.
+    /// </summary>
+    public bool DisableMetrics { get; set; }
+
+    /// <summary>
     /// When true (default), trust the CA file referenced by the connection string's
     /// <c>CaCertFile</c> value for LDAPS connections. Set false to use the system trust store only.
     /// </summary>

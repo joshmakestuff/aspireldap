@@ -10,6 +10,11 @@
     <PackageVersion Include="Aspire.Hosting.Testing" Version="13.4.6" />
   </ItemGroup>
 
+  <!-- OpenTelemetry -->
+  <ItemGroup>
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
+  </ItemGroup>
+
   <!-- Microsoft.Extensions / runtime -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.0" />
