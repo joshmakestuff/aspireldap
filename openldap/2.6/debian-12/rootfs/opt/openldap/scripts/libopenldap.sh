@@ -148,6 +148,7 @@ export LDAP_ONLINE_CONF_DIR="${LDAP_VOLUME_DIR}/slapd.d"
 export LDAP_PID_FILE="/var/run/slapd/slapd.pid"
 export LDAP_MODULE_PATH="/usr/lib/ldap"
 export LDAP_CUSTOM_LDIF_DIR="${LDAP_CUSTOM_LDIF_DIR:-/ldifs}"
+export LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR="${LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR:-no}"
 export LDAP_CUSTOM_SCHEMA_FILE="${LDAP_CUSTOM_SCHEMA_FILE:-/schema/custom.ldif}"
 export LDAP_CUSTOM_SCHEMA_DIR="${LDAP_CUSTOM_SCHEMA_DIR:-/schemas}"
 export LDAP_TLS_CERT_FILE="${LDAP_TLS_CERT_FILE:-}"
@@ -314,7 +315,12 @@ is_ldap_ready() {
 ldap_start_bg() {
     local -r retries="${1:-12}"
     local -r sleep_time="${2:-1}"
-    local -a flags=("-h" "ldap://:${LDAP_PORT_NUMBER}/ ldapi:///" "-F" "${LDAP_CONF_DIR}/slapd.d" "-d" "$LDAP_LOGLEVEL")
+    # Bind the init daemon to the IPC socket ONLY — never the public TCP port. All
+    # initialization (schemas, overlays, admin creds, the seed load) talks over ldapi:///,
+    # so the public port is unnecessary here. Keeping it closed until the foreground daemon
+    # starts (run.sh, after setup.sh has fully completed the seed) means a client / health
+    # check cannot connect to a partially-seeded directory. See GitHub issue #3.
+    local -a flags=("-h" "ldapi:///" "-F" "${LDAP_CONF_DIR}/slapd.d" "-d" "$LDAP_LOGLEVEL")
 
     if is_ldap_not_running; then
         info "Starting OpenLDAP server in background"
@@ -614,8 +620,20 @@ EOF
 ldap_add_custom_ldifs() {
     info "Loading custom LDIF files..."
     warn "Ignoring LDAP_USERS, LDAP_PASSWORDS, LDAP_USER_OU, LDAP_GROUP_OU and LDAP_GROUP environment variables..."
+
+    # By default a single rejected entry (bad DN, missing parent, schema violation) aborts
+    # the whole load — fail-loud is the least-surprising default for a bad seed. Opt into
+    # continue-on-error with LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR=yes (ldapadd -c), which skips
+    # past individual failures. In that mode ldapadd runs WITHOUT debug_execute so rejected
+    # entries are visible in the container log rather than silently dropped. See issue #3.
     find "$LDAP_CUSTOM_LDIF_DIR" -maxdepth 1 \( -type f -o -type l \) -iname '*.ldif' -print0 | sort -z | while IFS= read -r -d '' ldif_file; do
-        debug_execute ldapadd -f "$ldif_file" -H "ldapi:///" -D "$LDAP_ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD"
+        if is_boolean_yes "$LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR"; then
+            if ! ldapadd -c -f "$ldif_file" -H "ldapi:///" -D "$LDAP_ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD"; then
+                warn "ldapadd rejected one or more entries while loading '$ldif_file' (LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR=yes); continuing past failures."
+            fi
+        else
+            debug_execute ldapadd -f "$ldif_file" -H "ldapi:///" -D "$LDAP_ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD"
+        fi
     done
 }
 

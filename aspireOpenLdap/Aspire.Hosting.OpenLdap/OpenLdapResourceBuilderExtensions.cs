@@ -503,15 +503,34 @@ public static class OpenLdapResourceBuilderExtensions
     /// When seed data is present the container's default tree (the <c>LDAP_USERS</c>/<c>LDAP_PASSWORDS</c>
     /// users) is NOT created — your seed becomes the entire initial dataset. Pair with
     /// <see cref="WithDataVolume"/> to amortize the cost of large seeds across restarts.
+    /// <para>
+    /// By default a single rejected entry (bad DN, missing parent, schema violation) aborts the
+    /// entire load — the directory fails to come up rather than silently coming up partial. Set
+    /// <paramref name="continueOnError"/> to <see langword="true"/> to load with <c>ldapadd -c</c>,
+    /// which skips past individual bad entries and logs them instead of failing the load. Use this
+    /// for messy bulk data where a partial directory is acceptable.
+    /// </para>
     /// </remarks>
+    /// <param name="builder">The OpenLDAP resource builder.</param>
+    /// <param name="ldifFileOrDirectory">Path to a single LDIF file or a directory of LDIF files.</param>
+    /// <param name="continueOnError">
+    /// When <see langword="true"/>, load with <c>ldapadd -c</c> so a rejected entry does not abort
+    /// the rest of the seed. Defaults to <see langword="false"/> (fail-loud on the first bad entry).
+    /// </param>
     public static IResourceBuilder<OpenLdapResource> WithSeedData(
         this IResourceBuilder<OpenLdapResource> builder,
-        string ldifFileOrDirectory)
+        string ldifFileOrDirectory,
+        bool continueOnError = false)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldifFileOrDirectory);
 
         var fullPath = Path.GetFullPath(ldifFileOrDirectory);
+
+        if (continueOnError)
+        {
+            builder.WithEnvironment("LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR", "yes");
+        }
 
         if (Directory.Exists(fullPath))
         {
