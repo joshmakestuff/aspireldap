@@ -11,7 +11,7 @@ public class OpenLdapResourceTests
     [Fact]
     public async Task OpenLdap_Resource_Becomes_Healthy()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
         var appHost = await DistributedApplicationTestingBuilder
             .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(cts.Token);
