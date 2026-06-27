@@ -36,6 +36,7 @@ The `connectionName` (`"ldap"` above) must match the resource name passed to `Ad
 
 - `OpenLdapClientFactory` (singleton) — parses the connection string, applies settings, and creates `LdapConnection` instances.
 - `LdapConnection` (transient) — resolved from the factory.
+- `OpenLdapClient` (transient) — an instrumented wrapper over `LdapConnection`; use it to get OpenTelemetry traces/metrics (see [Telemetry](#telemetry)).
 - A health check named `openldap_{connectionName}` that performs a root-DSE search (disable with `settings.DisableHealthChecks = true`).
 
 ## Multiple directories (keyed)
@@ -64,6 +65,27 @@ builder.AddOpenLdapClient("ldap", settings =>
 ```
 
 The connection string is normally provided automatically by Aspire via `ConnectionStrings:{connectionName}`.
+
+## Telemetry
+
+Operations issued through **`OpenLdapClient`** (resolve it from DI and call `Send` / `SendAsync` instead of using the raw `LdapConnection`) emit OpenTelemetry traces and metrics under the source/meter name **`Aspire.OpenLdap`**. `AddOpenLdapClient` registers the source and meter with the app's OpenTelemetry pipeline automatically, so they flow to whatever exporter you've configured (e.g. via Aspire's `AddServiceDefaults`).
+
+```csharp
+builder.AddOpenLdapClient("ldap");
+
+app.MapGet("/users", (OpenLdapClient ldap) =>
+{
+    var resp = (SearchResponse)ldap.Send(
+        new SearchRequest("ou=users,dc=example,dc=org", "(objectClass=person)", SearchScope.Subtree, null));
+    return Results.Ok(resp.Entries.Count);
+});
+```
+
+- **Traces** — one span per operation named `LDAP <op>` (e.g. `LDAP search`), kind `Client`, with attributes `db.system.name=openldap`, `db.operation.name`, `server.address`, `server.port`, `db.response.status_code` / `db.ldap.result_code`, and for searches `db.ldap.scope`, `db.ldap.entries_returned`, `db.ldap.controls` (control OIDs), `db.ldap.paged`.
+- **Metrics** — a histogram `db.client.operation.duration` (seconds) tagged by operation, server, and result/error.
+- **Privacy** — search filters, DNs, entry attributes, control values, and paging-cookie bytes are **never** recorded.
+- **Disabling** — set `settings.DisableTracing` and/or `settings.DisableMetrics` (or `Aspire:OpenLdap:DisableTracing` in configuration).
+- **Note** — only `OpenLdapClient` is instrumented; the raw `LdapConnection` and the `OpenLdapClient.Connection` escape hatch are not.
 
 ## Requirements on Linux
 
