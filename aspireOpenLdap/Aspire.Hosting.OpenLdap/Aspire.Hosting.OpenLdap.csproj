@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
 
     <IsPackable>true</IsPackable>
-    <PackageId>Aspire.Hosting.OpenLdap</PackageId>
+    <PackageId>JoshMakeStuff.Aspire.Hosting.OpenLdap</PackageId>
     <Description>.NET Aspire hosting integration for OpenLDAP. Adds an OpenLDAP container resource (with optional TLS, health checks, and phpLDAPadmin sidecar) to your AppHost.</Description>
     <PackageTags>aspire;hosting;openldap;ldap;directory</PackageTags>
   </PropertyGroup>
@@ -26,9 +26,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting" Version="13.3.5" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0-preview.5.25277.114" />
-    <PackageReference Include="System.DirectoryServices.Protocols" Version="9.0.5" />
+    <PackageReference Include="Aspire.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <PackageReference Include="System.DirectoryServices.Protocols" />
   </ItemGroup>
 
 </Project>

@@ -1,13 +1,15 @@
-# Aspire.Hosting.OpenLdap
+# JoshMakeStuff.Aspire.Hosting.OpenLdap
 
 A [.NET Aspire](https://learn.microsoft.com/dotnet/aspire/) hosting integration that adds an OpenLDAP container resource to your AppHost. The container is built from a Dockerfile bundled with this package, so no external image registry is required.
 
-Pairs with [`Aspire.OpenLdap`](https://www.nuget.org/packages/Aspire.OpenLdap), the client integration installed in your service projects.
+Pairs with [`JoshMakeStuff.Aspire.OpenLdap`](https://www.nuget.org/packages/JoshMakeStuff.Aspire.OpenLdap), the client integration installed in your service projects.
+
+> The package ID carries the `JoshMakeStuff.` prefix because `Aspire.*` is reserved on nuget.org. The API namespace is still `Aspire.Hosting`, so `AddOpenLdap(...)` resolves without any extra `using`.
 
 ## Install
 
 ```sh
-dotnet add package Aspire.Hosting.OpenLdap
+dotnet add package JoshMakeStuff.Aspire.Hosting.OpenLdap
 ```
 
 Install this package in your **AppHost** project.
