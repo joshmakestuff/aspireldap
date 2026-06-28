@@ -56,6 +56,16 @@ app.Run();
 
 See each package's README for the full API: [hosting](aspireOpenLdap/Aspire.Hosting.OpenLdap/README.md) · [client](aspireOpenLdap/Aspire.OpenLdap/README.md).
 
+## Examples
+
+A runnable end-to-end sample lives in [`examples/`](examples/): an AppHost running OpenLDAP plus a minimal Web API that queries it through the instrumented `OpenLdapClient`. Run it and watch `LDAP search` spans (nested under each HTTP request) and `db.client.operation.duration` metrics appear in the Aspire dashboard:
+
+```sh
+aspire run --apphost examples/AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj
+```
+
+See [examples/README.md](examples/README.md) for the walkthrough.
+
 ## Building
 
 ```sh

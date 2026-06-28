@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj" />
+  <Project Path="AspireOpenLdap.Api/AspireOpenLdap.Api.csproj" />
+  <Project Path="AspireOpenLdap.ServiceDefaults/AspireOpenLdap.ServiceDefaults.csproj" />
+</Solution>
