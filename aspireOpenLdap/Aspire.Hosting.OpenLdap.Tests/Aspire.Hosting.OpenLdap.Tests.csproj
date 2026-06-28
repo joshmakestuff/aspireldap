@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Aspire.OpenLdap\Aspire.OpenLdap.csproj" />
     <ProjectReference Include="..\AspireOpenLdap.TestAppHost\AspireOpenLdap.TestAppHost.csproj" />
   </ItemGroup>
 
