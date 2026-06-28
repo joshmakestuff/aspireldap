@@ -1,15 +1,17 @@
-<Project Sdk="Aspire.AppHost.Sdk">
+<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
     <UserSecretsId>9ceec0a2-3dc6-4092-bfee-c66ddae2d1da</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Aspire.Hosting.OpenLdap\Aspire.Hosting.OpenLdap.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\aspireOpenLdap\Aspire.Hosting.OpenLdap\Aspire.Hosting.OpenLdap.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\AspireOpenLdap.Api\AspireOpenLdap.Api.csproj" />
   </ItemGroup>
 
 </Project>

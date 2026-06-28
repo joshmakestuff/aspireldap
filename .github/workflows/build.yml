@@ -55,6 +55,12 @@ jobs:
         working-directory: aspireOpenLdap
         run: dotnet test AspireOpenLdap.slnx --configuration Release --no-restore
 
+      # Build the examples so they can't rot against the library. Build-only (no Docker /
+      # no run); skipped on tag/publish runs.
+      - name: Build examples
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: dotnet build examples/AspireOpenLdap.Examples.slnx --configuration Release
+
       - name: Pack
         working-directory: aspireOpenLdap
         run: |
