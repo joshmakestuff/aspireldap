@@ -87,6 +87,8 @@ app.MapGet("/users", (OpenLdapClient ldap) =>
 - **Disabling** — set `settings.DisableTracing` and/or `settings.DisableMetrics` (or `Aspire:OpenLdap:DisableTracing` in configuration).
 - **Note** — only `OpenLdapClient` is instrumented; the raw `LdapConnection` and the `OpenLdapClient.Connection` escape hatch are not.
 
+For a runnable end-to-end demo (AppHost + Web API + dashboard), see the [`examples/`](../../examples/) folder.
+
 ## Requirements on Linux
 
 `LdapConnection` comes from `System.DirectoryServices.Protocols`, which on Linux P/Invokes the native OpenLDAP client library. (On Windows it uses the built-in `wldap32.dll` and needs nothing extra.) The runtime loads **`libldap-2.5.so.0`** — still true on .NET 10 ([dotnet/runtime#123676](https://github.com/dotnet/runtime/issues/123676)) — so the library must be present under that name:
