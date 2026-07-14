@@ -30,6 +30,11 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
+        // On Linux distros shipping OpenLDAP 2.6+ the runtime's hardcoded libldap-2.5 load
+        // fails; register the soname fallback resolver so the health check's LdapConnection
+        // works without a hand-made symlink.
+        Aspire.OpenLdap.OpenLdapNativeLibraryResolver.EnsureRegistered();
+
         var passwordParameter = adminPassword?.Resource
             ?? ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder, $"{name}-password");
 

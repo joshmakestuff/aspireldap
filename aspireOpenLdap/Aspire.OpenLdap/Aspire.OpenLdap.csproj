@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\OpenLdapNativeLibraryResolver.cs" Link="OpenLdapNativeLibraryResolver.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Aspire.Hosting.OpenLdap.Tests" />
   </ItemGroup>
 
