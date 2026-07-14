@@ -62,6 +62,10 @@ public static class OpenLdapClientExtensions
         string? serviceKey,
         Action<OpenLdapClientSettings>? configureSettings)
     {
+        // On Linux distros shipping OpenLDAP 2.6+ the runtime's hardcoded libldap-2.5 load
+        // fails; register the soname fallback resolver before any LDAP P/Invoke can happen.
+        OpenLdapNativeLibraryResolver.EnsureRegistered();
+
         var settings = new OpenLdapClientSettings();
         builder.Configuration.GetSection(DefaultConfigSectionName).Bind(settings);
         settings.ConnectionString ??= builder.Configuration.GetConnectionString(connectionName);

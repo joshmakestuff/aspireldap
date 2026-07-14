@@ -50,22 +50,16 @@ When `WithRequiredTls()` is used the scheme switches to `ldaps://` and `CaCertFi
 
 ## Requirements on Linux
 
-The automatically-registered health check uses `System.DirectoryServices.Protocols`, which on Linux P/Invokes the native OpenLDAP client library. (On Windows it uses the built-in `wldap32.dll` and needs nothing extra.) The runtime loads **`libldap-2.5.so.0`** — this is still true on .NET 10 ([dotnet/runtime#123676](https://github.com/dotnet/runtime/issues/123676)) — so the library must be present under that name:
+The automatically-registered health check uses `System.DirectoryServices.Protocols`, which on Linux P/Invokes the native OpenLDAP client library. (On Windows it uses the built-in `wldap32.dll` and needs nothing extra.) The runtime hardcodes a load of **`libldap-2.5.so.0`** — still true on .NET 10 ([dotnet/runtime#123676](https://github.com/dotnet/runtime/issues/123676)) — but modern distros (Ubuntu 24.04+, Fedora, Alpine 3.20+) ship the upstream soname `libldap.so.2` instead.
+
+**`AddOpenLdap` handles this automatically**: it registers a resolver that probes the sonames distros actually ship (`libldap-2.5.so.0`, `libldap.so.2`, `libldap-2.6.so.0`, `libldap-2.4.so.2`). The AppHost machine only needs the OpenLDAP client library installed — no symlinks:
 
 ```sh
-# Debian/Ubuntu that ship OpenLDAP 2.5 (e.g. 22.04)
-sudo apt-get install -y libldap-2.5-0
-
-# Distros that ship OpenLDAP 2.6 (Ubuntu 24.04+, Fedora, Alpine 3.20+):
-# install the client libs, then symlink the 2.6 sonames to the 2.5 names.
-# Path is /usr/lib/x86_64-linux-gnu on Debian/Ubuntu, /usr/lib64 on Fedora.
-# Confirm what you have with:  ldconfig -p | grep -E 'libldap|liblber'
-sudo ln -sf .../libldap-2.6.so.0 .../libldap-2.5.so.0
-sudo ln -sf .../liblber-2.6.so.0 .../liblber-2.5.so.0
-sudo ldconfig
+sudo apt-get install -y libldap2      # Ubuntu 24.04+ (22.04: libldap-2.5-0)
+sudo dnf install -y openldap          # Fedora
 ```
 
-Without this you'll see `Unable to load shared library 'libldap-2.5.so.0'` and the resource never reports healthy.
+Without the library installed you'll see `Unable to load shared library 'libldap-2.5.so.0'` and the resource never reports healthy.
 
 ## Notes
 

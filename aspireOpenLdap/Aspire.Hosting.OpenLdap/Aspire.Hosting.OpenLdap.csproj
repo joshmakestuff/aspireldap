@@ -15,6 +15,10 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\OpenLdapNativeLibraryResolver.cs" Link="OpenLdapNativeLibraryResolver.cs" />
+  </ItemGroup>
+
   <!--
     Bundle the OpenLDAP docker build context (Dockerfile + rootfs scripts) so the
     integration works for NuGet consumers without requiring them to clone this repo.
