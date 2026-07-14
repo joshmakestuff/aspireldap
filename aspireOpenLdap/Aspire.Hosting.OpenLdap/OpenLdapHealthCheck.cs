@@ -89,7 +89,7 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
         }
         catch (LdapException ex) when (ex.ErrorCode == InvalidCredentialsResultCode)
         {
-            return HealthCheckResult.Unhealthy("LDAP authentication failed.", ex);
+            return HealthCheckResult.Unhealthy(DescribeAuthFailure(), ex);
         }
         catch (LdapException ex)
         {
@@ -99,6 +99,32 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
         {
             return HealthCheckResult.Unhealthy("Unexpected error during LDAP health check.", ex);
         }
+    }
+
+    private string DescribeAuthFailure()
+    {
+        // A persistent data mount that predates this run keeps whatever admin password the
+        // directory was first initialized with — the container skips LDAP_ADMIN_PASSWORD when
+        // it finds existing data — so the current credentials fail forever with err=49.
+        var mounts = resource.Annotations.OfType<ContainerMountAnnotation>()
+            .Where(m => m.Target == OpenLdapResource.DataPath)
+            .ToList();
+
+        if (mounts.Any(m => m.Type == ContainerMountType.Volume))
+        {
+            return "LDAP authentication failed. The data volume may predate this run and hold a " +
+                "different admin password — the resource's \"Reset data volume\" command " +
+                "reinitializes it with the current credentials.";
+        }
+
+        if (mounts.Count > 0)
+        {
+            return "LDAP authentication failed. The data bind mount may predate this run and hold " +
+                "a different admin password — clear the host directory to reinitialize with the " +
+                "current credentials.";
+        }
+
+        return "LDAP authentication failed.";
     }
 
     private static bool ChainsTo(X509Certificate serverCert, X509Certificate2 trustedRoot)

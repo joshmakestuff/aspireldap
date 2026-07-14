@@ -29,7 +29,7 @@ builder.Build().Run();
 
 `AddOpenLdap` returns an `IResourceBuilder<OpenLdapResource>` that exposes:
 
-- `WithDataVolume(...)` / `WithDataBindMount(...)` — persist directory data across runs.
+- `WithDataVolume(...)` / `WithDataBindMount(...)` — persist directory data across runs. The default volume name is scoped to the AppHost (`{apphost}-{hash}-{resource}-data`); pass an explicit name to share a volume across AppHosts.
 - `WithSchema(...)` / `WithSchemas(...)` — apply custom LDIF schemas.
 - `WithSeedData(...)` / `WithCustomLdifsBindMount(...)` — seed entries on first start.
 - `WithAnonymousBinding(...)` — allow unauthenticated binds.

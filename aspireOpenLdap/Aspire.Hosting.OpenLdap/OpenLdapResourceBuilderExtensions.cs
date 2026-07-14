@@ -260,6 +260,11 @@ public static class OpenLdapResourceBuilderExtensions
     /// On subsequent starts, the container detects existing data and skips reinitialization
     /// (including re-applying seed LDIFs), making startup fast even with large seed data.
     /// </summary>
+    /// <remarks>
+    /// When <paramref name="name"/> is omitted, the volume name is scoped to this AppHost
+    /// (e.g. <c>myapp.apphost-64d61f24-ldap-data</c>) so different projects never share a
+    /// volume by accident. Pass an explicit name to opt into cross-AppHost sharing.
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithDataVolume(
         this IResourceBuilder<OpenLdapResource> builder,
         string? name = null,
@@ -267,7 +272,7 @@ public static class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        var volumeName = name ?? $"{builder.Resource.Name}-data";
+        var volumeName = name ?? VolumeNameGenerator.Generate(builder, "data");
         builder.WithVolume(volumeName, OpenLdapResource.DataPath, isReadOnly);
         RegisterResetDataVolumeCommand(builder, volumeName);
         return builder;
