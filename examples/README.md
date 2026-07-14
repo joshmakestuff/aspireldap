@@ -34,4 +34,4 @@ Then:
 | `AspireOpenLdap.Api` | Minimal Web API that queries the directory via `OpenLdapClient` |
 | `AspireOpenLdap.ServiceDefaults` | Standard Aspire service defaults (OpenTelemetry export, health checks) |
 
-> **Linux note:** the client uses `System.DirectoryServices.Protocols`, which needs the native `libldap` library at runtime. See [Requirements on Linux](../aspireOpenLdap/Aspire.OpenLdap/README.md#requirements-on-linux).
+> **Linux note:** the client uses `System.DirectoryServices.Protocols`, which needs the native `libldap` library installed at runtime (any of the 2.4/2.5/2.6 sonames — `AddOpenLdapClient` resolves whichever your distro ships automatically). See [Requirements on Linux](../aspireOpenLdap/Aspire.OpenLdap/README.md#requirements-on-linux).
