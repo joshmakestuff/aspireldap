@@ -1,5 +1,6 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting.ApplicationModel;
@@ -13,7 +14,8 @@ namespace Aspire.Hosting.ApplicationModel;
 /// server-side <c>LDAP_REQUIRE_TLS</c> enforcement on macOS, so the health check connects
 /// to the plain LDAP port with the admin bind. See that method's remarks for the full
 /// rationale (Apple's <c>LDAP.framework</c> can't trust our self-signed CA from managed
-/// code). The Linux carve-out lives in the same place.
+/// code). Linux trusts the CA natively via <c>TrustedCertificatesDirectory</c> — see the
+/// TLS branch in <see cref="CheckHealthAsync"/>.
 /// </remarks>
 internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCheck
 {
@@ -43,29 +45,6 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
 
             var bindDn = $"cn={resource.AdminUsername},{resource.BaseDn}";
 
-            using var connection = new LdapConnection(
-                new LdapDirectoryIdentifier(allocatedEndpoint.Host, allocatedEndpoint.Port, fullyQualifiedDnsHostName: false, connectionless: false))
-            {
-                AuthType = AuthType.Basic,
-                Credential = new NetworkCredential(bindDn, password),
-                Timeout = TimeSpan.FromSeconds(5),
-            };
-            connection.SessionOptions.ProtocolVersion = 3;
-
-            if (useTls)
-            {
-                connection.SessionOptions.SecureSocketLayer = true;
-                if (resource.CaCertHostPath is { } caPath)
-                {
-                    var ca = Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.LoadPemCertificate(caPath);
-                    // Chain to the resource's CA AND match the host we dial, unless the user
-                    // opted out (custom certificates that don't name localhost).
-                    var expectedHost = resource.TlsHostnameValidationDisabled ? null : allocatedEndpoint.Host;
-                    connection.SessionOptions.VerifyServerCertificate = (_, serverCert) =>
-                        Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.ValidateAgainstCustomRoot(serverCert, ca, expectedHost);
-                }
-            }
-
             // Root DSE query: base DN = "", scope = Base.
             // The "aspire-healthcheck" attribute is a sentinel — slapd logs the attribute list
             // verbatim, so a downstream log parser can drop healthcheck probes by matching this
@@ -76,9 +55,72 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
                 searchScope: SearchScope.Base,
                 attributeList: ["namingContexts", "aspire-healthcheck"]);
 
+            var connection = new LdapConnection(
+                new LdapDirectoryIdentifier(allocatedEndpoint.Host, allocatedEndpoint.Port, fullyQualifiedDnsHostName: false, connectionless: false))
+            {
+                AuthType = AuthType.Basic,
+                Credential = new NetworkCredential(bindDn, password),
+                Timeout = TimeSpan.FromSeconds(5),
+            };
+            X509Certificate2? ca = null;
+            try
+            {
+                connection.SessionOptions.ProtocolVersion = 3;
+
+                if (useTls)
+                {
+                    connection.SessionOptions.SecureSocketLayer = true;
+                    if (resource.CaCertHostPath is { } caPath)
+                    {
+                        if (OperatingSystem.IsWindows())
+                        {
+                            ca = Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.LoadPemCertificate(caPath);
+                            // Chain to the resource's CA AND match the host we dial, unless the user
+                            // opted out (custom certificates that don't name localhost).
+                            var expectedHost = resource.TlsHostnameValidationDisabled ? null : allocatedEndpoint.Host;
+                            var trustedRoot = ca;
+                            connection.SessionOptions.VerifyServerCertificate = (_, serverCert) =>
+                                Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.ValidateAgainstCustomRoot(serverCert, trustedRoot, expectedHost);
+                        }
+                        else
+                        {
+                            // Linux (macOS never reaches here — useTls excludes it): libldap throws
+                            // from the VerifyServerCertificate setter, so trust the CA natively via
+                            // an OpenSSL hash-named directory. libldap also validates the hostname;
+                            // the generated certificates name localhost/127.0.0.1, and
+                            // WithTlsCertificates rejects the hostname-validation opt-out on Linux.
+                            connection.SessionOptions.TrustedCertificatesDirectory =
+                                Aspire.Hosting.OpenLdap.OpenLdapUnixTlsTrust.EnsureTrustDirectory(caPath);
+                            connection.SessionOptions.StartNewTlsSessionContext();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Setup failed before the probe task below could take ownership.
+                ca?.Dispose();
+                connection.Dispose();
+                throw;
+            }
+
+            // SendRequest is synchronous and cannot observe the token once dispatched, so the
+            // probe task owns the connection (and CA callback certificate) and disposes them
+            // when the request finishes — while WaitAsync lets THIS method return promptly on
+            // cancellation instead of blocking out the LDAP timeout. The 5-second connection
+            // timeout bounds the orphaned probe.
             var response = await Task.Run(
-                () => (SearchResponse)connection.SendRequest(request),
-                cancellationToken);
+                () =>
+                {
+                    using (connection)
+                    using (ca)
+                    {
+                        return (SearchResponse)connection.SendRequest(request);
+                    }
+                },
+                CancellationToken.None)
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
 
             if (response.ResultCode == ResultCode.Success && response.Entries.Count > 0)
             {
@@ -87,6 +129,11 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
 
             return HealthCheckResult.Unhealthy(
                 $"LDAP root DSE query returned unexpected result: {response.ResultCode}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation is the caller's shutdown/timeout, not LDAP unhealthiness.
+            throw;
         }
         catch (LdapException ex) when (ex.ErrorCode == InvalidCredentialsResultCode)
         {
@@ -108,7 +155,7 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
         // directory was first initialized with — the container skips LDAP_ADMIN_PASSWORD when
         // it finds existing data — so the current credentials fail forever with err=49.
         var mounts = resource.Annotations.OfType<ContainerMountAnnotation>()
-            .Where(m => m.Target == OpenLdapResource.DataPath)
+            .Where(m => string.Equals(m.Target, OpenLdapResource.DataPath, StringComparison.Ordinal))
             .ToList();
 
         if (mounts.Any(m => m.Type == ContainerMountType.Volume))

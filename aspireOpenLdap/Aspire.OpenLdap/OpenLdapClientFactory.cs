@@ -49,15 +49,55 @@ public sealed class OpenLdapClientFactory
             connection.SessionOptions.SecureSocketLayer = true;
             if (_settings.TrustConnectionStringCaCertificate && _caCertificate.Value is { } ca)
             {
-                // Chain must reach the connection string's CA, and the certificate must name the
-                // host we dialed — unless the caller explicitly opted out of hostname validation.
-                var expectedHost = _settings.DisableTlsHostnameValidation ? null : endpoint.Host;
-                connection.SessionOptions.VerifyServerCertificate = (_, serverCert) =>
-                    OpenLdapCertificateValidation.ValidateAgainstCustomRoot(serverCert, ca, expectedHost);
+                ConfigureCustomTrust(connection, ca, endpoint.Host);
             }
         }
 
         return connection;
+    }
+
+    /// <summary>
+    /// Trusts the connection string's CA for this connection. The mechanism is per-platform:
+    /// Windows wldap32 supports a managed verification callback; Linux libldap rejects that
+    /// callback before the first request (the setter itself throws), so trust is configured
+    /// natively via an OpenSSL hash-named CA directory instead; macOS LDAP.framework supports
+    /// neither, so custom trust is refused up front with an actionable message.
+    /// </summary>
+    private void ConfigureCustomTrust(LdapConnection connection, X509Certificate2 ca, string host)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Chain must reach the connection string's CA, and the certificate must name the
+            // host we dialed — unless the caller explicitly opted out of hostname validation.
+            var expectedHost = _settings.DisableTlsHostnameValidation ? null : host;
+            connection.SessionOptions.VerifyServerCertificate = (_, serverCert) =>
+                OpenLdapCertificateValidation.ValidateAgainstCustomRoot(serverCert, ca, expectedHost);
+            return;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            if (_settings.DisableTlsHostnameValidation)
+            {
+                throw new PlatformNotSupportedException(
+                    "DisableTlsHostnameValidation is not supported on Linux: libldap validates the " +
+                    "server hostname natively and offers no hostname-only opt-out. Use a server " +
+                    "certificate that names the endpoint host, or run on Windows.");
+            }
+
+            // libldap validates the chain (against the staged CA directory) and the hostname
+            // natively during the handshake; no managed callback is involved.
+            connection.SessionOptions.TrustedCertificatesDirectory =
+                OpenLdapUnixTlsTrust.EnsureTrustDirectory(_connectionString.CaCertFile!);
+            connection.SessionOptions.StartNewTlsSessionContext();
+            return;
+        }
+
+        throw new PlatformNotSupportedException(
+            "Trusting the connection string's CA certificate is not supported on this OS (Apple's " +
+            "LDAP.framework rejects OpenSSL-style trust options). Set " +
+            $"{nameof(OpenLdapClientSettings.TrustConnectionStringCaCertificate)} to false to use " +
+            "the system trust store, after adding the CA to it out of band.");
     }
 
     private X509Certificate2? LoadCaCertificate()

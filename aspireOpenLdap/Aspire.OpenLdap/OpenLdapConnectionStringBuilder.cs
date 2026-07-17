@@ -104,6 +104,12 @@ public sealed class OpenLdapConnectionStringBuilder
         {
             throw new FormatException($"'{EndpointKey}' must not contain a path or query: '{endpointRaw}'.");
         }
+        // LdapDirectoryIdentifier only uses host and port; silently ignoring user-info or a
+        // fragment would hide a configuration mistake, so reject them too.
+        if (!string.IsNullOrEmpty(endpoint.UserInfo) || !string.IsNullOrEmpty(endpoint.Fragment))
+        {
+            throw new FormatException($"'{EndpointKey}' must not contain user info or a fragment: '{endpointRaw}'.");
+        }
         return endpoint;
     }
 

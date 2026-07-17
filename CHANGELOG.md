@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased
+
+Fixes from a second (2026-07-17) adversarial code review, findings F01–F08. F04 (DN
+validation/escaping) and F05 (seed password hashing) are deferred pending adoption of an
+RFC-compliant LDIF library.
+
+### Breaking / behavior changes
+
+- **Custom-CA LDAPS now works on Linux** (F01). The client integration and the AppHost health
+  check previously threw `LdapException` before the first request on Linux; they now configure
+  libldap trust natively (`TrustedCertificatesDirectory` + `StartNewTlsSessionContext`) via an
+  OpenSSL hash-named CA directory staged automatically. Consequences: on Linux, hostname
+  validation is always on (the `disableHealthCheckHostnameValidation` /
+  `DisableTlsHostnameValidation` opt-outs now throw there), and on macOS the client fails fast
+  with guidance instead of an opaque native error when asked to trust a connection-string CA.
+- **The container refuses to start over a partially-initialized data directory** (F02). A
+  completion marker (`.init_complete`) is written only after every init step succeeds; existing
+  data without it fails startup with reset instructions instead of silently serving partial
+  data with TLS/ACL/anonymous-bind configuration never applied. Volumes initialized by older
+  image versions lack the marker — reset them or create the marker manually as the error
+  message describes.
+- Out-of-range `WithLdapPort`/`WithLdapsPort` values fail at the fluent call; connection-string
+  endpoints with URI user-info or fragments are rejected at parse time.
+
+### Fixed
+
+- Admin passwords with repeated/leading/trailing whitespace or glob characters are hashed
+  byte-exactly (F03; unquoted shell expansion previously altered the value before hashing).
+- Failed init commands (rejected seed entries, schema/config errors) now log the failing file,
+  command, and server diagnostic — with bind passwords redacted (F06).
+- Health checks honor cancellation (surfaced as cancellation, not "unhealthy"), return promptly
+  instead of blocking out the LDAP timeout, and dispose the per-probe CA certificate (F07).
+- The generated-certificate cache validates the full set (CA parses, key matches the server
+  certificate, chain, validity windows, SANs) before reuse, and writes files atomically (F08).
+
+### Changed
+
+- Adopted `Meziantou.Analyzer` across `aspireOpenLdap/` (dev-only); fixed the issues it found,
+  including a misleading `ArgumentException` parameter name and a regex without a match timeout.
+- Package READMEs document per-platform TLS trust behavior and seed-once/reset-volume semantics.
+
 ## 0.4.0-preview.1 — 2026-07-17
 
 Fixes stemming from a 2026-07 adversarial code review (findings referenced as F01–F14 in PR #15).

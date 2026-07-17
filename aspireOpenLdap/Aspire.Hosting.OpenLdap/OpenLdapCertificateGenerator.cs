@@ -30,7 +30,7 @@ internal static class OpenLdapCertificateGenerator
         var serverCertPath = Path.Combine(dir, "server.crt");
         var serverKeyPath = Path.Combine(dir, "server.key");
 
-        if (CertsAreFresh(caPath, serverCertPath, serverKeyPath))
+        if (CertsAreFresh(resourceName, caPath, serverCertPath, serverKeyPath))
         {
             return new GeneratedCertificates(dir, caPath, serverCertPath, serverKeyPath);
         }
@@ -39,7 +39,14 @@ internal static class OpenLdapCertificateGenerator
         return new GeneratedCertificates(dir, caPath, serverCertPath, serverKeyPath);
     }
 
-    private static bool CertsAreFresh(string caPath, string serverCertPath, string serverKeyPath)
+    /// <summary>
+    /// A cached set is reused only when ALL THREE files are individually valid AND consistent
+    /// with each other: the key matches the server certificate, the server certificate chains
+    /// to the CA, both are inside their validity window, and the expected SANs are present.
+    /// Checking only the server certificate would let a corrupt CA or mismatched key survive
+    /// as "fresh" for up to two years, producing a persistent opaque LDAPS failure.
+    /// </summary>
+    private static bool CertsAreFresh(string resourceName, string caPath, string serverCertPath, string serverKeyPath)
     {
         if (!File.Exists(caPath) || !File.Exists(serverCertPath) || !File.Exists(serverKeyPath))
         {
@@ -48,8 +55,27 @@ internal static class OpenLdapCertificateGenerator
 
         try
         {
-            using var cert = X509Certificate2.CreateFromPemFile(serverCertPath);
-            return cert.NotAfter - DateTime.UtcNow > RegenWithinExpiry;
+            using var caCert = Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.LoadPemCertificate(caPath);
+            // Pairing the certificate with the key file throws when they don't correspond.
+            using var serverCert = X509Certificate2.CreateFromPemFile(serverCertPath, serverKeyPath);
+
+            var now = DateTime.UtcNow;
+            if (caCert.NotBefore > now || caCert.NotAfter - now <= RegenWithinExpiry ||
+                serverCert.NotBefore > now || serverCert.NotAfter - now <= RegenWithinExpiry)
+            {
+                return false;
+            }
+
+            if (!Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.ValidateAgainstCustomRoot(
+                    serverCert, caCert, expectedHost: null))
+            {
+                return false;
+            }
+
+            // The health check dials localhost and containers dial the resource name.
+            return Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.MatchesHost(serverCert, "localhost")
+                && Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.MatchesHost(serverCert, resourceName)
+                && Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.MatchesHost(serverCert, "127.0.0.1");
         }
         catch
         {
@@ -99,9 +125,25 @@ internal static class OpenLdapCertificateGenerator
         RandomNumberGenerator.Fill(serialNumber);
         using var serverCert = serverRequest.Create(caCert, notBefore, notAfter, serialNumber);
 
-        File.WriteAllText(caPath, ExportCertificatePem(caCert));
-        File.WriteAllText(serverCertPath, ExportCertificatePem(serverCert));
-        File.WriteAllText(serverKeyPath, ExportPrivateKeyPem(serverKey));
+        // Write the whole set to temp files first, then move into place — an interruption can
+        // no longer leave a mixed old/new set behind, and CertsAreFresh rejects any mix that
+        // does slip through (e.g. a crash between the moves).
+        WriteAtomically(caPath, ExportCertificatePem(caCert), restrictPermissions: false);
+        WriteAtomically(serverCertPath, ExportCertificatePem(serverCert), restrictPermissions: false);
+        WriteAtomically(serverKeyPath, ExportPrivateKeyPem(serverKey), restrictPermissions: true);
+    }
+
+    private static void WriteAtomically(string path, string content, bool restrictPermissions)
+    {
+        var tempPath = Path.Combine(
+            Path.GetDirectoryName(path)!,
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        File.WriteAllText(tempPath, content);
+        if (restrictPermissions && !OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(tempPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        File.Move(tempPath, path, overwrite: true);
     }
 
     private static string ExportCertificatePem(X509Certificate2 cert)

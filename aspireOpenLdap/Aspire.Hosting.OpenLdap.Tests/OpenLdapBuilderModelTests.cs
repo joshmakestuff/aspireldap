@@ -35,6 +35,19 @@ public class OpenLdapBuilderModelTests
         Assert.Equal(1636, endpoints["ldaps"].Port);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void Out_Of_Range_Ports_Fail_At_The_Fluent_Call(int port)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap");
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ldap.WithLdapPort(port));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ldap.WithLdapsPort(port));
+    }
+
     [Fact]
     public void WithTls_Custom_Files_Mounts_Each_File_At_Its_Fixed_Container_Path()
     {
