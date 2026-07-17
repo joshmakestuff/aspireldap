@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Fixes stemming from the 2026-07 adversarial code review (`CODE_REVIEW_REPORT.md`).
+Fixes stemming from a 2026-07 adversarial code review (findings referenced as F01–F14 in PR #15).
 
 ### Breaking changes
 
