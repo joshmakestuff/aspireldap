@@ -20,14 +20,31 @@ public sealed class OpenLdapConnectionStringBuilder
     private const string BindPasswordKey = "BindPassword";
     private const string CaCertFileKey = "CaCertFile";
 
+    /// <summary>The LDAP server endpoint (<c>ldap://host:port</c> or <c>ldaps://host:port</c>).</summary>
     public required Uri Endpoint { get; init; }
+
+    /// <summary>The directory's base DN / suffix (e.g. <c>dc=example,dc=org</c>).</summary>
     public required string BaseDn { get; init; }
+
+    /// <summary>The DN used to bind (e.g. <c>cn=admin,dc=example,dc=org</c>).</summary>
     public required string BindDn { get; init; }
+
+    /// <summary>The password for <see cref="BindDn"/>.</summary>
     public required string BindPassword { get; init; }
+
+    /// <summary>Path to a PEM CA certificate to trust for LDAPS; null when TLS is not enabled on the server.</summary>
     public string? CaCertFile { get; init; }
 
+    /// <summary>True when <see cref="Endpoint"/> uses the <c>ldaps</c> scheme.</summary>
     public bool UsesLdaps => string.Equals(Endpoint.Scheme, "ldaps", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Parses a connection string in the format documented on this class.
+    /// </summary>
+    /// <exception cref="FormatException">
+    /// A required key is missing, a key is duplicated, the endpoint is not a valid
+    /// <c>ldap</c>/<c>ldaps</c> host URI, or a quoted value is malformed.
+    /// </exception>
     public static OpenLdapConnectionStringBuilder Parse(string connectionString)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);

@@ -12,6 +12,10 @@ public sealed class PhpLdapAdminResource : ContainerResource
     internal const int ContainerHttpPort = 8080;
     internal const string HttpEndpointName = "http";
 
+    /// <summary>
+    /// Creates the resource. Use <c>WithPhpLdapAdmin(...)</c> on an OpenLDAP builder rather than
+    /// constructing directly.
+    /// </summary>
     public PhpLdapAdminResource(string name, OpenLdapResource parent) : base(name)
     {
         ArgumentNullException.ThrowIfNull(parent);

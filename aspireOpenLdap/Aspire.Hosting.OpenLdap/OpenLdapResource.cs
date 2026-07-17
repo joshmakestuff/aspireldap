@@ -49,6 +49,9 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     private EndpointReference? _ldapEndpoint;
     private EndpointReference? _ldapsEndpoint;
 
+    /// <summary>
+    /// Creates the resource. Use <c>builder.AddOpenLdap(...)</c> rather than constructing directly.
+    /// </summary>
     public OpenLdapResource(
         string name,
         string baseDn,
@@ -111,9 +114,11 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// <summary>Host filesystem path of the generated access-control LDIF. Set alongside <see cref="AccessRules"/>.</summary>
     internal string? AccessFilePath { get; set; }
 
+    /// <summary>Reference to the plain LDAP endpoint (container port 1389).</summary>
     public EndpointReference LdapEndpoint =>
         _ldapEndpoint ??= new EndpointReference(this, LdapEndpointName);
 
+    /// <summary>Reference to the LDAPS endpoint (container port 1636).</summary>
     public EndpointReference LdapsEndpoint =>
         _ldapsEndpoint ??= new EndpointReference(this, LdapsEndpointName);
 

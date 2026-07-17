@@ -13,6 +13,7 @@ public sealed class OpenLdapClientFactory
     private readonly OpenLdapClientSettings _settings;
     private readonly Lazy<X509Certificate2?> _caCertificate;
 
+    /// <summary>Creates a factory for the given parsed connection string and client settings.</summary>
     public OpenLdapClientFactory(OpenLdapConnectionStringBuilder connectionString, OpenLdapClientSettings settings)
     {
         ArgumentNullException.ThrowIfNull(connectionString);
@@ -22,6 +23,7 @@ public sealed class OpenLdapClientFactory
         _caCertificate = new Lazy<X509Certificate2?>(LoadCaCertificate);
     }
 
+    /// <summary>The parsed connection-string settings this factory was created with.</summary>
     public OpenLdapConnectionStringBuilder ConnectionString => _connectionString;
 
     /// <summary>Creates a new <see cref="LdapConnection"/>. Caller owns disposal.</summary>

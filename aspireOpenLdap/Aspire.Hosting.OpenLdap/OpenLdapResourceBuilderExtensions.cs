@@ -6,6 +6,9 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting;
 
+/// <summary>
+/// Extension methods for adding and configuring an OpenLDAP container resource in an Aspire AppHost.
+/// </summary>
 public static class OpenLdapResourceBuilderExtensions
 {
     /// <summary>
@@ -488,6 +491,7 @@ public static class OpenLdapResourceBuilderExtensions
     /// Selects which image-bundled schemas are loaded before any <see cref="WithSchemas"/> files
     /// (<c>LDAP_EXTRA_SCHEMAS</c>). Replaces the default set (<c>cosine,inetorgperson,nis</c>).
     /// </summary>
+    /// <param name="builder">The OpenLDAP resource builder.</param>
     /// <param name="schemas">
     /// Schema names matching files under the image's <c>/etc/ldap/schema/{name}.ldif</c>
     /// (e.g. <c>cosine</c>, <c>inetorgperson</c>, <c>nis</c>, <c>dyngroup</c>). Pass none to load only
@@ -586,6 +590,7 @@ public static class OpenLdapResourceBuilderExtensions
     /// <summary>
     /// Declares a user entry (objectClass <c>inetOrgPerson</c>) seeded into the directory.
     /// </summary>
+    /// <param name="builder">The OpenLDAP resource builder.</param>
     /// <param name="uid">The user's <c>uid</c>. Becomes the RDN. Must match <c>[A-Za-z0-9._-]+</c>.</param>
     /// <param name="password">Password stored as <c>userPassword</c>. OpenLDAP hashes it on add when configured to do so.</param>
     /// <param name="ou">Optional organizational unit. Must match a name passed to <see cref="WithOrganizationalUnit"/>.</param>
@@ -619,6 +624,7 @@ public static class OpenLdapResourceBuilderExtensions
     /// <summary>
     /// Declares a group entry (objectClass <c>groupOfNames</c>) seeded into the directory.
     /// </summary>
+    /// <param name="builder">The OpenLDAP resource builder.</param>
     /// <param name="cn">Group's <c>cn</c>. Becomes the RDN.</param>
     /// <param name="members">
     /// Members. Each entry is either a previously-declared user <c>uid</c> (resolved to its DN
