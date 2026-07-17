@@ -13,12 +13,45 @@ warn()  { echo "[WARN]  $*" >&2; }
 error() { echo "[ERROR] $*" >&2; }
 debug() { [[ "${BITNAMI_DEBUG:-false}" == "true" ]] && echo "[DEBUG] $*" || true; }
 
-# Run a command, suppressing stdout/stderr unless debug mode is on.
-debug_execute() {
+# Run a command, suppressing stdout/stderr entirely unless debug mode is on. For readiness
+# probes and other calls where failure is an EXPECTED outcome (retry loops) — a probe's
+# failure output would read as a startup error.
+quiet_execute() {
     if [[ "${BITNAMI_DEBUG:-false}" == "true" ]]; then
         "$@"
     else
         "$@" >/dev/null 2>&1
+    fi
+}
+
+# Run a command, suppressing its output on success unless debug mode is on. On FAILURE the
+# buffered output is always emitted (with the argument after any -w redacted, so bind
+# passwords never reach the log) — a rejected seed entry or config command must name its
+# error without requiring a BITNAMI_DEBUG re-run.
+debug_execute() {
+    if [[ "${BITNAMI_DEBUG:-false}" == "true" ]]; then
+        "$@"
+        return
+    fi
+    local output=""
+    local status=0
+    output="$("$@" 2>&1)" || status=$?
+    if [[ "$status" -ne 0 ]]; then
+        local -a display=()
+        local redact_next=false
+        local arg
+        for arg in "$@"; do
+            if [[ "$redact_next" == true ]]; then
+                display+=("[redacted]")
+                redact_next=false
+            else
+                display+=("$arg")
+                [[ "$arg" == "-w" ]] && redact_next=true
+            fi
+        done
+        error "Command failed (exit ${status}): ${display[*]}"
+        [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+        return "$status"
     fi
 }
 
@@ -145,6 +178,9 @@ export LDAP_VOLUME_DIR="/data/openldap"
 export LDAP_DATA_DIR="${LDAP_VOLUME_DIR}/data"
 export LDAP_ACCESSLOG_DATA_DIR="${LDAP_DATA_DIR}/accesslog"
 export LDAP_ONLINE_CONF_DIR="${LDAP_VOLUME_DIR}/slapd.d"
+# Written only after EVERY initialization step (config, schemas, seed, TLS, ACLs, init
+# scripts) has succeeded. Existing data without it means a previous init failed partway.
+export LDAP_INIT_COMPLETE_MARKER="${LDAP_DATA_DIR}/.init_complete"
 export LDAP_PID_FILE="/var/run/slapd/slapd.pid"
 export LDAP_MODULE_PATH="/usr/lib/ldap"
 export LDAP_CUSTOM_LDIF_DIR="${LDAP_CUSTOM_LDIF_DIR:-/ldifs}"
@@ -221,10 +257,12 @@ for env_var in "${ldap_env_vars[@]}"; do
 done
 unset ldap_env_vars
 
-# Pre-hash passwords using slappasswd
-export LDAP_ENCRYPTED_ADMIN_PASSWORD="$(echo -n $LDAP_ADMIN_PASSWORD | slappasswd -n -T /dev/stdin)"
-export LDAP_ENCRYPTED_CONFIG_ADMIN_PASSWORD="$(echo -n $LDAP_CONFIG_ADMIN_PASSWORD | slappasswd -n -T /dev/stdin)"
-export LDAP_ENCRYPTED_ACCESSLOG_ADMIN_PASSWORD="$(echo -n $LDAP_ACCESSLOG_ADMIN_PASSWORD | slappasswd -n -T /dev/stdin)"
+# Pre-hash passwords using slappasswd. printf '%s' with a QUOTED expansion is deliberate:
+# an unquoted echo would word-split/glob the value, silently hashing a different password
+# than the one later used to bind (collapsed spaces, expanded wildcards).
+export LDAP_ENCRYPTED_ADMIN_PASSWORD="$(printf '%s' "$LDAP_ADMIN_PASSWORD" | slappasswd -n -T /dev/stdin)"
+export LDAP_ENCRYPTED_CONFIG_ADMIN_PASSWORD="$(printf '%s' "$LDAP_CONFIG_ADMIN_PASSWORD" | slappasswd -n -T /dev/stdin)"
+export LDAP_ENCRYPTED_ACCESSLOG_ADMIN_PASSWORD="$(printf '%s' "$LDAP_ACCESSLOG_ADMIN_PASSWORD" | slappasswd -n -T /dev/stdin)"
 EOF
 }
 
@@ -306,7 +344,7 @@ is_ldap_not_running() {
 # Check if OpenLDAP is ready for queries
 ########################
 is_ldap_ready() {
-    debug_execute ldapsearch -Y EXTERNAL -H "ldapi:///" -b "cn=config" -s base "(objectClass=*)" dn
+    quiet_execute ldapsearch -Y EXTERNAL -H "ldapi:///" -b "cn=config" -s base "(objectClass=*)" dn
 }
 
 ########################
@@ -326,7 +364,9 @@ ldap_start_bg() {
         info "Starting OpenLDAP server in background"
         ulimit -n "$LDAP_ULIMIT_NOFILES"
         am_i_root && flags=("-u" "$LDAP_DAEMON_USER" "${flags[@]}")
-        debug_execute slapd "${flags[@]}" &
+        # quiet_execute, NOT debug_execute: the buffering variant would hold the daemon's whole
+        # debug log in memory and dump it as a spurious "failure" when slapd is later stopped.
+        quiet_execute slapd "${flags[@]}" &
         if ! retry_while is_ldap_ready "$retries" "$sleep_time"; then
             error "OpenLDAP failed to start"
             return 1
@@ -675,7 +715,17 @@ ldap_initialize() {
 
     ldap_configure_permissions
     if ! is_dir_empty "$LDAP_DATA_DIR"; then
-        info "Using persisted data"
+        if [[ ! -f "$LDAP_INIT_COMPLETE_MARKER" ]]; then
+            # slapd creates MDB files the moment it starts, so ANY init failure — even before
+            # the first seed entry — leaves a non-empty data dir. Serving it would expose a
+            # partial dataset with post-seed security steps (TLS enforcement, ACLs,
+            # anonymous-bind policy) never applied. Refuse loudly instead.
+            error "Found existing data in '$LDAP_DATA_DIR' but no completed-initialization marker ('$LDAP_INIT_COMPLETE_MARKER')."
+            error "A previous initialization most likely failed partway; fix the original error (it is printed on the failing start) and reset the data volume to reinitialize."
+            error "If this volume was initialized by an older image version that predates the marker and you know its initialization completed, create the marker file manually to keep the data."
+            exit 1
+        fi
+        info "Using persisted data (configuration and seeds apply only on first initialization; reset the data volume to re-apply current settings)"
     else
         # Create OpenLDAP online configuration
         ldap_create_online_configuration

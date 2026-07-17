@@ -141,21 +141,39 @@ internal sealed class OpenLdapClientHealthCheck(OpenLdapClientFactory factory) :
     {
         try
         {
-            using var connection = factory.CreateConnection();
-            // "aspire-healthcheck" sentinel — see OpenLdapHealthCheck for why.
+            // "aspire-healthcheck" sentinel — see OpenLdapHealthCheck for why. Built before the
+            // connection so no throw path can leak an undisposed connection.
             var request = new SearchRequest(
                 distinguishedName: "",
                 ldapFilter: "(objectClass=*)",
                 searchScope: SearchScope.Base,
                 attributeList: ["namingContexts", "aspire-healthcheck"]);
+            var connection = factory.CreateConnection();
 
+            // SendRequest is synchronous and cannot observe the token once dispatched: the probe
+            // task owns and disposes the connection when the request finishes, while WaitAsync
+            // lets the health check return promptly on cancellation instead of blocking out the
+            // (default 30 s) LDAP timeout, which also bounds the orphaned probe.
             var response = await Task.Run(
-                () => (SearchResponse)connection.SendRequest(request),
-                cancellationToken).ConfigureAwait(false);
+                () =>
+                {
+                    using (connection)
+                    {
+                        return (SearchResponse)connection.SendRequest(request);
+                    }
+                },
+                CancellationToken.None)
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
 
             return response.ResultCode == ResultCode.Success
                 ? HealthCheckResult.Healthy("LDAP root DSE query succeeded.")
                 : HealthCheckResult.Unhealthy($"Unexpected LDAP result code: {response.ResultCode}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation is the caller's shutdown/timeout, not LDAP unhealthiness.
+            throw;
         }
         catch (LdapException ex)
         {

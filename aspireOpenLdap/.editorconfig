@@ -1,0 +1,24 @@
+root = true
+
+# Meziantou.Analyzer tuning. Rules stay at their defaults unless listed here; product code
+# must build warning-free (CI sets TreatWarningsAsErrors).
+
+[*.cs]
+# MA0048 (file name must match type name): small, closely-related types are deliberately
+# colocated (seed model records, resource + its value-provider, extension class + its
+# health check).
+dotnet_diagnostic.MA0048.severity = none
+
+# MA0051 (method too long): fluent resource-builder methods and Docker-backed integration
+# tests are legitimately long and read top-to-bottom; splitting them hurts more than helps.
+dotnet_diagnostic.MA0051.severity = none
+
+[Aspire.Hosting.OpenLdap.Tests/**.cs]
+# xunit runs without a SynchronizationContext, so ConfigureAwait(false) is pure noise there.
+dotnet_diagnostic.MA0004.severity = none
+# Culture-explicit comparisons in assertions (Assert.Contains/StartsWith, LINQ over test
+# fixtures) add ceremony without catching real bugs; product code keeps these rules on.
+dotnet_diagnostic.MA0002.severity = none
+dotnet_diagnostic.MA0006.severity = none
+dotnet_diagnostic.MA0011.severity = none
+dotnet_diagnostic.MA0074.severity = none

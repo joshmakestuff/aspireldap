@@ -48,6 +48,10 @@ Endpoint=ldap://host:port;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc
 
 When `WithRequiredTls()` is used the scheme switches to `ldaps://` and `CaCertFile=...` is appended.
 
+TLS trust is platform-specific: on Windows the health check validates the server certificate through a managed callback; on Linux the CA is trusted natively by `libldap` (via an OpenSSL hash-named certificate directory), which always validates the peer — so the `disableHealthCheckHostnameValidation` opt-out is rejected there. Because libldap checks a DNS-name dial against the peer address's reverse-DNS name (which loopback typically resolves to the machine hostname, never matching), the health check dials the IP literal on Linux and the certificate is validated against its **IP SANs** — custom server certificates must therefore include a loopback IP SAN (`127.0.0.1`); the generated certificates do. On macOS the server-side TLS requirement is relaxed and the health check uses plain LDAP, because Apple's `LDAP.framework` cannot trust a custom CA from managed code.
+
+Settings applied through the builder (TLS enforcement, seeds, schemas, ACLs, anonymous-bind policy) take effect on **first initialization only**. A persisted data volume keeps the configuration it was initialized with — use the resource's "Reset data volume" dashboard command to reinitialize with current settings. If initialization fails partway (for example on a rejected seed entry), the container refuses to restart over the partial data until the volume is reset; the original failure is printed in the logs of the failing run.
+
 ## Requirements on Linux
 
 The automatically-registered health check uses `System.DirectoryServices.Protocols`, which on Linux P/Invokes the native OpenLDAP client library. (On Windows it uses the built-in `wldap32.dll` and needs nothing extra.) The runtime hardcodes a load of **`libldap-2.5.so.0`** — still true on .NET 10 ([dotnet/runtime#123676](https://github.com/dotnet/runtime/issues/123676)) — but modern distros (Ubuntu 24.04+, Fedora, Alpine 3.20+) ship the upstream soname `libldap.so.2` instead.
