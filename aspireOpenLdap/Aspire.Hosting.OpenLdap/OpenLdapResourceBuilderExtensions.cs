@@ -612,7 +612,12 @@ public static class OpenLdapResourceBuilderExtensions
     /// </summary>
     /// <param name="builder">The OpenLDAP resource builder.</param>
     /// <param name="uid">The user's <c>uid</c>. Becomes the RDN. Must match <c>[A-Za-z0-9._-]+</c>.</param>
-    /// <param name="password">Password stored as <c>userPassword</c>. OpenLDAP hashes it on add when configured to do so.</param>
+    /// <param name="password">
+    /// The user's password. Hashed as <c>{SSHA}</c> into the generated LDIF, so the directory
+    /// stores a salted hash rather than the cleartext; binds verify against the hash natively.
+    /// A value that already carries an RFC 3112 scheme prefix (e.g. <c>{SSHA}...</c>,
+    /// <c>{CRYPT}...</c>) is stored verbatim, so pre-hashed values keep working.
+    /// </param>
     /// <param name="ou">Optional organizational unit. Must match a name passed to <see cref="WithOrganizationalUnit"/>.</param>
     /// <param name="cn">Common name. Defaults to <paramref name="uid"/>.</param>
     /// <param name="sn">Surname (required for <c>inetOrgPerson</c>). Defaults to <paramref name="uid"/>.</param>

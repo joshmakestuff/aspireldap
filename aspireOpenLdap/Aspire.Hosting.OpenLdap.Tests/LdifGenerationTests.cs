@@ -55,10 +55,10 @@ public class LdapSeedLdifGeneratorTests
 
         var ldif = LdapSeedLdifGenerator.Generate(resource, model);
 
-        // Every hostile value must have been base64-encoded; none may appear raw.
+        // Every hostile value must have been base64-encoded or hashed; none may appear raw.
         Assert.DoesNotContain("word: injected", ldif);
         Assert.DoesNotContain("Seán", ldif);
-        Assert.Contains("userPassword:: ", ldif);
+        Assert.Contains("userPassword: {SSHA}", ldif);
         Assert.Contains("cn:: ", ldif);
         Assert.Contains("sn:: ", ldif);
         Assert.Contains("mail:: ", ldif);
@@ -80,7 +80,66 @@ public class LdapSeedLdifGeneratorTests
         Assert.Contains("dn: uid=user01,ou=people,dc=example,dc=org\n", ldif);
         Assert.Contains("dn: cn=admins,dc=example,dc=org\n", ldif);
         Assert.Contains("member: uid=user01,ou=people,dc=example,dc=org\n", ldif);
-        Assert.Contains("userPassword: password1\n", ldif);
+        // The password is stored hashed, never cleartext (F05).
+        Assert.Contains("userPassword: {SSHA}", ldif);
+        Assert.DoesNotContain("password1", ldif);
+    }
+
+    [Fact]
+    public void Seeded_Password_Is_Stored_As_Verifiable_Ssha_Hash()
+    {
+        var resource = CreateResource();
+        var model = new LdapSeedModel();
+        model.Users.Add(new SeedUserEntry("user01", "s3cret!", null, "User One", "One", null));
+
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        // Extract the {SSHA} value and verify it the way slapd does: base64 decodes to
+        // 20 digest bytes + salt, and SHA1(password + salt) must equal the digest.
+        var line = ldif.Split('\n').Single(l => l.StartsWith("userPassword: ", StringComparison.Ordinal));
+        var value = line["userPassword: ".Length..];
+        Assert.StartsWith("{SSHA}", value);
+
+        var decoded = Convert.FromBase64String(value["{SSHA}".Length..]);
+        var digest = decoded[..System.Security.Cryptography.SHA1.HashSizeInBytes];
+        var salt = decoded[System.Security.Cryptography.SHA1.HashSizeInBytes..];
+        Assert.NotEmpty(salt);
+
+        var passwordBytes = System.Text.Encoding.UTF8.GetBytes("s3cret!");
+        var recomputed = System.Security.Cryptography.SHA1.HashData([.. passwordBytes, .. salt]);
+        Assert.Equal(digest, recomputed);
+    }
+
+    [Fact]
+    public void Equal_Passwords_Hash_With_Distinct_Salts()
+    {
+        var resource = CreateResource();
+        var model = new LdapSeedModel();
+        model.Users.Add(new SeedUserEntry("user01", "same-password", null, "User One", "One", null));
+        model.Users.Add(new SeedUserEntry("user02", "same-password", null, "User Two", "Two", null));
+
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        var hashes = ldif.Split('\n')
+            .Where(l => l.StartsWith("userPassword: ", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, hashes.Count);
+        Assert.NotEqual(hashes[0], hashes[1]);
+    }
+
+    [Fact]
+    public void Prehashed_Password_Passes_Through_Verbatim()
+    {
+        // A caller migrating existing data may supply an already-hashed value; re-hashing
+        // it would break the user's bind.
+        const string prehashed = "{SSHA}AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        var resource = CreateResource();
+        var model = new LdapSeedModel();
+        model.Users.Add(new SeedUserEntry("user01", prehashed, null, "User One", "One", null));
+
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        Assert.Contains($"userPassword: {prehashed}\n", ldif);
     }
 
     [Fact]

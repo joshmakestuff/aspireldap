@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ApplicationModel.Seeding;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
@@ -152,6 +153,73 @@ public class InitializationIntegrityTests : IDisposable
         Assert.True(search.ExitCode == 0, $"admin bind/search under c=US failed: {search.Output}");
         Assert.Contains("objectClass: country", search.Output);
         Assert.Contains("c: US", search.Output);
+    }
+
+    [Fact]
+    public async Task Seeded_User_Password_Is_Hashed_At_Rest_And_Binds_With_Cleartext()
+    {
+        // F05: the typed seed generator stores userPassword as {SSHA}. Prove end-to-end that
+        // (a) the seeded user can still bind with the original cleartext password and
+        // (b) the directory holds only the hash at rest.
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        const string userPassword = "user-s3cret!";
+        var resource = new OpenLdapResource(
+            "ldap", "dc=example,dc=org", "admin",
+            new ParameterResource("pw", _ => "unused", secret: true));
+        var model = new LdapSeedModel();
+        model.Users.Add(new SeedUserEntry("user01", userPassword, null, "User One", "One", null));
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        var seedDir = Directory.CreateTempSubdirectory("aspire-openldap-hashseed-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(seedDir, "00-seed.ldif"), ldif, cts.Token);
+            WidenPermissionsForContainer(seedDir);
+
+            var name = NewName("container");
+            _ = await DockerAsync(cts.Token,
+                "run", "-d", "--name", name,
+                "-v", $"{seedDir}:/ldifs:ro",
+                "-e", "LDAP_ADMIN_PASSWORD=test-admin-password",
+                image);
+
+            var deadline = DateTime.UtcNow.AddMinutes(5);
+            DockerResult whoami;
+            do
+            {
+                whoami = await DockerAsync(cts.Token,
+                    "exec", "-e", $"PROBE_PW={userPassword}", name,
+                    "bash", "-c", "ldapwhoami -x -H ldapi:/// -D \"uid=user01,dc=example,dc=org\" -w \"$PROBE_PW\"");
+                if (whoami.ExitCode == 0)
+                {
+                    break;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+            } while (DateTime.UtcNow < deadline);
+
+            Assert.True(whoami.ExitCode == 0, $"seeded user bind failed: {whoami.Output}");
+            Assert.Contains("dn:uid=user01,dc=example,dc=org", whoami.Output);
+
+            // At rest, only the salted hash: slapcat must show {SSHA} and never the cleartext.
+            var slapcat = await DockerAsync(cts.Token, "exec", name, "slapcat", "-b", "dc=example,dc=org");
+            Assert.Equal(0, slapcat.ExitCode);
+            // slapcat may emit the value plainly or base64-encoded ("e1NTSEF9" is base64 of
+            // a "{SSHA}"-prefixed value); either way it must be the hash.
+            Assert.True(
+                slapcat.Output.Contains("userPassword:: e1NTSEF9", StringComparison.Ordinal)
+                    || slapcat.Output.Contains("userPassword: {SSHA}", StringComparison.Ordinal),
+                $"expected {{SSHA}}-hashed userPassword at rest, got: {slapcat.Output}");
+            Assert.DoesNotContain(userPassword, slapcat.Output);
+            Assert.DoesNotContain(
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(userPassword)),
+                slapcat.Output);
+        }
+        finally
+        {
+            Directory.Delete(seedDir, recursive: true);
+        }
     }
 
     [Fact]
