@@ -30,8 +30,22 @@ public sealed class OpenLdapClientFactory
     public LdapConnection CreateConnection()
     {
         var endpoint = _connectionString.Endpoint;
+
+        // On the Linux native-trust path, dial an IP literal: libldap checks the cert against
+        // the peer address's reverse-DNS name (not the dialed name), which on typical NSS
+        // stacks resolves 127.0.0.1 to the machine hostname and can never match. IP dials are
+        // validated against the cert's IP SANs instead. The Windows callback below still
+        // validates against the ORIGINAL endpoint host.
+        var usesLinuxNativeTrust = OperatingSystem.IsLinux()
+            && _connectionString.UsesLdaps
+            && _settings.TrustConnectionStringCaCertificate
+            && _caCertificate.Value is not null;
+        var dialHost = usesLinuxNativeTrust
+            ? OpenLdapUnixTlsTrust.ResolveDialHost(endpoint.Host)
+            : endpoint.Host;
+
         var identifier = new LdapDirectoryIdentifier(
-            endpoint.Host,
+            dialHost,
             endpoint.Port,
             fullyQualifiedDnsHostName: false,
             connectionless: false);

@@ -1,4 +1,6 @@
 using System.Formats.Asn1;
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -46,6 +48,36 @@ internal static class OpenLdapUnixTlsTrust
         }
 
         return trustDir;
+    }
+
+    /// <summary>
+    /// Returns the host to dial for a TLS connection through libldap. When
+    /// <paramref name="host"/> is a DNS name, libldap validates the certificate against the
+    /// REVERSE-DNS canonical name of the connected peer address rather than the dialed name —
+    /// on typical Linux NSS stacks (including CI runners), 127.0.0.1 reverse-resolves to the
+    /// machine's own hostname, so a dial of <c>localhost</c> can never match the certificate.
+    /// Dialing the IP literal sidesteps that: libldap then checks the address against the
+    /// certificate's IP SANs directly (the generated certificates carry 127.0.0.1 and ::1).
+    /// IPv4 is preferred; an IPv6-only result falls back to the original name because
+    /// <c>LdapDirectoryIdentifier</c> does not bracket IPv6 literals in the connection URI.
+    /// </summary>
+    public static string ResolveDialHost(string host)
+    {
+        if (IPAddress.TryParse(host.Trim('[', ']'), out _))
+        {
+            return host;
+        }
+
+        try
+        {
+            var addresses = Dns.GetHostAddresses(host);
+            return addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)?.ToString() ?? host;
+        }
+        catch (SocketException)
+        {
+            // Unresolvable now — keep the name; the connection will surface the real error.
+            return host;
+        }
     }
 
     /// <summary>
