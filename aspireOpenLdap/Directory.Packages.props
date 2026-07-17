@@ -15,6 +15,11 @@
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
   </ItemGroup>
 
+  <!-- LDIF (RFC 2849) reading/writing -->
+  <ItemGroup>
+    <PackageVersion Include="LdifDotNet" Version="0.2.0" />
+  </ItemGroup>
+
   <!-- Microsoft.Extensions / runtime — keep on the current net10 servicing release -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.10" />
