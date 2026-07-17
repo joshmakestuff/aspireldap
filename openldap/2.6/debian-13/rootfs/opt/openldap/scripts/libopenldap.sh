@@ -302,6 +302,31 @@ ldap_validate() {
         fi
     fi
 
+    # DN-bearing inputs are interpolated into generated cn=config LDIF (admin.ldif,
+    # tree.ldif). A line break would smuggle extra LDIF lines into a privileged apply,
+    # so reject it outright. Usernames additionally become the verbatim cn value of a
+    # bind DN with no escaping applied, so DN special characters can never bind
+    # consistently — reject those too.
+    for var in LDAP_ROOT LDAP_ADMIN_USERNAME LDAP_CONFIG_ADMIN_USERNAME; do
+        if [[ "${!var}" == *$'\n'* ]] || [[ "${!var}" == *$'\r'* ]]; then
+            print_validation_error "$var must not contain line breaks"
+        fi
+    done
+    for var in LDAP_ADMIN_USERNAME LDAP_CONFIG_ADMIN_USERNAME; do
+        if [[ "${!var}" =~ [,+\"\\\<\>\;] ]] || [[ "${!var}" =~ ^[\#\ ] ]] || [[ "${!var}" =~ \ $ ]]; then
+            print_validation_error "$var must not contain DN special characters (, + \" \\ < > ; a leading '#' or space, or a trailing space): it is used verbatim as the cn value of a bind DN"
+        fi
+    done
+
+    # The leading RDN of LDAP_ROOT names the root entry; only dc=/o=/c= roots have a
+    # known object-class mapping (see ldap_create_tree). Fail loud up front instead of
+    # dying mid-bootstrap at "Creating LDAP default tree".
+    local root_type="${LDAP_ROOT%%=*}"
+    case "$(tr '[:upper:]' '[:lower:]' <<< "$root_type")" in
+        dc|o|c) ;;
+        *) print_validation_error "LDAP_ROOT must begin with a dc=, o= or c= component (got '${root_type}=')" ;;
+    esac
+
     read -r -a users <<< "$(tr ',;' ' ' <<< "${LDAP_USERS}")"
     read -r -a passwords <<< "$(tr ',;' ' ' <<< "${LDAP_PASSWORDS}")"
     if [[ "${#users[@]}" -ne "${#passwords[@]}" ]]; then
@@ -607,23 +632,68 @@ ldap_apply_access() {
 ########################
 ldap_create_tree() {
     info "Creating LDAP default tree"
-    local dc=""
-    local o="example"
-    read -r -a root <<< "$(tr ',;' ' ' <<< "${LDAP_ROOT}")"
-    for attr in "${root[@]}"; do
-        if [[ $attr = dc=* ]] && [[ -z "$dc" ]]; then
-            dc="${attr:3}"
-        elif [[ $attr = o=* ]] && [[ $o = "example" ]]; then
-            o="${attr:2}"
+    # The LEADING RDN of LDAP_ROOT names the root entry, so it drives the object class
+    # and must appear as an attribute. Split it off at the first UNESCAPED comma
+    # (o=Acme\, Inc.,c=US must not split mid-value), then unescape the value.
+    local first_rdn="" ch escaped=0
+    local -i i
+    for (( i = 0; i < ${#LDAP_ROOT}; i++ )); do
+        ch="${LDAP_ROOT:i:1}"
+        if (( escaped )); then
+            first_rdn+="$ch"
+            escaped=0
+        elif [[ "$ch" == "\\" ]]; then
+            first_rdn+="$ch"
+            escaped=1
+        elif [[ "$ch" == "," ]]; then
+            break
+        else
+            first_rdn+="$ch"
         fi
     done
+    local root_type root_value rest root_entry
+    root_type="$(tr '[:upper:]' '[:lower:]' <<< "${first_rdn%%=*}")"
+    root_value="$(sed -E 's/\\(.)/\1/g' <<< "${first_rdn#*=}")"
+    rest="${LDAP_ROOT:i+1}"
+
+    case "$root_type" in
+        dc)
+            # organization requires an o attribute; use the first o= elsewhere in the
+            # DN, falling back to the dc value. Split on commas only (not spaces), so
+            # an o value containing spaces survives.
+            local o="$root_value" attr
+            local -a root=()
+            IFS=';,' read -r -a root <<< "$rest"
+            for attr in "${root[@]}"; do
+                if [[ $attr = o=* ]]; then
+                    o="${attr:2}"
+                    break
+                fi
+            done
+            root_entry="objectClass: dcObject
+objectClass: organization
+dc: $root_value
+o: $o"
+            ;;
+        o)
+            root_entry="objectClass: organization
+o: $root_value"
+            ;;
+        c)
+            root_entry="objectClass: country
+c: $root_value"
+            ;;
+        *)
+            # Unreachable when ldap_validate ran, but fail loud rather than emit a
+            # root entry slapd will reject with an opaque schema error.
+            error "LDAP_ROOT must begin with a dc=, o= or c= component (got '${root_type}=')"
+            exit 1
+            ;;
+    esac
     cat > "${LDAP_SHARE_DIR}/tree.ldif" << EOF
 # Root creation
 dn: $LDAP_ROOT
-objectClass: dcObject
-objectClass: organization
-dc: $dc
-o: $o
+$root_entry
 
 dn: ${LDAP_USER_OU/#/ou=},${LDAP_ROOT}
 objectClass: organizationalUnit

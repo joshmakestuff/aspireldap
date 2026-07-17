@@ -2,11 +2,25 @@
 
 ## Unreleased
 
-Fixes from a second (2026-07-17) adversarial code review, findings F01–F08. F04 (DN
-validation/escaping) and F05 (seed password hashing) are deferred pending adoption of an
-RFC-compliant LDIF library.
+Fixes from a second (2026-07-17) adversarial code review, findings F01–F08, plus adoption of
+the [LdifDotNet](https://github.com/joshmakestuff/ldifdotnet) library for LDIF generation and
+RFC 4514 DN handling (which unblocked F04). F05 (seed password hashing) is tracked as #26.
 
 ### Breaking / behavior changes
+
+- **Base DN and admin username are validated at model construction** (F04). `AddOpenLdap` /
+  `WithBaseDn` / `WithAdminUsername` now fail in the AppHost — before Docker starts — instead
+  of producing a broken DN or a mid-bootstrap container death: the base DN must be a
+  well-formed RFC 4514 DN with no control characters and a `dc=`, `o=`, or `c=` leading RDN;
+  the admin username must not contain characters that require DN escaping (`, + " \ < > ;`, a
+  leading `#`/space, a trailing space) since the container composes `cn={username},{baseDn}`
+  verbatim. The container's own `ldap_validate` enforces the same rules for standalone use,
+  closing the newline-into-privileged-LDIF injection class.
+- **Malformed base DNs are no longer silently mis-split.** Root-entry derivation now parses
+  the base DN escape-aware (`Dn.Parse`): `o=Acme\, Inc.,c=US` no longer splits mid-value, and
+  extracted values are unescaped. `c=` roots are newly supported (root entry
+  `objectClass: country`) in both the typed seed generator and the container's default tree;
+  previously they killed the container at "Creating LDAP default tree".
 
 - **Custom-CA LDAPS now works on Linux** (F01). The client integration and the AppHost health
   check previously threw `LdapException` before the first request on Linux; they now configure
@@ -37,6 +51,11 @@ RFC-compliant LDIF library.
 
 ### Changed
 
+- LDIF generation and DN handling are now backed by **LdifDotNet 0.2.0** (#23): the
+  hand-maintained `LdifEncoder` (RFC 2849) and `DnEscaper` (RFC 4514) were deleted in favor of
+  `LdifWriter` and the `Dn` API. The admin bind DN is composed once (escaped) and reused by the
+  connection string, health check, dashboard command, and phpLDAPadmin — previously four
+  unescaped string interpolations.
 - Adopted `Meziantou.Analyzer` across `aspireOpenLdap/` (dev-only); fixed the issues it found,
   including a misleading `ArgumentException` parameter name and a regex without a match timeout.
 - Package READMEs document per-platform TLS trust behavior and seed-once/reset-volume semantics.

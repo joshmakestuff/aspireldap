@@ -61,6 +61,10 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
         : base(name)
     {
         ArgumentNullException.ThrowIfNull(adminPasswordParameter);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseDn);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adminUsername);
+        Aspire.Hosting.OpenLdap.OpenLdapDnValidation.ValidateBaseDn(baseDn, nameof(baseDn));
+        Aspire.Hosting.OpenLdap.OpenLdapDnValidation.ValidateAdminUsername(adminUsername, nameof(adminUsername));
         BaseDn = baseDn;
         AdminUsername = adminUsername;
         AdminPasswordParameter = adminPasswordParameter;
