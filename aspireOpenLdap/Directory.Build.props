@@ -25,4 +25,10 @@
     <None Include="$(MSBuildThisFileDirectory)..\assets\icon.png" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
+  <!-- Dev-time analyzer for every project under aspireOpenLdap/ (PrivateAssets keeps it out
+       of the published packages' dependency graphs). -->
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Analyzer" PrivateAssets="all" />
+  </ItemGroup>
+
 </Project>

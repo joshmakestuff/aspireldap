@@ -12,4 +12,11 @@ if (!string.IsNullOrWhiteSpace(seedDir))
     ldap.WithSeedData(seedDir);
 }
 
+// Optional TLS scenario, driven by tests via --OpenLdap:Tls=true: generated CA + required
+// LDAPS, so the health check and client connect through the real TLS trust paths.
+if (string.Equals(builder.Configuration["OpenLdap:Tls"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    ldap.WithTls().WithRequiredTls();
+}
+
 builder.Build().Run();

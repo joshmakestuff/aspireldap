@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
 using Microsoft.Extensions.DependencyInjection;
@@ -258,6 +259,10 @@ public static class OpenLdapResourceBuilderExtensions
 
     private static void SetEndpointPort(IResourceBuilder<OpenLdapResource> builder, string endpointName, int port)
     {
+        // Validate here so a bad value fails at the fluent call rather than later inside
+        // Aspire's endpoint allocation with a less attributable error.
+        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         var annotation = builder.Resource.Annotations
             .OfType<EndpointAnnotation>()
             .FirstOrDefault(e => string.Equals(e.Name, endpointName, StringComparison.OrdinalIgnoreCase))
@@ -364,7 +369,7 @@ public static class OpenLdapResourceBuilderExtensions
         {
             return null;
         }
-        var prop = evt.Snapshot.Properties.FirstOrDefault(p => p.Name == "container.id");
+        var prop = evt.Snapshot.Properties.FirstOrDefault(p => string.Equals(p.Name, "container.id", StringComparison.Ordinal));
         return prop?.Value as string;
     }
 
@@ -750,7 +755,9 @@ public static class OpenLdapResourceBuilderExtensions
 
         foreach (var rule in rules)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(rule);
+            // Name the real parameter: CallerArgumentExpression would report "rule", which is
+            // not an argument the caller can see.
+            ArgumentException.ThrowIfNullOrWhiteSpace(rule, nameof(rules));
             resource.AccessRules.Add(rule.Trim());
         }
         return builder;
@@ -929,7 +936,7 @@ public static class OpenLdapResourceBuilderExtensions
                 context.EnvironmentVariables["LDAP_HOST"] = parent.Name;
                 context.EnvironmentVariables["LDAP_PORT"] = (parent.TlsRequired
                     ? OpenLdapResource.DefaultLdapsTargetPort
-                    : OpenLdapResource.DefaultLdapTargetPort).ToString();
+                    : OpenLdapResource.DefaultLdapTargetPort).ToString(CultureInfo.InvariantCulture);
                 context.EnvironmentVariables["LDAP_BASE_DN"] = parent.BaseDn;
                 context.EnvironmentVariables["LDAP_USERNAME"] = $"cn={parent.AdminUsername},{parent.BaseDn}";
                 context.EnvironmentVariables["LDAP_PASSWORD"] = parent.AdminPasswordParameter;
@@ -981,7 +988,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <paramref name="caCertFile"/> and name the host it dials (usually <c>localhost</c>).
     /// If your certificate doesn't include a <c>localhost</c>/loopback SAN, either reissue it
     /// with one, or pass <paramref name="disableHealthCheckHostnameValidation"/> —
-    /// a local-development-only relaxation.
+    /// a local-development-only relaxation that is unavailable on Linux, where libldap
+    /// performs hostname validation natively with no hostname-only opt-out.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithTls(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -991,6 +999,13 @@ public static class OpenLdapResourceBuilderExtensions
         bool disableHealthCheckHostnameValidation = false)
     {
         ArgumentNullException.ThrowIfNull(builder);
+        if (disableHealthCheckHostnameValidation && OperatingSystem.IsLinux())
+        {
+            throw new DistributedApplicationException(
+                "disableHealthCheckHostnameValidation is not supported on Linux: libldap validates " +
+                "the server hostname natively during the TLS handshake and offers no hostname-only " +
+                "opt-out. Reissue the server certificate with a localhost/loopback SAN instead.");
+        }
         ArgumentException.ThrowIfNullOrWhiteSpace(serverCertFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKeyFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(caCertFile);
@@ -1032,10 +1047,9 @@ public static class OpenLdapResourceBuilderExtensions
     /// <c>LDAPTLS_REQCERT</c>), so a self-signed CA cannot be trusted from managed code without
     /// admin/GUI Keychain interaction. The connection string still advertises <c>ldaps://</c>
     /// and the LDAPS port is still exposed; only the server-side requirement is relaxed.
-    /// TODO(linux): Linux libldap has the same callback limitation; once a
-    /// <c>TrustedCertificatesDirectory</c> + <c>StartNewTlsSessionContext()</c> path is wired
-    /// up in the health check, this carve-out should be tightened to macOS only via an
-    /// <c>OperatingSystem.IsMacOS()</c> check rather than <c>!IsWindows()</c>.
+    /// On Linux the health check (and the client integration) trust the CA natively via
+    /// <c>TrustedCertificatesDirectory</c> + <c>StartNewTlsSessionContext()</c>, so no
+    /// carve-out is needed there.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithRequiredTls(
         this IResourceBuilder<OpenLdapResource> builder)

@@ -5,8 +5,9 @@ namespace Aspire.Hosting.ApplicationModel.Seeding;
 internal static partial class LdapSeedValidator
 {
     // Restricted to characters that need no LDAP DN escaping. Keeps generated LDIF
-    // safe without needing a full RFC 4514 escaper for now.
-    [GeneratedRegex("^[A-Za-z0-9._-]+$")]
+    // safe without needing a full RFC 4514 escaper for now. The pattern is linear
+    // (no nested quantifiers); the timeout is a defense-in-depth backstop (MA0009).
+    [GeneratedRegex("^[A-Za-z0-9._-]+$", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex SafeNameRegex();
 
     public static void Validate(OpenLdapResource resource, LdapSeedModel model)
