@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
 
     <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>JoshMakeStuff.Aspire.OpenLdap</PackageId>
     <Description>.NET Aspire client integration for OpenLDAP. Registers an LdapConnection with DI, configuration binding, and health checks.</Description>
     <PackageTags>aspire;client;openldap;ldap;directory</PackageTags>
@@ -17,6 +18,8 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\OpenLdapNativeLibraryResolver.cs" Link="OpenLdapNativeLibraryResolver.cs" />
+    <Compile Include="..\Shared\ConnectionStringQuoting.cs" Link="ConnectionStringQuoting.cs" />
+    <Compile Include="..\Shared\OpenLdapCertificateValidation.cs" Link="OpenLdapCertificateValidation.cs" />
   </ItemGroup>
 
   <ItemGroup>

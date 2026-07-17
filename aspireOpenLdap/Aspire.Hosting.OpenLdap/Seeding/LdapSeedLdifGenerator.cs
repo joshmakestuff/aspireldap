@@ -21,48 +21,51 @@ internal static class LdapSeedLdifGenerator
 
         foreach (var ou in model.OrganizationalUnits.OrderBy(o => o.Name, StringComparer.Ordinal))
         {
-            sb.Append("dn: ou=").Append(ou.Name).Append(',').Append(resource.BaseDn).Append(Nl);
-            sb.Append("objectClass: organizationalUnit").Append(Nl);
-            sb.Append("ou: ").Append(ou.Name).Append(Nl);
+            Append(sb, "dn", $"ou={LdifEncoder.EscapeDnValue(ou.Name)},{resource.BaseDn}");
+            Append(sb, "objectClass", "organizationalUnit");
+            Append(sb, "ou", ou.Name);
             sb.Append(Nl);
         }
 
         foreach (var user in model.Users.OrderBy(u => u.Uid, StringComparer.Ordinal))
         {
-            sb.Append("dn: ").Append(UserDn(resource, user)).Append(Nl);
-            sb.Append("objectClass: inetOrgPerson").Append(Nl);
-            sb.Append("objectClass: organizationalPerson").Append(Nl);
-            sb.Append("objectClass: person").Append(Nl);
-            sb.Append("objectClass: top").Append(Nl);
-            sb.Append("uid: ").Append(user.Uid).Append(Nl);
-            sb.Append("cn: ").Append(user.Cn).Append(Nl);
-            sb.Append("sn: ").Append(user.Sn).Append(Nl);
+            Append(sb, "dn", UserDn(resource, user));
+            Append(sb, "objectClass", "inetOrgPerson");
+            Append(sb, "objectClass", "organizationalPerson");
+            Append(sb, "objectClass", "person");
+            Append(sb, "objectClass", "top");
+            Append(sb, "uid", user.Uid);
+            Append(sb, "cn", user.Cn);
+            Append(sb, "sn", user.Sn);
             if (user.Mail is not null)
             {
-                sb.Append("mail: ").Append(user.Mail).Append(Nl);
+                Append(sb, "mail", user.Mail);
             }
-            sb.Append("userPassword: ").Append(user.Password).Append(Nl);
+            Append(sb, "userPassword", user.Password);
             sb.Append(Nl);
         }
 
         foreach (var group in model.Groups.OrderBy(g => g.Cn, StringComparer.Ordinal))
         {
-            sb.Append("dn: ").Append(GroupDn(resource, group)).Append(Nl);
-            sb.Append("objectClass: groupOfNames").Append(Nl);
-            sb.Append("objectClass: top").Append(Nl);
-            sb.Append("cn: ").Append(group.Cn).Append(Nl);
+            Append(sb, "dn", GroupDn(resource, group));
+            Append(sb, "objectClass", "groupOfNames");
+            Append(sb, "objectClass", "top");
+            Append(sb, "cn", group.Cn);
             foreach (var member in group.Members)
             {
                 var memberDn = member.Contains('=', StringComparison.Ordinal)
                     ? member
                     : ResolveUserDn(resource, model, member);
-                sb.Append("member: ").Append(memberDn).Append(Nl);
+                Append(sb, "member", memberDn);
             }
             sb.Append(Nl);
         }
 
         return sb.ToString();
     }
+
+    private static void Append(StringBuilder sb, string attribute, string value)
+        => LdifEncoder.AppendAttribute(sb, attribute, value, Nl);
 
     private static void AppendRootEntry(StringBuilder sb, OpenLdapResource resource)
     {
@@ -80,29 +83,29 @@ internal static class LdapSeedLdifGenerator
             }
         }
 
-        sb.Append("dn: ").Append(resource.BaseDn).Append(Nl);
+        Append(sb, "dn", resource.BaseDn);
         if (dc is not null)
         {
-            sb.Append("objectClass: dcObject").Append(Nl);
+            Append(sb, "objectClass", "dcObject");
         }
-        sb.Append("objectClass: organization").Append(Nl);
+        Append(sb, "objectClass", "organization");
         if (dc is not null)
         {
-            sb.Append("dc: ").Append(dc).Append(Nl);
+            Append(sb, "dc", dc);
         }
-        sb.Append("o: ").Append(o ?? dc ?? "organization").Append(Nl);
+        Append(sb, "o", o ?? dc ?? "organization");
         sb.Append(Nl);
     }
 
     private static string UserDn(OpenLdapResource resource, SeedUserEntry user)
         => user.OrganizationalUnit is { } ou
-            ? $"uid={user.Uid},ou={ou},{resource.BaseDn}"
-            : $"uid={user.Uid},{resource.BaseDn}";
+            ? $"uid={LdifEncoder.EscapeDnValue(user.Uid)},ou={LdifEncoder.EscapeDnValue(ou)},{resource.BaseDn}"
+            : $"uid={LdifEncoder.EscapeDnValue(user.Uid)},{resource.BaseDn}";
 
     private static string GroupDn(OpenLdapResource resource, SeedGroupEntry group)
         => group.OrganizationalUnit is { } ou
-            ? $"cn={group.Cn},ou={ou},{resource.BaseDn}"
-            : $"cn={group.Cn},{resource.BaseDn}";
+            ? $"cn={LdifEncoder.EscapeDnValue(group.Cn)},ou={LdifEncoder.EscapeDnValue(ou)},{resource.BaseDn}"
+            : $"cn={LdifEncoder.EscapeDnValue(group.Cn)},{resource.BaseDn}";
 
     private static string ResolveUserDn(OpenLdapResource resource, LdapSeedModel model, string uid)
     {

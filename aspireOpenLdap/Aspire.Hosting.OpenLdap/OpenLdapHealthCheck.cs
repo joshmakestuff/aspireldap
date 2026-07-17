@@ -1,7 +1,5 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting.ApplicationModel;
@@ -59,9 +57,12 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
                 connection.SessionOptions.SecureSocketLayer = true;
                 if (resource.CaCertHostPath is { } caPath)
                 {
-                    var ca = LoadCertificateFromPemFile(caPath);
+                    var ca = Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.LoadPemCertificate(caPath);
+                    // Chain to the resource's CA AND match the host we dial, unless the user
+                    // opted out (custom certificates that don't name localhost).
+                    var expectedHost = resource.TlsHostnameValidationDisabled ? null : allocatedEndpoint.Host;
                     connection.SessionOptions.VerifyServerCertificate = (_, serverCert) =>
-                        ChainsTo(serverCert, ca);
+                        Aspire.Hosting.OpenLdap.OpenLdapCertificateValidation.ValidateAgainstCustomRoot(serverCert, ca, expectedHost);
                 }
             }
 
@@ -127,22 +128,4 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
         return "LDAP authentication failed.";
     }
 
-    private static bool ChainsTo(X509Certificate serverCert, X509Certificate2 trustedRoot)
-    {
-        using var chainCert = X509CertificateLoader.LoadCertificate(serverCert.GetRawCertData());
-        using var chain = new X509Chain();
-        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        chain.ChainPolicy.CustomTrustStore.Add(trustedRoot);
-        chain.ChainPolicy.VerificationFlags = X509VerificationFlags.IgnoreInvalidName;
-        return chain.Build(chainCert);
-    }
-
-    private static X509Certificate2 LoadCertificateFromPemFile(string path)
-    {
-        var pemText = File.ReadAllText(path);
-        var fields = PemEncoding.Find(pemText);
-        var derBytes = Convert.FromBase64String(pemText[fields.Base64Data]);
-        return X509CertificateLoader.LoadCertificate(derBytes);
-    }
 }
