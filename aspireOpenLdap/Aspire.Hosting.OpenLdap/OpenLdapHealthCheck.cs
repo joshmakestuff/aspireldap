@@ -55,8 +55,16 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
                 searchScope: SearchScope.Base,
                 attributeList: ["namingContexts", "aspire-healthcheck"]);
 
+            // On the Linux native-trust path, dial an IP literal: libldap checks the cert
+            // against the peer address's reverse-DNS name (not the dialed name), which on
+            // typical NSS stacks resolves 127.0.0.1 to the machine hostname and can never
+            // match. IP dials are validated against the cert's IP SANs instead.
+            var dialHost = useTls && !OperatingSystem.IsWindows() && resource.CaCertHostPath is not null
+                ? Aspire.Hosting.OpenLdap.OpenLdapUnixTlsTrust.ResolveDialHost(allocatedEndpoint.Host)
+                : allocatedEndpoint.Host;
+
             var connection = new LdapConnection(
-                new LdapDirectoryIdentifier(allocatedEndpoint.Host, allocatedEndpoint.Port, fullyQualifiedDnsHostName: false, connectionless: false))
+                new LdapDirectoryIdentifier(dialHost, allocatedEndpoint.Port, fullyQualifiedDnsHostName: false, connectionless: false))
             {
                 AuthType = AuthType.Basic,
                 Credential = new NetworkCredential(bindDn, password),

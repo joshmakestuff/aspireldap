@@ -71,7 +71,7 @@ The connection string is normally provided automatically by Aspire via `Connecti
 When the connection string carries `CaCertFile=...` (the hosting integration appends it under `WithRequiredTls()`), connections trust that CA. The mechanism is platform-specific:
 
 - **Windows** — a managed callback validates the chain against the CA and that the certificate names the endpoint host. `settings.DisableTlsHostnameValidation` relaxes the hostname part only.
-- **Linux** — the CA is trusted natively by `libldap` via an OpenSSL hash-named certificate directory (staged automatically under the temp folder). `libldap` always validates the hostname, so `DisableTlsHostnameValidation` is rejected there.
+- **Linux** — the CA is trusted natively by `libldap` via an OpenSSL hash-named certificate directory (staged automatically under the temp folder). `libldap` always validates the peer, so `DisableTlsHostnameValidation` is rejected there. DNS-name endpoints are dialed by IP literal (libldap checks a name dial against the peer's reverse-DNS name, which loopback resolves to the machine hostname), so the server certificate must carry the endpoint's **IP SAN** — e.g. `127.0.0.1` for local development; the hosting integration's generated certificates do.
 - **macOS** — Apple's `LDAP.framework` cannot trust a custom CA from managed code; connection creation fails with guidance. Set `settings.TrustConnectionStringCaCertificate = false` and add the CA to the system trust store out of band instead.
 
 ## Telemetry
