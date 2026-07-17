@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
+using Aspire.Hosting.OpenLdap;
 using LdifDotNet;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -211,12 +212,18 @@ public static class OpenLdapResourceBuilderExtensions
     /// <summary>
     /// Overrides the directory's base DN (a.k.a. suffix / root). Default <c>dc=example,dc=org</c>.
     /// </summary>
+    /// <remarks>
+    /// The DN is validated here, before the container starts: it must be a well-formed RFC 4514
+    /// DN with no control characters, and its leading RDN must be <c>dc=</c>, <c>o=</c>, or
+    /// <c>c=</c> — the root-entry forms the container bootstrap and the seed generator support.
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithBaseDn(
         this IResourceBuilder<OpenLdapResource> builder,
         string baseDn)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(baseDn);
+        OpenLdapDnValidation.ValidateBaseDn(baseDn, nameof(baseDn));
         builder.Resource.BaseDn = baseDn;
         return builder;
     }
@@ -224,12 +231,19 @@ public static class OpenLdapResourceBuilderExtensions
     /// <summary>
     /// Overrides the admin username. Bind DN becomes <c>cn={username},{baseDn}</c>. Default <c>admin</c>.
     /// </summary>
+    /// <remarks>
+    /// The username is one CN value, but the container init composes the bind DN from it
+    /// verbatim — so values containing DN special characters (<c>, + " \ &lt; &gt; ;</c>, a
+    /// leading <c>#</c> or space, a trailing space) or control characters are rejected here,
+    /// before the container starts, rather than producing a DN the host and container disagree on.
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithAdminUsername(
         this IResourceBuilder<OpenLdapResource> builder,
         string username)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(username);
+        OpenLdapDnValidation.ValidateAdminUsername(username, nameof(username));
         builder.Resource.AdminUsername = username;
         return builder;
     }

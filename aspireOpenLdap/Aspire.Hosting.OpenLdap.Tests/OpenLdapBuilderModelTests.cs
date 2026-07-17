@@ -23,6 +23,62 @@ public class OpenLdapBuilderModelTests
         });
     }
 
+    [Theory]
+    [InlineData("dc=example,dc=org")]
+    [InlineData("c=US")]
+    [InlineData("O=Acme")]
+    [InlineData("o=Acme\\, Inc.,c=US")]
+    public void WithBaseDn_Accepts_Supported_Well_Formed_Dns(string baseDn)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap").WithBaseDn(baseDn);
+
+        Assert.Equal(baseDn, ldap.Resource.BaseDn);
+    }
+
+    [Theory]
+    [InlineData("not-a-dn", "not a valid RFC 4514 DN")]                  // no type=value
+    [InlineData("dc=", "empty value")]                                   // empty value
+    [InlineData("ou=corp,dc=example,dc=org", "not a supported root")]    // unsupported leading RDN
+    [InlineData("cn=a+sn=b,dc=example,dc=org", "multi-valued leading")]  // multi-valued leading RDN
+    [InlineData("dc=exa\nmple,dc=org", "control characters")]            // LDIF line injection
+    public void WithBaseDn_Rejects_Invalid_Or_Unsupported_Dns(string baseDn, string expectedFragment)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap");
+
+        var ex = Assert.Throws<ArgumentException>(() => ldap.WithBaseDn(baseDn));
+        Assert.Contains(expectedFragment, ex.Message);
+    }
+
+    [Theory]
+    [InlineData("admin")]
+    [InlineData("Admin User")]
+    [InlineData("björn")]
+    public void WithAdminUsername_Accepts_Plain_Cn_Values(string username)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap").WithAdminUsername(username);
+
+        Assert.Equal(username, ldap.Resource.AdminUsername);
+    }
+
+    [Theory]
+    [InlineData("Doe, John")]     // comma — container composes the bind DN unescaped
+    [InlineData("back\\slash")]
+    [InlineData("#lead")]
+    [InlineData("trail ")]
+    [InlineData("semi;colon")]
+    [InlineData("a<b>c")]
+    [InlineData("new\nline")]
+    public void WithAdminUsername_Rejects_Dn_Special_And_Control_Characters(string username)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap");
+
+        Assert.Throws<ArgumentException>(() => ldap.WithAdminUsername(username));
+    }
+
     [Fact]
     public void WithLdapPort_And_WithLdapsPort_Pin_Host_Ports()
     {
