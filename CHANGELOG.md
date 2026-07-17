@@ -4,7 +4,7 @@
 
 Fixes from a second (2026-07-17) adversarial code review, findings F01–F08, plus adoption of
 the [LdifDotNet](https://github.com/joshmakestuff/ldifdotnet) library for LDIF generation and
-RFC 4514 DN handling (which unblocked F04). F05 (seed password hashing) is tracked as #26.
+RFC 4514 DN handling (which unblocked F04 and F05).
 
 ### Breaking / behavior changes
 
@@ -21,6 +21,13 @@ RFC 4514 DN handling (which unblocked F04). F05 (seed password hashing) is track
   extracted values are unescaped. `c=` roots are newly supported (root entry
   `objectClass: country`) in both the typed seed generator and the container's default tree;
   previously they killed the container at "Creating LDAP default tree".
+- **Seeded user passwords are stored hashed, not cleartext** (F05). `WithUser(...)` passwords
+  are written to the generated LDIF as `{SSHA}` (salted SHA-1, verified natively by slapd), so
+  the directory never holds the cleartext at rest — visible via `slapcat`, backups, or reads of
+  `userPassword`. Binds with the original password keep working. Values already carrying an
+  RFC 3112 scheme prefix (`{SSHA}...`, `{CRYPT}...`) are stored verbatim, so pre-hashed data
+  migrates unchanged. Anything that read the cleartext back out of `userPassword` must now
+  bind to verify instead.
 
 - **Custom-CA LDAPS now works on Linux** (F01). The client integration and the AppHost health
   check previously threw `LdapException` before the first request on Linux; they now configure
