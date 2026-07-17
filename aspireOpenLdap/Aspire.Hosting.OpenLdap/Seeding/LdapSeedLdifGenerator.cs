@@ -67,37 +67,49 @@ internal static class LdapSeedLdifGenerator
     // below have a parent to attach to. Mirrors the existing tree.ldif format.
     private static LdifContentRecord RootEntry(OpenLdapResource resource)
     {
-        // Parse the base DN into ordered, unescaped RDN components so an escaped comma
-        // inside a value (o=Acme\, Inc.) no longer splits mid-value, and the extracted
-        // dc/o values are the real (unescaped) values.
-        string? dc = null;
-        string? o = null;
-        foreach (var rdn in Dn.Parse(resource.BaseDn))
+        // Parse the base DN into ordered, unescaped RDN components (escape-aware, so an
+        // escaped comma in a value like o=Acme\, Inc. no longer splits mid-value). The
+        // LEADING RDN names the root entry, so it drives the object class and must appear
+        // as an attribute; dc=/o=/c= are the supported forms, enforced by
+        // OpenLdapDnValidation at model construction.
+        var rdns = Dn.Parse(resource.BaseDn);
+        var root = rdns[0].SoleAttribute;
+
+        var attributes = new List<LdifAttribute>();
+        if (string.Equals(root.Type, "dc", StringComparison.OrdinalIgnoreCase))
         {
-            foreach (var atav in rdn.Attributes)
+            // organization requires an o attribute; use the first o= elsewhere in the DN,
+            // falling back to the dc value.
+            var o = root.Value;
+            foreach (var rdn in rdns.Skip(1))
             {
-                if (dc is null && string.Equals(atav.Type, "dc", StringComparison.OrdinalIgnoreCase))
+                var match = rdn.Attributes.FirstOrDefault(a => string.Equals(a.Type, "o", StringComparison.OrdinalIgnoreCase));
+                if (match.Value is not null)
                 {
-                    dc = atav.Value;
-                }
-                else if (o is null && string.Equals(atav.Type, "o", StringComparison.OrdinalIgnoreCase))
-                {
-                    o = atav.Value;
+                    o = match.Value;
+                    break;
                 }
             }
+            attributes.Add(new("objectClass", "dcObject", "organization"));
+            attributes.Add(new("dc", root.Value));
+            attributes.Add(new("o", o));
+        }
+        else if (string.Equals(root.Type, "o", StringComparison.OrdinalIgnoreCase))
+        {
+            attributes.Add(new("objectClass", "organization"));
+            attributes.Add(new("o", root.Value));
+        }
+        else if (string.Equals(root.Type, "c", StringComparison.OrdinalIgnoreCase))
+        {
+            attributes.Add(new("objectClass", "country"));
+            attributes.Add(new("c", root.Value));
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"Base DN '{resource.BaseDn}' starts with '{root.Type}=', which is not a supported root naming attribute (dc=, o=, c=).");
         }
 
-        var attributes = new List<LdifAttribute>
-        {
-            dc is not null
-                ? new("objectClass", "dcObject", "organization")
-                : new("objectClass", "organization"),
-        };
-        if (dc is not null)
-        {
-            attributes.Add(new("dc", dc));
-        }
-        attributes.Add(new("o", o ?? dc ?? "organization"));
         return new LdifContentRecord(resource.BaseDn, attributes);
     }
 

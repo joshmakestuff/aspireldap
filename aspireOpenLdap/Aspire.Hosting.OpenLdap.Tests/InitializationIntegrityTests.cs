@@ -117,6 +117,71 @@ public class InitializationIntegrityTests : IDisposable
         Assert.Contains("dn:cn=admin,dc=example,dc=org", whoami.Output);
     }
 
+    [Fact]
+    public async Task Country_Base_Dn_Initializes_With_Country_Root_Entry()
+    {
+        // c=US is a valid suffix that previously killed the container at "Creating LDAP
+        // default tree": the generated root entry assumed dcObject/organization and never
+        // emitted the naming c attribute (F04).
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        var name = NewName("container");
+        const string password = "test-admin-password";
+        _ = await DockerAsync(cts.Token,
+            "run", "-d", "--name", name,
+            "-e", "LDAP_ROOT=c=US",
+            "-e", $"LDAP_ADMIN_PASSWORD={password}",
+            image);
+
+        var deadline = DateTime.UtcNow.AddMinutes(5);
+        DockerResult search;
+        do
+        {
+            search = await DockerAsync(cts.Token,
+                "exec", name,
+                "ldapsearch", "-x", "-H", "ldapi:///", "-D", "cn=admin,c=US", "-w", password,
+                "-b", "c=US", "-s", "base", "(objectClass=*)");
+            if (search.ExitCode == 0)
+            {
+                break;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+        } while (DateTime.UtcNow < deadline);
+
+        Assert.True(search.ExitCode == 0, $"admin bind/search under c=US failed: {search.Output}");
+        Assert.Contains("objectClass: country", search.Output);
+        Assert.Contains("c: US", search.Output);
+    }
+
+    [Fact]
+    public async Task Invalid_Dn_Inputs_Are_Rejected_Before_Bootstrap()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        // Unsupported root naming attribute: fail at validation, never reach tree creation.
+        var badRoot = await DockerAsync(cts.Token,
+            "run", "--name", NewName("container"),
+            "-e", "LDAP_ROOT=ou=nope,dc=example,dc=org",
+            "-e", "LDAP_ADMIN_PASSWORD=t",
+            image);
+        Assert.NotEqual(0, badRoot.ExitCode);
+        Assert.Contains("LDAP_ROOT must begin with a dc=, o= or c= component", badRoot.Output);
+        Assert.DoesNotContain("Starting slapd", badRoot.Output);
+
+        // DN-special characters in the admin username can never bind consistently (the
+        // container composes cn={username},{root} verbatim): fail at validation.
+        var badUser = await DockerAsync(cts.Token,
+            "run", "--name", NewName("container"),
+            "-e", "LDAP_ADMIN_USERNAME=Doe, John",
+            "-e", "LDAP_ADMIN_PASSWORD=t",
+            image);
+        Assert.NotEqual(0, badUser.ExitCode);
+        Assert.Contains("LDAP_ADMIN_USERNAME must not contain DN special characters", badUser.Output);
+        Assert.DoesNotContain("Starting slapd", badUser.Output);
+    }
+
     private async Task<string> BuildBundledImageAsync(CancellationToken cancellationToken)
     {
         var contextDir = OpenLdapResource.DefaultDockerContextPath;

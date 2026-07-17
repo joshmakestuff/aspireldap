@@ -17,12 +17,21 @@ public class AdminBindDnTests
     }
 
     [Fact]
-    public void AdminBindDn_Escapes_A_Comma_In_The_Username()
+    public void Username_Needing_Dn_Escaping_Is_Rejected_At_Construction()
     {
         // Previously $"cn={AdminUsername},{BaseDn}" produced a silently broken DN whose
-        // cn RDN ended at the first comma. The compose API escapes it instead.
-        var resource = CreateResource("Doe, John", "dc=example,dc=org");
-        Assert.Equal("cn=Doe\\, John,dc=example,dc=org", resource.AdminBindDn);
+        // cn RDN ended at the first comma. The container init composes the same DN
+        // verbatim, so such usernames can never bind consistently — they are rejected
+        // at model construction rather than escaped into a host/container mismatch.
+        var ex = Assert.Throws<ArgumentException>(() => CreateResource("Doe, John", "dc=example,dc=org"));
+        Assert.Contains("DN escaping", ex.Message);
+    }
+
+    [Fact]
+    public void AdminBindDn_Preserves_Interior_Spaces()
+    {
+        var resource = CreateResource("Admin User", "dc=example,dc=org");
+        Assert.Equal("cn=Admin User,dc=example,dc=org", resource.AdminBindDn);
     }
 }
 
@@ -85,6 +94,35 @@ public class LdapSeedLdifGeneratorTests
 
         Assert.Contains("dn:: ", ldif);
         Assert.DoesNotContain("dn: ou=people,dc=büro", ldif);
+    }
+
+    [Fact]
+    public void Root_Entry_For_Country_Base_Dn_Uses_Country_Object_Class()
+    {
+        // c=US is a valid suffix; previously the root entry assumed dcObject/organization
+        // and never emitted the naming c attribute, so container init failed mid-bootstrap.
+        var resource = CreateResource("c=US");
+        var model = new LdapSeedModel();
+
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        Assert.Contains("dn: c=US\n", ldif);
+        Assert.Contains("objectClass: country\n", ldif);
+        Assert.Contains("c: US\n", ldif);
+        Assert.DoesNotContain("dcObject", ldif);
+    }
+
+    [Fact]
+    public void Root_Entry_For_Dc_Base_Dn_Takes_O_Value_From_Later_Rdn()
+    {
+        var resource = CreateResource("dc=example,o=Acme Corp,c=US");
+        var model = new LdapSeedModel();
+
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        Assert.Contains("objectClass: dcObject\n", ldif);
+        Assert.Contains("dc: example\n", ldif);
+        Assert.Contains("o: Acme Corp\n", ldif);
     }
 
     [Fact]
