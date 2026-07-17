@@ -5,18 +5,32 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
+    <!-- Switches the linked Shared\OpenLdapNativeLibraryResolver.cs to this assembly's namespace. -->
+    <DefineConstants>$(DefineConstants);ASPIRE_HOSTING_OPENLDAP</DefineConstants>
+
     <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>JoshMakeStuff.Aspire.Hosting.OpenLdap</PackageId>
     <Description>.NET Aspire hosting integration for OpenLDAP. Adds an OpenLDAP container resource (with optional TLS, health checks, and phpLDAPadmin sidecar) to your AppHost.</Description>
     <PackageTags>aspire;hosting;openldap;ldap;directory</PackageTags>
+    <!-- The assemblies are MIT, but the bundled docker build context (contentFiles/…/openldap/)
+         is Apache-2.0 (derived from Bitnami OpenLDAP) — see THIRD-PARTY-NOTICES.txt. -->
+    <PackageLicenseExpression>MIT AND Apache-2.0</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\Shared\OpenLdapNativeLibraryResolver.cs" Link="OpenLdapNativeLibraryResolver.cs" />
+    <Compile Include="..\Shared\ConnectionStringQuoting.cs" Link="ConnectionStringQuoting.cs" />
+    <Compile Include="..\Shared\OpenLdapCertificateValidation.cs" Link="OpenLdapCertificateValidation.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aspire.Hosting.OpenLdap.Tests" />
   </ItemGroup>
 
   <!--
@@ -26,7 +40,7 @@
     the nupkg with copyToOutput=true so a PackageReference produces the same layout.
   -->
   <ItemGroup>
-    <Content Include="$(MSBuildThisFileDirectory)..\..\openldap\2.6\debian-12\**\*" Link="openldap\2.6\debian-12\%(RecursiveDir)%(Filename)%(Extension)" Pack="true" PackagePath="contentFiles/any/any/openldap/2.6/debian-12/" PackageCopyToOutput="true" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)..\..\openldap\2.6\debian-13\**\*" Link="openldap\2.6\debian-13\%(RecursiveDir)%(Filename)%(Extension)" Pack="true" PackagePath="contentFiles/any/any/openldap/2.6/debian-13/" PackageCopyToOutput="true" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

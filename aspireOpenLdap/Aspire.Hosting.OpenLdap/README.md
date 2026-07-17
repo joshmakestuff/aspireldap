@@ -64,4 +64,4 @@ Without the library installed you'll see `Unable to load shared library 'libldap
 ## Notes
 
 - The admin password is auto-generated and surfaced in the Aspire dashboard as a secret parameter named `{name}-password`. Pass your own via the `adminPassword` parameter to override.
-- Container endpoints default to `1389` (LDAP) and `1636` (LDAPS) on the host.
+- Host ports are allocated dynamically by Aspire (the container listens on `1389`/`1636` internally), so multiple AppHosts can run side by side. Pin fixed host ports with `.WithLdapPort(1389)` / `.WithLdapsPort(1636)` when an external tool needs a stable address.

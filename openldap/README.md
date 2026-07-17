@@ -1,13 +1,13 @@
 # OpenLDAP Docker Image
 
-OpenLDAP 2.6 container image based on stock Debian Bookworm packages. Forked from the Bitnami OpenLDAP container and rewritten to eliminate external binary dependencies.
+OpenLDAP 2.6 container image based on stock Debian 13 (Trixie) packages, which ship slapd 2.6.x. The Dockerfile asserts the installed `slapd -VV` version at build time, so the advertised and actual versions cannot drift apart. Forked from the Bitnami OpenLDAP container and rewritten to eliminate external binary dependencies.
 
 ## Quick Start
 
 Build and run directly:
 
 ```bash
-docker build -t openldap ./2.6/debian-12
+docker build -t openldap ./2.6/debian-13
 docker run --rm -p 1389:1389 -p 1636:1636 openldap
 ```
 
@@ -21,7 +21,7 @@ ldapsearch -x -H ldap://localhost:1389 -b "" -s base "(objectClass=*)" +
 
 | Feature | Bitnami | This Image |
 |---------|---------|------------|
-| Base image | `bitnami/minideb:bookworm` | `debian:bookworm-slim` |
+| Base image | `bitnami/minideb:bookworm` | `debian:trixie-slim` |
 | OpenLDAP source | Pre-compiled binary from `downloads.bitnami.com` | `apt-get install slapd ldap-utils` |
 | Binary paths | `/opt/bitnami/openldap/` | `/usr/sbin/`, `/usr/bin/` |
 | Config path | `/opt/bitnami/openldap/etc/` | `/etc/ldap/` |

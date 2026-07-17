@@ -40,11 +40,11 @@ public sealed class OpenLdapOverlay
         string memberOfAttribute = "memberOf",
         bool referentialIntegrity = true,
         string dangling = "ignore") => new()
-    {
-        Name = "memberof",
-        ModuleLoads = ["memberof.so"],
-        OverlayObjectClass = "olcMemberOf",
-        Attributes =
+        {
+            Name = "memberof",
+            ModuleLoads = ["memberof.so"],
+            OverlayObjectClass = "olcMemberOf",
+            Attributes =
         [
             new("olcMemberOfGroupOC", groupObjectClass),
             new("olcMemberOfMemberAD", memberAttribute),
@@ -52,7 +52,7 @@ public sealed class OpenLdapOverlay
             new("olcMemberOfDangling", dangling),
             new("olcMemberOfRefInt", referentialIntegrity ? "TRUE" : "FALSE"),
         ],
-    };
+        };
 
     /// <summary>Renders this overlay's <c>cn=config</c> entry against the given database DN.</summary>
     internal string ToOverlayEntryLdif(string databaseDn)

@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
+using ConnectionStringQuoting = Aspire.Hosting.OpenLdap.ConnectionStringQuoting;
 
 namespace Aspire.Hosting.ApplicationModel;
 
@@ -19,7 +20,7 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// The context (Dockerfile + rootfs scripts) is shipped as contentFiles in the
     /// Aspire.Hosting.OpenLdap nupkg and copied here at build time.
     /// </summary>
-    internal const string DefaultDockerContextRelativePath = "openldap/2.6/debian-12";
+    internal const string DefaultDockerContextRelativePath = "openldap/2.6/debian-13";
     internal const string DefaultDockerfilePath = "Dockerfile";
 
     /// <summary>
@@ -80,6 +81,12 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     internal string? CaCertHostPath { get; set; }
 
     /// <summary>
+    /// True when the health check should skip certificate hostname validation — an explicit
+    /// local-dev opt-out for caller-provided certificates that don't name the health-check host.
+    /// </summary>
+    internal bool TlsHostnameValidationDisabled { get; set; }
+
+    /// <summary>
     /// Accumulated seed declarations (OUs, users, groups) emitted as a generated LDIF
     /// at <c>BeforeResourceStarted</c> time. Null until the first seed builder call.
     /// </summary>
@@ -114,6 +121,8 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// Connection string in the format:
     /// Endpoint=ldap://host:port;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=secret
     /// When TLS is required the scheme switches to <c>ldaps://</c> and <c>CaCertFile=</c> is appended.
+    /// Values containing semicolons, quotes, or leading/trailing whitespace are double-quoted
+    /// (embedded quotes doubled) so any password or DN round-trips through the client parser.
     /// </summary>
     public ReferenceExpression ConnectionStringExpression
     {
@@ -121,12 +130,30 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
         {
             var scheme = TlsRequired ? "ldaps" : "ldap";
             var endpoint = TlsRequired ? LdapsEndpoint : LdapEndpoint;
+            var baseDn = ConnectionStringQuoting.Quote(BaseDn);
+            var bindDn = ConnectionStringQuoting.Quote($"cn={AdminUsername},{BaseDn}");
+            var password = new QuotedParameterValue(AdminPasswordParameter);
             var caSuffix = TlsEnabled && CaCertHostPath is not null
-                ? $";CaCertFile={CaCertHostPath}"
+                ? $";CaCertFile={ConnectionStringQuoting.Quote(CaCertHostPath)}"
                 : string.Empty;
 
             return ReferenceExpression.Create(
-                $"Endpoint={scheme}://{endpoint.Property(EndpointProperty.HostAndPort)};BaseDN={BaseDn};BindDN=cn={AdminUsername},{BaseDn};BindPassword={AdminPasswordParameter}{caSuffix}");
+                $"Endpoint={scheme}://{endpoint.Property(EndpointProperty.HostAndPort)};BaseDN={baseDn};BindDN={bindDn};BindPassword={password}{caSuffix}");
         }
+    }
+}
+
+/// <summary>
+/// Wraps a parameter so its resolved value is connection-string-quoted at the moment Aspire
+/// evaluates the expression — the only point where a runtime secret's content is knowable.
+/// </summary>
+internal sealed class QuotedParameterValue(ParameterResource parameter) : IValueProvider, IManifestExpressionProvider
+{
+    public string ValueExpression => parameter.ValueExpression;
+
+    public async ValueTask<string?> GetValueAsync(CancellationToken cancellationToken = default)
+    {
+        var value = await parameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+        return value is null ? null : ConnectionStringQuoting.Quote(value);
     }
 }

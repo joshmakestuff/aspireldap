@@ -33,7 +33,7 @@ public static class OpenLdapResourceBuilderExtensions
         // On Linux distros shipping OpenLDAP 2.6+ the runtime's hardcoded libldap-2.5 load
         // fails; register the soname fallback resolver so the health check's LdapConnection
         // works without a hand-made symlink.
-        Aspire.OpenLdap.OpenLdapNativeLibraryResolver.EnsureRegistered();
+        Aspire.Hosting.OpenLdap.OpenLdapNativeLibraryResolver.EnsureRegistered();
 
         var passwordParameter = adminPassword?.Resource
             ?? ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder, $"{name}-password");
@@ -50,8 +50,11 @@ public static class OpenLdapResourceBuilderExtensions
             // by Aspire's WithDockerfile and not affected by this call.
             .WithImage(OpenLdapResource.DefaultImageName, OpenLdapResource.DefaultImageTag)
             .WithDockerfile(OpenLdapResource.DefaultDockerContextPath, OpenLdapResource.DefaultDockerfilePath)
-            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName, isProxied: false)
-            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName, isProxied: false)
+            // Proxied endpoints: Aspire allocates a free host port per run, so multiple
+            // AppHosts (or multiple LDAP resources) never collide. Pin a fixed host port
+            // via WithLdapPort / WithLdapsPort when a stable address is needed.
+            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName)
+            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName)
             // Late-binding env values so fluent overrides (e.g. WithBaseDn) take effect when the container starts.
             .WithEnvironment(context =>
             {
@@ -905,40 +908,41 @@ public static class OpenLdapResourceBuilderExtensions
         var adminName = containerName ?? $"{parent.Name}-admin";
         var adminResource = new PhpLdapAdminResource(adminName, parent);
 
-        // Inside the container network the admin connects to the parent by resource name.
-        // If TLS is required we point at the LDAPS target port; otherwise plain LDAP.
-        var ldapHost = parent.Name;
-        var ldapPort = parent.TlsRequired
-            ? OpenLdapResource.DefaultLdapsTargetPort
-            : OpenLdapResource.DefaultLdapTargetPort;
-
         var admin = builder.ApplicationBuilder
             .AddResource(adminResource)
             .WithImage(PhpLdapAdminResource.DefaultImageName, PhpLdapAdminResource.DefaultImageTag)
             .WithHttpEndpoint(targetPort: PhpLdapAdminResource.ContainerHttpPort, name: PhpLdapAdminResource.HttpEndpointName)
-            .WithEnvironment("LDAP_HOST", ldapHost)
-            .WithEnvironment("LDAP_PORT", ldapPort.ToString())
-            .WithEnvironment("LDAP_BASE_DN", parent.BaseDn)
             .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", loginObjectClass ?? "inetOrgPerson")
-            .WithEnvironment("LDAP_USERNAME", $"cn={parent.AdminUsername},{parent.BaseDn}")
+            // All parent-derived settings resolve when the admin container starts, so fluent
+            // calls chained on the parent AFTER WithPhpLdapAdmin (WithBaseDn, WithAdminUsername,
+            // WithTls().WithRequiredTls()) still take effect here.
             .WithEnvironment(context =>
             {
+                // Inside the container network the admin connects to the parent by resource name.
+                // If TLS is required we point at the LDAPS target port; otherwise plain LDAP.
+                context.EnvironmentVariables["LDAP_HOST"] = parent.Name;
+                context.EnvironmentVariables["LDAP_PORT"] = (parent.TlsRequired
+                    ? OpenLdapResource.DefaultLdapsTargetPort
+                    : OpenLdapResource.DefaultLdapTargetPort).ToString();
+                context.EnvironmentVariables["LDAP_BASE_DN"] = parent.BaseDn;
+                context.EnvironmentVariables["LDAP_USERNAME"] = $"cn={parent.AdminUsername},{parent.BaseDn}";
                 context.EnvironmentVariables["LDAP_PASSWORD"] = parent.AdminPasswordParameter;
+
+                if (parent.TlsRequired)
+                {
+                    // Use the image's preconfigured 'ldaps' connection (use_ssl=true). Self-signed
+                    // CA isn't trusted inside the admin container so disable libldap's cert
+                    // verification for local dev.
+                    context.EnvironmentVariables["LDAP_CONNECTION"] = "ldaps";
+                    context.EnvironmentVariables["LDAP_SSL"] = "true";
+                    context.EnvironmentVariables["LDAPTLS_REQCERT"] = "never";
+                }
             })
             // The login page only renders 200 when the LDAP bind succeeds (it does a root-DSE
             // query during page construction), so this also doubles as an end-to-end connectivity
             // probe between the admin container and the LDAP server.
             .WithHttpHealthCheck(path: "/", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)
             .WaitFor(builder);
-
-        if (parent.TlsRequired)
-        {
-            // Use the image's preconfigured 'ldaps' connection (use_ssl=true). Self-signed CA isn't
-            // trusted inside the admin container so disable libldap's cert verification for local dev.
-            admin.WithEnvironment("LDAP_CONNECTION", "ldaps")
-                 .WithEnvironment("LDAP_SSL", "true")
-                 .WithEnvironment("LDAPTLS_REQCERT", "never");
-        }
 
         configureContainer?.Invoke(admin);
         return builder;
@@ -962,32 +966,52 @@ public static class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
-    /// Enables TLS using caller-provided certificates. All three paths must point to PEM files
-    /// inside a single directory that is bind-mounted read-only at <c>/tls</c>.
+    /// Enables TLS using caller-provided PEM files. Each file is bind-mounted read-only at its
+    /// fixed container path (<c>/tls/server.crt</c>, <c>/tls/server.key</c>, <c>/tls/ca.crt</c>),
+    /// so the host files can live anywhere and use any names.
     /// </summary>
+    /// <remarks>
+    /// The AppHost health check requires the server certificate to both chain to
+    /// <paramref name="caCertFile"/> and name the host it dials (usually <c>localhost</c>).
+    /// If your certificate doesn't include a <c>localhost</c>/loopback SAN, either reissue it
+    /// with one, or pass <paramref name="disableHealthCheckHostnameValidation"/> —
+    /// a local-development-only relaxation.
+    /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithTls(
         this IResourceBuilder<OpenLdapResource> builder,
         string serverCertFile,
         string serverKeyFile,
-        string caCertFile)
+        string caCertFile,
+        bool disableHealthCheckHostnameValidation = false)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(serverCertFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKeyFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(caCertFile);
 
-        var certDir = Path.GetDirectoryName(Path.GetFullPath(serverCertFile))
-            ?? throw new DistributedApplicationException($"Could not resolve directory for '{serverCertFile}'.");
-        var keyDir = Path.GetDirectoryName(Path.GetFullPath(serverKeyFile));
-        var caDir = Path.GetDirectoryName(Path.GetFullPath(caCertFile));
-        if (!string.Equals(certDir, keyDir, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(certDir, caDir, StringComparison.OrdinalIgnoreCase))
+        builder.Resource.TlsHostnameValidationDisabled = disableHealthCheckHostnameValidation;
+
+        var certPath = RequireTlsFile(serverCertFile, "server certificate");
+        var keyPath = RequireTlsFile(serverKeyFile, "server private key");
+        var caPath = RequireTlsFile(caCertFile, "CA certificate");
+
+        builder
+            .WithBindMount(certPath, ContainerServerCertPath, isReadOnly: true)
+            .WithBindMount(keyPath, ContainerServerKeyPath, isReadOnly: true)
+            .WithBindMount(caPath, ContainerCaCertPath, isReadOnly: true);
+
+        return ApplyTlsEnvironment(builder, caPath);
+    }
+
+    private static string RequireTlsFile(string path, string description)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath))
         {
             throw new DistributedApplicationException(
-                "serverCertFile, serverKeyFile and caCertFile must all live in the same directory (it is bind-mounted into the container).");
+                $"TLS {description} file not found: {fullPath}");
         }
-
-        return ApplyTls(builder, certDir, Path.GetFullPath(caCertFile));
+        return fullPath;
     }
 
     /// <summary>
@@ -1031,11 +1055,18 @@ public static class OpenLdapResourceBuilderExtensions
         string hostCertDir,
         string caCertHostPath)
     {
+        builder.WithBindMount(hostCertDir, ContainerTlsDir, isReadOnly: true);
+        return ApplyTlsEnvironment(builder, caCertHostPath);
+    }
+
+    private static IResourceBuilder<OpenLdapResource> ApplyTlsEnvironment(
+        IResourceBuilder<OpenLdapResource> builder,
+        string caCertHostPath)
+    {
         builder.Resource.TlsEnabled = true;
         builder.Resource.CaCertHostPath = caCertHostPath;
 
         return builder
-            .WithBindMount(hostCertDir, ContainerTlsDir, isReadOnly: true)
             .WithEnvironment("LDAP_ENABLE_TLS", "yes")
             .WithEnvironment("LDAP_TLS_CERT_FILE", ContainerServerCertPath)
             .WithEnvironment("LDAP_TLS_KEY_FILE", ContainerServerKeyPath)

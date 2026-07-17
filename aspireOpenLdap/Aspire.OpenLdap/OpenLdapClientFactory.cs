@@ -1,6 +1,5 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
-using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 namespace Aspire.OpenLdap;
@@ -48,8 +47,11 @@ public sealed class OpenLdapClientFactory
             connection.SessionOptions.SecureSocketLayer = true;
             if (_settings.TrustConnectionStringCaCertificate && _caCertificate.Value is { } ca)
             {
+                // Chain must reach the connection string's CA, and the certificate must name the
+                // host we dialed — unless the caller explicitly opted out of hostname validation.
+                var expectedHost = _settings.DisableTlsHostnameValidation ? null : endpoint.Host;
                 connection.SessionOptions.VerifyServerCertificate = (_, serverCert) =>
-                    ChainsTo(serverCert, ca);
+                    OpenLdapCertificateValidation.ValidateAgainstCustomRoot(serverCert, ca, expectedHost);
             }
         }
 
@@ -67,20 +69,6 @@ public sealed class OpenLdapClientFactory
             return null;
         }
 
-        var pemText = File.ReadAllText(_connectionString.CaCertFile);
-        var fields = PemEncoding.Find(pemText);
-        var derBytes = Convert.FromBase64String(pemText[fields.Base64Data]);
-        return X509CertificateLoader.LoadCertificate(derBytes);
-    }
-
-    private static bool ChainsTo(X509Certificate serverCert, X509Certificate2 trustedRoot)
-    {
-        using var chainCert = X509CertificateLoader.LoadCertificate(serverCert.GetRawCertData());
-        using var chain = new X509Chain();
-        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        chain.ChainPolicy.CustomTrustStore.Add(trustedRoot);
-        chain.ChainPolicy.VerificationFlags = X509VerificationFlags.IgnoreInvalidName;
-        return chain.Build(chainCert);
+        return OpenLdapCertificateValidation.LoadPemCertificate(_connectionString.CaCertFile);
     }
 }
