@@ -1,9 +1,9 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
-using System.Text;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
+using LdifDotNet;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -80,26 +80,28 @@ public class LargeSeedHealthGatingTests
 
     private static string GenerateLargeSeed(int userCount)
     {
-        var sb = new StringBuilder();
-        sb.Append("dn: dc=example,dc=org\n");
-        sb.Append("objectClass: dcObject\n");
-        sb.Append("objectClass: organization\n");
-        sb.Append("dc: example\n");
-        sb.Append("o: Example\n\n");
-        sb.Append("dn: ou=people,dc=example,dc=org\n");
-        sb.Append("objectClass: organizationalUnit\n");
-        sb.Append("ou: people\n\n");
+        var records = new List<LdifRecord>
+        {
+            new LdifContentRecord("dc=example,dc=org",
+                new LdifAttribute("objectClass", "dcObject", "organization"),
+                new LdifAttribute("dc", "example"),
+                new LdifAttribute("o", "Example")),
+            new LdifContentRecord("ou=people,dc=example,dc=org",
+                new LdifAttribute("objectClass", "organizationalUnit"),
+                new LdifAttribute("ou", "people")),
+        };
 
         for (var i = 0; i < userCount; i++)
         {
-            sb.Append($"dn: uid=user{i:D5},ou=people,dc=example,dc=org\n");
-            sb.Append("objectClass: inetOrgPerson\n");
-            sb.Append($"uid: user{i:D5}\n");
-            sb.Append($"cn: User {i:D5}\n");
-            sb.Append($"sn: Surname{i:D5}\n\n");
+            var uid = $"user{i:D5}";
+            records.Add(new LdifContentRecord($"uid={uid},ou=people,dc=example,dc=org",
+                new LdifAttribute("objectClass", "inetOrgPerson"),
+                new LdifAttribute("uid", uid),
+                new LdifAttribute("cn", $"User {i:D5}"),
+                new LdifAttribute("sn", $"Surname{i:D5}")));
         }
 
-        return sb.ToString();
+        return LdifWriter.WriteToString(records, new LdifWriterOptions { IncludeVersionLine = false });
     }
 
     private static int CountSubtreeEntries(string connectionString)
