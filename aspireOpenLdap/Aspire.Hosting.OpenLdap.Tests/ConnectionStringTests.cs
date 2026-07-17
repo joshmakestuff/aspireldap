@@ -68,6 +68,8 @@ public class ConnectionStringTests
     [InlineData("Endpoint=http://h:1389;BaseDN=a;BindDN=b;BindPassword=c")] // wrong scheme
     [InlineData("Endpoint=ldap://h:1389/path;BaseDN=a;BindDN=b;BindPassword=c")] // path
     [InlineData("Endpoint=ldap://h:1389?q=1;BaseDN=a;BindDN=b;BindPassword=c")] // query
+    [InlineData("Endpoint=ldap://user:pw@h:1389;BaseDN=a;BindDN=b;BindPassword=c")] // user info (ignored by LdapDirectoryIdentifier)
+    [InlineData("Endpoint=ldap://h:1389#frag;BaseDN=a;BindDN=b;BindPassword=c")] // fragment
     [InlineData("BaseDN=a;BindDN=b;BindPassword=c")] // missing endpoint
     [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"unterminated")] // bad quote
     [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"x\"tail")] // trailing junk

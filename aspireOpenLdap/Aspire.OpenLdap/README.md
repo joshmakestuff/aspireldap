@@ -66,6 +66,14 @@ builder.AddOpenLdapClient("ldap", settings =>
 
 The connection string is normally provided automatically by Aspire via `ConnectionStrings:{connectionName}`.
 
+### LDAPS trust
+
+When the connection string carries `CaCertFile=...` (the hosting integration appends it under `WithRequiredTls()`), connections trust that CA. The mechanism is platform-specific:
+
+- **Windows** — a managed callback validates the chain against the CA and that the certificate names the endpoint host. `settings.DisableTlsHostnameValidation` relaxes the hostname part only.
+- **Linux** — the CA is trusted natively by `libldap` via an OpenSSL hash-named certificate directory (staged automatically under the temp folder). `libldap` always validates the hostname, so `DisableTlsHostnameValidation` is rejected there.
+- **macOS** — Apple's `LDAP.framework` cannot trust a custom CA from managed code; connection creation fails with guidance. Set `settings.TrustConnectionStringCaCertificate = false` and add the CA to the system trust store out of band instead.
+
 ## Telemetry
 
 Operations issued through **`OpenLdapClient`** (resolve it from DI and call `Send` / `SendAsync` instead of using the raw `LdapConnection`) emit OpenTelemetry traces and metrics under the source/meter name **`Aspire.OpenLdap`**. `AddOpenLdapClient` registers the source and meter with the app's OpenTelemetry pipeline automatically, so they flow to whatever exporter you've configured (e.g. via Aspire's `AddServiceDefaults`).

@@ -27,6 +27,7 @@
     <Compile Include="..\Shared\OpenLdapNativeLibraryResolver.cs" Link="OpenLdapNativeLibraryResolver.cs" />
     <Compile Include="..\Shared\ConnectionStringQuoting.cs" Link="ConnectionStringQuoting.cs" />
     <Compile Include="..\Shared\OpenLdapCertificateValidation.cs" Link="OpenLdapCertificateValidation.cs" />
+    <Compile Include="..\Shared\OpenLdapUnixTlsTrust.cs" Link="OpenLdapUnixTlsTrust.cs" />
   </ItemGroup>
 
   <ItemGroup>
