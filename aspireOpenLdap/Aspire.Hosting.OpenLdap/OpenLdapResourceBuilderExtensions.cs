@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
+using LdifDotNet;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -125,7 +126,7 @@ public static class OpenLdapResourceBuilderExtensions
                 Success = true,
                 Data = new CommandResultData
                 {
-                    Value = $"cn={resource.AdminUsername},{resource.BaseDn}",
+                    Value = resource.AdminBindDn,
                     Format = CommandResultFormat.Text,
                     DisplayImmediately = true,
                 },
@@ -655,6 +656,70 @@ public static class OpenLdapResourceBuilderExtensions
         return builder;
     }
 
+    private const string GeneratedSeedRecordsContainerPath = "/ldifs/01-aspire-seed-records.ldif";
+
+    /// <summary>
+    /// Seeds the directory from LDIF records built with the <c>LdifDotNet</c> object model
+    /// (<see cref="LdifContentRecord"/>, <see cref="LdifAttribute"/>, …) — the escape hatch for
+    /// entries the typed helpers (<see cref="WithUser"/>, <see cref="WithGroup"/>, …) don't cover,
+    /// e.g. custom objectClasses or binary attributes. May be called multiple times; records
+    /// accumulate into one generated LDIF file loaded via <c>ldapadd</c> after the typed seed.
+    /// </summary>
+    /// <remarks>
+    /// Values are RFC 2849-encoded on write (base64 where required), so arbitrary strings and
+    /// binary data are safe. The file may hold either content records or change records, not a
+    /// mix — <c>LdifWriter</c> rejects mixed documents when the resource starts. Parent entries
+    /// must exist: the base-DN root is created automatically only when the typed seed helpers are
+    /// also used; otherwise include the root entry in the records.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithSeedRecords(
+        this IResourceBuilder<OpenLdapResource> builder,
+        params IEnumerable<LdifRecord> records)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(records);
+
+        var resource = builder.Resource;
+        if (resource.SeedRecords is null)
+        {
+            resource.SeedRecords = [];
+
+            // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
+            var seedDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-seed");
+            Directory.CreateDirectory(seedDir);
+            var recordsPath = Path.Combine(seedDir, $"{resource.Name}-seed-records.ldif");
+            resource.SeedRecordsFilePath = recordsPath;
+
+            // Bind-mount needs an existing file at start time; real content is written by the handler below.
+            if (!File.Exists(recordsPath))
+            {
+                File.WriteAllText(recordsPath, string.Empty);
+            }
+
+            builder.WithBindMount(recordsPath, GeneratedSeedRecordsContainerPath, isReadOnly: true);
+
+            builder.OnBeforeResourceStarted((res, _, ct) =>
+            {
+                if (res.SeedRecords is not { Count: > 0 } seedRecords || res.SeedRecordsFilePath is null)
+                {
+                    return Task.CompletedTask;
+                }
+                var ldif = LdifWriter.WriteToString(seedRecords, LdapSeedLdifGenerator.WriterOptions);
+                return File.WriteAllTextAsync(res.SeedRecordsFilePath, ldif, ct);
+            });
+        }
+
+        foreach (var record in records)
+        {
+            if (record is null)
+            {
+                throw new ArgumentException("Seed records must not contain null.", nameof(records));
+            }
+            resource.SeedRecords.Add(record);
+        }
+        return builder;
+    }
+
     /// <summary>
     /// Enables an OpenLDAP <paramref name="overlay"/> (opt-in). The overlay's <c>cn=config</c>
     /// entries (module load + config) are folded into the slapd bootstrap before the data load,
@@ -764,24 +829,22 @@ public static class OpenLdapResourceBuilderExtensions
     }
 
     // A single olcAccess modify on the mdb database, prepending the declared rules ({0}, {1}, …).
-    private static string GenerateAccessLdif(IReadOnlyList<string> rules)
+    // Applied online via ldapmodify inside the container.
+    internal static string GenerateAccessLdif(IReadOnlyList<string> rules)
     {
-        var lines = new List<string>
-        {
-            $"dn: {OpenLdapResource.MdbDatabaseDn}",
-            "changetype: modify",
-            "add: olcAccess",
-        };
-        for (var i = 0; i < rules.Count; i++)
-        {
-            lines.Add($"olcAccess: {{{i}}}{rules[i]}");
-        }
-        return string.Join('\n', lines) + "\n";
+        var record = new LdifModifyRecord(
+            OpenLdapResource.MdbDatabaseDn,
+            new LdifModification(
+                LdifModificationType.Add,
+                "olcAccess",
+                rules.Select((rule, i) => (LdifValue)$"{{{i}}}{rule}")));
+        return LdifWriter.WriteToString([record], LdapSeedLdifGenerator.WriterOptions);
     }
 
-    private static string GenerateOverlayLdif(IReadOnlyList<OpenLdapOverlay> overlays)
+    // Applied online via ldapadd inside the container.
+    internal static string GenerateOverlayLdif(IReadOnlyList<OpenLdapOverlay> overlays)
     {
-        var blocks = new List<string>();
+        var records = new List<LdifRecord>();
 
         // A single extra module list ({0} is the bootstrap one) carrying every overlay's modules.
         var modules = overlays
@@ -790,21 +853,17 @@ public static class OpenLdapResourceBuilderExtensions
             .ToList();
         if (modules.Count > 0)
         {
-            var moduleLines = new List<string>
-            {
-                "dn: cn=module{1},cn=config",
-                "objectClass: olcModuleList",
-                "cn: module{1}",
-                "olcModulePath: /usr/lib/ldap",
-            };
-            moduleLines.AddRange(modules.Select(m => $"olcModuleLoad: {m}"));
-            blocks.Add(string.Join('\n', moduleLines));
+            records.Add(new LdifContentRecord(
+                "cn=module{1},cn=config",
+                new LdifAttribute("objectClass", "olcModuleList"),
+                new LdifAttribute("cn", "module{1}"),
+                new LdifAttribute("olcModulePath", "/usr/lib/ldap"),
+                new LdifAttribute("olcModuleLoad", modules.Select(m => (LdifValue)m))));
         }
 
-        blocks.AddRange(overlays.Select(o => o.ToOverlayEntryLdif(OpenLdapResource.MdbDatabaseDn).TrimEnd('\n')));
+        records.AddRange(overlays.Select(o => o.ToOverlayEntry(OpenLdapResource.MdbDatabaseDn)));
 
-        // Blank line between entries; trailing newline so a clean append to slapd.ldif.
-        return string.Join("\n\n", blocks) + "\n";
+        return LdifWriter.WriteToString(records, LdapSeedLdifGenerator.WriterOptions);
     }
 
     private static LdapSeedModel GetOrInitializeSeedModel(IResourceBuilder<OpenLdapResource> builder)
@@ -938,7 +997,7 @@ public static class OpenLdapResourceBuilderExtensions
                     ? OpenLdapResource.DefaultLdapsTargetPort
                     : OpenLdapResource.DefaultLdapTargetPort).ToString(CultureInfo.InvariantCulture);
                 context.EnvironmentVariables["LDAP_BASE_DN"] = parent.BaseDn;
-                context.EnvironmentVariables["LDAP_USERNAME"] = $"cn={parent.AdminUsername},{parent.BaseDn}";
+                context.EnvironmentVariables["LDAP_USERNAME"] = parent.AdminBindDn;
                 context.EnvironmentVariables["LDAP_PASSWORD"] = parent.AdminPasswordParameter;
 
                 if (parent.TlsRequired)

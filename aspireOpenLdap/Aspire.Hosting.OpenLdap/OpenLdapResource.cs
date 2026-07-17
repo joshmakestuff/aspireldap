@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
+using LdifDotNet;
 using ConnectionStringQuoting = Aspire.Hosting.OpenLdap.ConnectionStringQuoting;
 
 namespace Aspire.Hosting.ApplicationModel;
@@ -33,7 +34,7 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     internal const string DefaultBaseDn = "dc=example,dc=org";
     internal const string DataPath = "/data/openldap";
 
-    /// <summary>Container path of the generated overlay LDIF the init script folds into slapd.ldif.</summary>
+    /// <summary>Container path of the generated overlay LDIF the init script applies online (ldapadd).</summary>
     internal const string GeneratedOverlayContainerPath = "/overlays.ldif";
 
     /// <summary>Container path of the generated access-control LDIF the init script applies online (ldapmodify).</summary>
@@ -71,6 +72,13 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// <summary>The admin username (CN component). Admin DN = <c>cn={AdminUsername},{BaseDn}</c>. Override with <c>WithAdminUsername(...)</c>.</summary>
     public string AdminUsername { get; internal set; }
 
+    /// <summary>
+    /// The admin bind DN, <c>cn={AdminUsername},{BaseDn}</c>, composed through the RFC 4514 DN
+    /// builder so a username (or base DN) containing a comma or other special character escapes
+    /// correctly instead of silently producing a broken DN.
+    /// </summary>
+    internal string AdminBindDn => Dn.Combine(Dn.Rdn("cn", AdminUsername), BaseDn);
+
     /// <summary>Parameter resource backing the admin password. Auto-generated when the caller does not supply one.</summary>
     public ParameterResource AdminPasswordParameter { get; }
 
@@ -97,6 +105,15 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
 
     /// <summary>Host filesystem path of the generated seed LDIF. Set alongside <see cref="SeedModel"/>.</summary>
     internal string? SeedFilePath { get; set; }
+
+    /// <summary>
+    /// Raw LDIF records declared via <c>WithSeedRecords(...)</c>, written as a generated LDIF at
+    /// <c>BeforeResourceStarted</c> time and loaded after the typed seed. Null until the first call.
+    /// </summary>
+    internal List<LdifRecord>? SeedRecords { get; set; }
+
+    /// <summary>Host filesystem path of the generated record-seed LDIF. Set alongside <see cref="SeedRecords"/>.</summary>
+    internal string? SeedRecordsFilePath { get; set; }
 
     /// <summary>Opt-in overlays declared via <c>WithOverlay(...)</c>, emitted as cn=config at start. Null until the first call.</summary>
     internal List<OpenLdapOverlay>? Overlays { get; set; }
@@ -136,7 +153,7 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
             var scheme = TlsRequired ? "ldaps" : "ldap";
             var endpoint = TlsRequired ? LdapsEndpoint : LdapEndpoint;
             var baseDn = ConnectionStringQuoting.Quote(BaseDn);
-            var bindDn = ConnectionStringQuoting.Quote($"cn={AdminUsername},{BaseDn}");
+            var bindDn = ConnectionStringQuoting.Quote(AdminBindDn);
             var password = new QuotedParameterValue(AdminPasswordParameter);
             var caSuffix = TlsEnabled && CaCertHostPath is not null
                 ? $";CaCertFile={ConnectionStringQuoting.Quote(CaCertHostPath)}"

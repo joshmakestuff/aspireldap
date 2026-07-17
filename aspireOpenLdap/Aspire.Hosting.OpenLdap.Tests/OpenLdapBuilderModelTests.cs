@@ -81,6 +81,25 @@ public class OpenLdapBuilderModelTests
     }
 
     [Fact]
+    public void WithSeedRecords_Mounts_One_Generated_File_And_Accumulates_Records()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap")
+            .WithSeedRecords(new LdifDotNet.LdifContentRecord("dc=example,dc=org",
+                new LdifDotNet.LdifAttribute("objectClass", "organization"),
+                new LdifDotNet.LdifAttribute("o", "example")))
+            .WithSeedRecords(new LdifDotNet.LdifContentRecord("ou=custom,dc=example,dc=org",
+                new LdifDotNet.LdifAttribute("objectClass", "organizationalUnit"),
+                new LdifDotNet.LdifAttribute("ou", "custom")));
+
+        var mount = Assert.Single(
+            ldap.Resource.Annotations.OfType<ContainerMountAnnotation>(),
+            m => m.Target == "/ldifs/01-aspire-seed-records.ldif");
+        Assert.True(mount.IsReadOnly);
+        Assert.Equal(2, ldap.Resource.SeedRecords!.Count);
+    }
+
+    [Fact]
     public void WithTls_Missing_File_Fails_At_Model_Construction()
     {
         var builder = DistributedApplication.CreateBuilder();

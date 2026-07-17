@@ -1,4 +1,4 @@
-using System.Text;
+using LdifDotNet;
 
 namespace Aspire.Hosting.ApplicationModel;
 
@@ -54,18 +54,18 @@ public sealed class OpenLdapOverlay
         ],
         };
 
-    /// <summary>Renders this overlay's <c>cn=config</c> entry against the given database DN.</summary>
-    internal string ToOverlayEntryLdif(string databaseDn)
+    /// <summary>Builds this overlay's <c>cn=config</c> entry against the given database DN.</summary>
+    internal LdifContentRecord ToOverlayEntry(string databaseDn)
     {
-        var sb = new StringBuilder();
-        sb.Append("dn: olcOverlay=").Append(Name).Append(',').AppendLine(databaseDn);
-        sb.AppendLine("objectClass: olcOverlayConfig");
-        sb.Append("objectClass: ").AppendLine(OverlayObjectClass);
-        sb.Append("olcOverlay: ").AppendLine(Name);
+        var attributes = new List<LdifAttribute>
+        {
+            new("objectClass", "olcOverlayConfig", OverlayObjectClass),
+            new("olcOverlay", Name),
+        };
         foreach (var attr in Attributes)
         {
-            sb.Append(attr.Key).Append(": ").AppendLine(attr.Value);
+            attributes.Add(new(attr.Key, attr.Value));
         }
-        return sb.ToString();
+        return new LdifContentRecord($"olcOverlay={Name},{databaseDn}", attributes);
     }
 }

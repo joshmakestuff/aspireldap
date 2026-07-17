@@ -31,7 +31,9 @@ builder.Build().Run();
 
 - `WithDataVolume(...)` / `WithDataBindMount(...)` — persist directory data across runs. The default volume name is scoped to the AppHost (`{apphost}-{hash}-{resource}-data`); pass an explicit name to share a volume across AppHosts.
 - `WithSchema(...)` / `WithSchemas(...)` — apply custom LDIF schemas.
-- `WithSeedData(...)` / `WithCustomLdifsBindMount(...)` — seed entries on first start.
+- `WithSeedData(...)` / `WithCustomLdifsBindMount(...)` — seed entries from your own LDIF files on first start.
+- `WithOrganizationalUnit(...)` / `WithUser(...)` / `WithGroup(...)` — declare a typed seed tree in the AppHost; the LDIF is generated for you.
+- `WithSeedRecords(...)` — seed arbitrary entries built with the [LdifDotNet](https://www.nuget.org/packages/LdifDotNet) record model (custom objectClasses, binary attributes) without hand-writing LDIF.
 - `WithAnonymousBinding(...)` — allow unauthenticated binds.
 - `WithTls(...)` / `WithRequiredTls(...)` — enable LDAPS; auto-generates a self-signed cert if you don't supply one.
 - `WithPhpLdapAdmin(...)` — add a sibling phpLDAPadmin UI container.

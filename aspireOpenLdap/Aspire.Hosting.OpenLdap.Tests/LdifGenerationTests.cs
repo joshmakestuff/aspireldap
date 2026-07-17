@@ -1,68 +1,28 @@
-using System.Text;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
-public class LdifEncoderTests
+public class AdminBindDnTests
 {
-    private static string Encode(string attribute, string value)
-    {
-        var sb = new StringBuilder();
-        LdifEncoder.AppendAttribute(sb, attribute, value, "\n");
-        return sb.ToString().TrimEnd('\n');
-    }
+    private static OpenLdapResource CreateResource(string adminUsername, string baseDn)
+        => new("ldap", baseDn, adminUsername, new ParameterResource("pw", _ => "secret", secret: true));
 
-    [Theory]
-    [InlineData("Alice Smith")]
-    [InlineData("O'Brien-D.")]
-    [InlineData("with = equals")]
-    [InlineData("trailing:colon ok if not leading")]
-    public void Safe_Values_Stay_Plain(string value)
+    [Fact]
+    public void AdminBindDn_Composes_Plain_Username_And_Base_Dn()
     {
-        Assert.Equal($"cn: {value}", Encode("cn", value));
-    }
-
-    [Theory]
-    [InlineData(" leading space")]
-    [InlineData("trailing space ")]
-    [InlineData(":leading colon")]
-    [InlineData("<leading angle")]
-    [InlineData("embedded\nnewline")]
-    [InlineData("embedded\rcarriage")]
-    [InlineData("nul\0char")]
-    [InlineData("Seán Ó Briain")]
-    [InlineData("日本語")]
-    public void Unsafe_Values_Are_Base64_Encoded(string value)
-    {
-        var line = Encode("cn", value);
-        Assert.StartsWith("cn:: ", line);
-        var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(line["cn:: ".Length..]));
-        Assert.Equal(value, decoded);
+        var resource = CreateResource("admin", "dc=example,dc=org");
+        Assert.Equal("cn=admin,dc=example,dc=org", resource.AdminBindDn);
     }
 
     [Fact]
-    public void Newline_Value_Cannot_Inject_Extra_Attributes()
+    public void AdminBindDn_Escapes_A_Comma_In_The_Username()
     {
-        var line = Encode("cn", "user\nuserPassword: injected");
-        Assert.DoesNotContain("\nuserPassword", line);
-        Assert.StartsWith("cn:: ", line);
-    }
-
-    [Theory]
-    [InlineData("plain", "plain")]
-    [InlineData("a,b", "a\\,b")]
-    [InlineData("a+b;c", "a\\+b\\;c")]
-    [InlineData("a\\b", "a\\\\b")]
-    [InlineData("\"quoted\"", "\\\"quoted\\\"")]
-    [InlineData("<angles>", "\\<angles\\>")]
-    [InlineData("#leading", "\\#leading")]
-    [InlineData(" pad ", "\\ pad\\ ")]
-    [InlineData("mid#hash ok", "mid#hash ok")]
-    public void EscapeDnValue_Follows_Rfc4514(string input, string expected)
-    {
-        Assert.Equal(expected, LdifEncoder.EscapeDnValue(input));
+        // Previously $"cn={AdminUsername},{BaseDn}" produced a silently broken DN whose
+        // cn RDN ended at the first comma. The compose API escapes it instead.
+        var resource = CreateResource("Doe, John", "dc=example,dc=org");
+        Assert.Equal("cn=Doe\\, John,dc=example,dc=org", resource.AdminBindDn);
     }
 }
 
@@ -125,5 +85,71 @@ public class LdapSeedLdifGeneratorTests
 
         Assert.Contains("dn:: ", ldif);
         Assert.DoesNotContain("dn: ou=people,dc=büro", ldif);
+    }
+
+    [Fact]
+    public void Root_Entry_Handles_Escaped_Comma_In_Base_Dn_Value()
+    {
+        // A base DN whose o value contains an escaped comma used to split mid-value:
+        // the old splitter yielded o="Acme\" instead of the real value. Dn.Parse unescapes it.
+        var resource = CreateResource("o=Acme\\, Inc.,c=US");
+        var model = new LdapSeedModel();
+
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        Assert.Contains("dn: o=Acme\\, Inc.,c=US\n", ldif);
+        Assert.Contains("objectClass: organization\n", ldif);
+        Assert.Contains("o: Acme, Inc.\n", ldif);
+    }
+
+    [Fact]
+    public void Generated_Seed_Has_No_Version_Line_And_Uses_Lf_Only()
+    {
+        var resource = CreateResource();
+        var model = new LdapSeedModel();
+        model.Users.Add(new SeedUserEntry("user01", "password1", null, "User One", "One", null));
+
+        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+
+        Assert.DoesNotContain("version:", ldif);
+        Assert.DoesNotContain('\r', ldif);
+    }
+}
+
+public class ConfigLdifGenerationTests
+{
+    [Fact]
+    public void Overlay_Ldif_Contains_Module_List_And_Overlay_Entry()
+    {
+        var overlay = OpenLdapOverlay.MemberOf("groupOfNames", "member");
+
+        var ldif = OpenLdapResourceBuilderExtensions.GenerateOverlayLdif([overlay]);
+
+        Assert.DoesNotContain("version:", ldif);
+        Assert.Contains("dn: cn=module{1},cn=config\n", ldif);
+        Assert.Contains("olcModuleLoad: memberof.so\n", ldif);
+        Assert.Contains("\n\ndn: olcOverlay=memberof,olcDatabase={2}mdb,cn=config\n", ldif);
+        Assert.Contains("objectClass: olcOverlayConfig\n", ldif);
+        Assert.Contains("objectClass: olcMemberOf\n", ldif);
+        Assert.Contains("olcOverlay: memberof\n", ldif);
+        Assert.Contains("olcMemberOfGroupOC: groupOfNames\n", ldif);
+        Assert.EndsWith("\n", ldif);
+    }
+
+    [Fact]
+    public void Access_Ldif_Is_A_Single_Modify_With_Ordered_Rules()
+    {
+        var ldif = OpenLdapResourceBuilderExtensions.GenerateAccessLdif(
+        [
+            "to dn.subtree=\"ou=entity,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=entity,dc=example,dc=org\" write by * break",
+            "to attrs=userPassword by self write by * break",
+        ]);
+
+        Assert.DoesNotContain("version:", ldif);
+        Assert.Contains("dn: olcDatabase={2}mdb,cn=config\n", ldif);
+        Assert.Contains("changetype: modify\n", ldif);
+        Assert.Contains("add: olcAccess\n", ldif);
+        Assert.Contains("olcAccess: {0}to dn.subtree=\"ou=entity,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=entity,dc=example,dc=org\" write by * break\n", ldif);
+        Assert.Contains("olcAccess: {1}to attrs=userPassword by self write by * break\n", ldif);
     }
 }
