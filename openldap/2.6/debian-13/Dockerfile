@@ -1,8 +1,8 @@
-# OpenLDAP 2.6 on Debian 12 (Bookworm)
+# OpenLDAP 2.6 on Debian 13 (Trixie)
 # Forked from Bitnami OpenLDAP, rewritten to use stock Debian packages.
 # SPDX-License-Identifier: Apache-2.0
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 LABEL org.opencontainers.image.title="openldap" \
       org.opencontainers.image.description="OpenLDAP server based on stock Debian packages" \
@@ -25,6 +25,11 @@ RUN echo 'slapd slapd/no_configuration boolean true' | debconf-set-selections &&
         psmisc && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# The directory name, image label, and docs all advertise OpenLDAP 2.6 — fail the build if
+# the base image ever drifts to a different major.minor (slapd -VV exits nonzero by design).
+RUN (/usr/sbin/slapd -VV 2>&1 || true) | grep -E 'slapd 2\.6' \
+    || { echo "FATAL: installed slapd is not OpenLDAP 2.6:"; (/usr/sbin/slapd -VV 2>&1 || true); exit 1; }
 
 # Create data and config directories on the volume mount path
 RUN mkdir -p /data/openldap/data \

@@ -15,6 +15,9 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- The warning baseline is zero; keep it that way where it matters. GitHub Actions
+         sets CI=true, so local builds stay lenient while CI fails on any new warning. -->
+    <TreatWarningsAsErrors Condition="'$(CI)' == 'true'">true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">

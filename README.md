@@ -79,4 +79,4 @@ On **Linux**, the client and the hosting health check use `System.DirectoryServi
 
 ## License
 
-[MIT](LICENSE). Icon from [iconoir](https://iconoir.com/), MIT licensed.
+The .NET libraries (`aspireOpenLdap/`, `examples/`) are [MIT](LICENSE). The bundled OpenLDAP container sources (`openldap/`) are derived from the Bitnami OpenLDAP container and are [Apache-2.0](openldap/LICENSE) — see [openldap/NOTICE](openldap/NOTICE). The `JoshMakeStuff.Aspire.Hosting.OpenLdap` package, which ships both, is licensed `MIT AND Apache-2.0`. Icon from [iconoir](https://iconoir.com/), MIT licensed.

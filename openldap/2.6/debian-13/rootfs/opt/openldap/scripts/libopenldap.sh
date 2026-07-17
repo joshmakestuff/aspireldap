@@ -513,9 +513,11 @@ ldap_add_schemas() {
 ########################
 ldap_add_custom_schema() {
     info "Adding custom schema: $LDAP_CUSTOM_SCHEMA_FILE"
-    debug_execute slapadd -F "$LDAP_ONLINE_CONF_DIR" -n 0 -l "$LDAP_CUSTOM_SCHEMA_FILE"
+    # slapadd is an offline tool — stop slapd before it touches the config database,
+    # then bring slapd back up with the new schema in place.
     ldap_stop
     while is_ldap_running; do sleep 1; done
+    debug_execute slapadd -F "$LDAP_ONLINE_CONF_DIR" -n 0 -l "$LDAP_CUSTOM_SCHEMA_FILE"
     ldap_start_bg
 }
 
@@ -524,11 +526,14 @@ ldap_add_custom_schema() {
 ########################
 ldap_add_custom_schemas() {
     info "Adding custom schemas from: $LDAP_CUSTOM_SCHEMA_DIR"
+    # slapadd is an offline tool — stop slapd before it touches the config database,
+    # load every schema file (sorted, so dependencies can be ordered by prefix), then
+    # bring slapd back up.
+    ldap_stop
+    while is_ldap_running; do sleep 1; done
     find "$LDAP_CUSTOM_SCHEMA_DIR" -maxdepth 1 \( -type f -o -type l \) -iname '*.ldif' -print0 | sort -z | while IFS= read -r -d '' schema_file; do
         debug_execute slapadd -F "$LDAP_ONLINE_CONF_DIR" -n 0 -l "$schema_file"
     done
-    ldap_stop
-    while is_ldap_running; do sleep 1; done
     ldap_start_bg
 }
 

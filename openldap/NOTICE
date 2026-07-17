@@ -1,0 +1,18 @@
+AspireLdap bundled OpenLDAP container sources
+==============================================
+
+The Dockerfile and shell scripts in this directory (openldap/) are derived from
+the Bitnami OpenLDAP container:
+
+    https://github.com/bitnami/containers/tree/main/bitnami/openldap
+    Copyright Broadcom, Inc. All Rights Reserved.
+    Licensed under the Apache License, Version 2.0.
+
+They were rewritten for this project to install OpenLDAP from stock Debian
+packages instead of Bitnami-distributed binaries, but remain a derivative work
+and are distributed under the Apache License, Version 2.0 (see the LICENSE file
+in this directory).
+
+The rest of this repository (the .NET libraries under aspireOpenLdap/ and
+examples/) is licensed under the MIT License (see the LICENSE file at the
+repository root).

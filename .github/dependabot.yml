@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directories:
+      - "/aspireOpenLdap"
+      - "/examples"
+    schedule:
+      interval: "weekly"
+    groups:
+      # One PR per week covering the whole .NET dependency surface; the full test
+      # suite (including Docker-backed integration tests) gates the merge.
+      dotnet-and-aspire:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/openldap/2.6/debian-13"
+    schedule:
+      interval: "weekly"

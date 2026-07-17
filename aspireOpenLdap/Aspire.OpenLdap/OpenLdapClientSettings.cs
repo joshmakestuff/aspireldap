@@ -30,6 +30,14 @@ public sealed class OpenLdapClientSettings
     /// </summary>
     public bool TrustConnectionStringCaCertificate { get; set; } = true;
 
+    /// <summary>
+    /// Disables server-certificate hostname validation for LDAPS connections that trust the
+    /// connection string's CA (<see cref="TrustConnectionStringCaCertificate"/>). By default the
+    /// certificate must both chain to that CA and name the endpoint host. Only enable this for
+    /// local development against a certificate that does not name the host you connect to.
+    /// </summary>
+    public bool DisableTlsHostnameValidation { get; set; }
+
     /// <summary>Connection timeout. Default 30 seconds.</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 }

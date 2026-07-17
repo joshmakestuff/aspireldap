@@ -2,7 +2,13 @@ using System.DirectoryServices.Protocols;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
+// Compiled into both assemblies under distinct namespaces so the two internal copies never
+// collide (CS0433) in a project that can see both assemblies' internals (e.g. the test project).
+#if ASPIRE_HOSTING_OPENLDAP
+namespace Aspire.Hosting.OpenLdap;
+#else
 namespace Aspire.OpenLdap;
+#endif
 
 /// <summary>
 /// Makes <c>System.DirectoryServices.Protocols</c> load on Linux distros that ship OpenLDAP 2.6+.
