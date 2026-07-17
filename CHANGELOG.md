@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0-preview.1 — 2026-07-17
 
 Fixes stemming from a 2026-07 adversarial code review (findings referenced as F01–F14 in PR #15).
 
