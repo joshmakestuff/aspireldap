@@ -41,7 +41,10 @@ internal static class LdapSeedLdifGenerator
             {
                 attributes.Add(new("mail", user.Mail));
             }
-            attributes.Add(new("userPassword", user.Password));
+            // Stored hashed ({SSHA}) so the directory never holds the cleartext at rest;
+            // slapd verifies binds against the hash natively. Pre-hashed values ({SCHEME}...)
+            // pass through verbatim.
+            attributes.Add(new("userPassword", LdapPasswordHasher.ToUserPasswordValue(user.Password)));
             records.Add(new LdifContentRecord(UserDn(resource, user), attributes));
         }
 
