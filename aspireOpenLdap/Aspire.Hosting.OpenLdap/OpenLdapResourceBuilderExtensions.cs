@@ -940,6 +940,51 @@ public static class OpenLdapResourceBuilderExtensions
         return builder.WithBindMount(source, "/ldifs", isReadOnly);
     }
 
+    private const OpenLdapLogLevel KnownLogLevels =
+        OpenLdapLogLevel.Trace | OpenLdapLogLevel.Packets | OpenLdapLogLevel.Args |
+        OpenLdapLogLevel.Connections | OpenLdapLogLevel.Ber | OpenLdapLogLevel.Filter |
+        OpenLdapLogLevel.Config | OpenLdapLogLevel.Acl | OpenLdapLogLevel.Stats |
+        OpenLdapLogLevel.StatsExtra | OpenLdapLogLevel.Shell | OpenLdapLogLevel.Parse |
+        OpenLdapLogLevel.Sync | OpenLdapLogLevel.Urgent;
+
+    /// <summary>
+    /// Sets slapd's debug log level (<c>LDAP_LOGLEVEL</c>). Defaults to
+    /// <see cref="OpenLdapLogLevel.Stats"/> — connection/operation/result lines. Combine flags
+    /// for more detail (e.g. <c>Stats | Config</c>), or pass <see cref="OpenLdapLogLevel.None"/>
+    /// to silence slapd's debug output entirely.
+    /// </summary>
+    /// <remarks>
+    /// Health-check probe connections are filtered out of the stats log independently of this
+    /// level — see <see cref="WithHealthCheckProbeLogging"/> to bring them back.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithLogLevel(
+        this IResourceBuilder<OpenLdapResource> builder,
+        OpenLdapLogLevel level)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        if ((level & ~KnownLogLevels) != OpenLdapLogLevel.None)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(level), level, "Value contains bits that are not defined slapd log levels.");
+        }
+        return builder.WithEnvironment("LDAP_LOGLEVEL", ((int)level).ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// Keeps the AppHost health-check probe's connection lines in the container log
+    /// (<c>LDAP_LOG_HEALTH_PROBES</c>). By default the container drops the stats-log block of
+    /// each wholly-successful probe (identified by the <c>aspire-healthcheck</c> sentinel
+    /// attribute in its root DSE search) so continuous polling doesn't drown out real traffic;
+    /// probes that fail in any way are always logged in full.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithHealthCheckProbeLogging(
+        this IResourceBuilder<OpenLdapResource> builder,
+        bool enabled = true)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder.WithEnvironment("LDAP_LOG_HEALTH_PROBES", enabled ? "yes" : "no");
+    }
+
     /// <summary>
     /// Enables anonymous LDAP binding on the container.
     /// </summary>

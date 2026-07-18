@@ -219,6 +219,44 @@ public class OpenLdapBuilderModelTests
         }
     }
 
+    [Theory]
+    [InlineData(OpenLdapLogLevel.None, "0")]
+    [InlineData(OpenLdapLogLevel.Stats, "256")]
+    [InlineData(OpenLdapLogLevel.Stats | OpenLdapLogLevel.Config, "320")]
+    [InlineData(OpenLdapLogLevel.Urgent, "32768")]
+    public async Task WithLogLevel_Sets_Ldap_Loglevel_Env(OpenLdapLogLevel level, string expected)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap").WithLogLevel(level);
+
+        var env = await EvaluateEnvironmentAsync(ldap.Resource);
+        Assert.Equal(expected, env["LDAP_LOGLEVEL"]);
+    }
+
+    [Theory]
+    [InlineData(4096)]  // gap in slapd's defined levels
+    [InlineData(8192)]
+    [InlineData(-1)]
+    public void WithLogLevel_Rejects_Undefined_Bits(int raw)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap");
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ldap.WithLogLevel((OpenLdapLogLevel)raw));
+    }
+
+    [Theory]
+    [InlineData(true, "yes")]
+    [InlineData(false, "no")]
+    public async Task WithHealthCheckProbeLogging_Sets_Env(bool enabled, string expected)
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap").WithHealthCheckProbeLogging(enabled);
+
+        var env = await EvaluateEnvironmentAsync(ldap.Resource);
+        Assert.Equal(expected, env["LDAP_LOG_HEALTH_PROBES"]);
+    }
+
     private static async Task<Dictionary<string, string>> EvaluateEnvironmentAsync(IResource resource)
     {
         var context = new EnvironmentCallbackContext(

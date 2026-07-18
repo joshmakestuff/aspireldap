@@ -220,6 +220,9 @@ export LDAP_REQUIRE_TLS="${LDAP_REQUIRE_TLS:-no}"
 export LDAP_ULIMIT_NOFILES="${LDAP_ULIMIT_NOFILES:-1024}"
 export LDAP_ALLOW_ANON_BINDING="${LDAP_ALLOW_ANON_BINDING:-yes}"
 export LDAP_LOGLEVEL="${LDAP_LOGLEVEL:-256}"
+# Aspire health-check probe connections are dropped from the stats log by default
+# (see probe_log_filter.sh); set to yes to log them like any other connection.
+export LDAP_LOG_HEALTH_PROBES="${LDAP_LOG_HEALTH_PROBES:-no}"
 export LDAP_PASSWORD_HASH="${LDAP_PASSWORD_HASH:-{SSHA\}}"
 export LDAP_CONFIGURE_PPOLICY="${LDAP_CONFIGURE_PPOLICY:-no}"
 export LDAP_PPOLICY_USE_LOCKOUT="${LDAP_PPOLICY_USE_LOCKOUT:-no}"

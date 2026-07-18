@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Health-check probe traffic no longer floods the container log** (#31). The Aspire health
+  check polls continuously, and at the default `stats` log level each probe emitted a ~7-line
+  `conn=N` block — drowning real activity in the dashboard's console view. The container now
+  pipes slapd's log through a sentinel-aware filter that drops each probe's block. The filter
+  is strictly fail-open: a block is discarded only after the connection completed as a
+  wholly-successful probe (sentinel attribute present, every result `err=0`, clean unbind and
+  close); any deviation — a nonzero result, an unexpected operation, slapd exiting mid-probe —
+  flushes the withheld lines verbatim, and a crashed filter falls back to a passthrough `cat`
+  so slapd never loses its stderr. Restore probe logging with `WithHealthCheckProbeLogging()`
+  (`LDAP_LOG_HEALTH_PROBES=yes` standalone).
+- `WithLogLevel(OpenLdapLogLevel)` — typed control over slapd's debug log level
+  (`LDAP_LOGLEVEL`), previously not settable from the AppHost. Flags map to slapd's
+  documented bits (`Stats` is the container default); undefined bits are rejected at the
+  fluent call.
+
 ## 0.5.0-preview.1 — 2026-07-18
 
 Fixes from a second (2026-07-17) adversarial code review, findings F01–F08, plus adoption of
