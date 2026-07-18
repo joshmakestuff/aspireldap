@@ -2,10 +2,11 @@
 # Filters the Aspire health-check probe's connection blocks out of slapd's stats log.
 # SPDX-License-Identifier: Apache-2.0
 #
-# The AppHost health check marks itself by requesting a sentinel attribute
-# ("aspire-healthcheck") in its root-DSE search; slapd logs the attribute list verbatim
-# on the "SRCH attr=" line. Reads slapd's stderr on stdin; run.sh routes the output back
-# to the container's stderr.
+# The AppHost health check marks its root-DSE search twice: it requests a sentinel
+# attribute ("aspire-healthcheck"), which slapd logs verbatim on the "SRCH attr=" line,
+# and it carries a no-op "(cn=aspire-healthcheck)" branch in its search filter, which
+# slapd logs on the "SRCH base=" line. Either marker classifies the connection. Reads
+# slapd's stderr on stdin; run.sh routes the output back to the container's stderr.
 #
 # Fail-open contract: a connection's lines are discarded ONLY once the connection has
 # completed as a wholly-successful probe — every line matched a probe shape (results all
@@ -16,12 +17,17 @@
 
 set -o nounset
 
-# Probe shapes before the sentinel line: ACCEPT, TLS handshake, admin bind, root-DSE search.
+# Probe shapes before a sentinel line: ACCEPT, TLS handshake, admin bind, root-DSE search.
 readonly PREFIX_RE='conn=[0-9]+ (fd=[0-9]+ (ACCEPT|TLS established)|op=0 BIND |op=0 RESULT tag=97 err=0( |$)|op=[0-9]+ SRCH base="" scope=0 )'
-# The sentinel: an attribute list containing the marker, logged verbatim by slapd.
-readonly SENTINEL_RE='conn=[0-9]+ op=[0-9]+ SRCH attr=.*aspire-healthcheck'
-# Probe shapes after the sentinel line: successful search result, unbind.
-readonly TAIL_RE='conn=[0-9]+ op=[0-9]+ (SEARCH RESULT tag=101 err=0( |$)|UNBIND)'
+# The sentinels, either of which classifies a pending conn as a probe:
+# - an attribute list containing the marker, logged verbatim by slapd;
+# - the marker branch of the probe's search filter, on a root-DSE search only (slapd
+#   case-normalizes assertion values, so the token must stay lowercase).
+readonly SENTINEL_ATTR_RE='conn=[0-9]+ op=[0-9]+ SRCH attr=.*aspire-healthcheck'
+readonly SENTINEL_FILTER_RE='conn=[0-9]+ op=[0-9]+ SRCH base="" scope=0 deref=[0-9]+ filter="\(\|\(objectClass=\*\)\(cn=aspire-healthcheck\)\)"'
+# Probe shapes after the classifying line: the probe's own attribute list (present when the
+# filter sentinel classified first), successful search result, unbind.
+readonly TAIL_RE='conn=[0-9]+ op=[0-9]+ (SRCH attr=|SEARCH RESULT tag=101 err=0( |$)|UNBIND)'
 # Clean close ("closed (connection lost)" etc. deliberately does not match).
 readonly CLOSED_RE='conn=[0-9]+ fd=[0-9]+ closed$'
 
@@ -89,7 +95,7 @@ while true; do
                 [[ "$line" == *" closed"* ]] && forget_conn "$id"
                 ;;
             pending)
-                if [[ "$line" =~ $SENTINEL_RE ]]; then
+                if [[ "$line" =~ $SENTINEL_ATTR_RE ]] || [[ "$line" =~ $SENTINEL_FILTER_RE ]]; then
                     conn_state[$id]="probe"
                     withhold "$id" "$line"
                     continue

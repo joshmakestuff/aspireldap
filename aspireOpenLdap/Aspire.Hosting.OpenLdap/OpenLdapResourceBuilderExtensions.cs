@@ -1074,10 +1074,12 @@ public static class OpenLdapResourceBuilderExtensions
                     context.EnvironmentVariables["LDAPTLS_REQCERT"] = "never";
                 }
             })
-            // The login page only renders 200 when the LDAP bind succeeds (it does a root-DSE
-            // query during page construction), so this also doubles as an end-to-end connectivity
-            // probe between the admin container and the LDAP server.
-            .WithHttpHealthCheck(path: "/", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)
+            // Deliberately a static asset, not the login page: the login page performs a real
+            // admin bind + root-DSE query on every render, so health-polling it flooded the
+            // LDAP container's log with un-filterable query noise (#31). LDAP connectivity is
+            // covered by the parent resource's own health check plus WaitFor below; this check
+            // only proves the admin container serves HTTP.
+            .WithHttpHealthCheck(path: "/robots.txt", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)
             .WaitFor(builder);
 
         configureContainer?.Invoke(admin);

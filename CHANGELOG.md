@@ -7,13 +7,23 @@
 - **Health-check probe traffic no longer floods the container log** (#31). The Aspire health
   check polls continuously, and at the default `stats` log level each probe emitted a ~7-line
   `conn=N` block — drowning real activity in the dashboard's console view. The container now
-  pipes slapd's log through a sentinel-aware filter that drops each probe's block. The filter
-  is strictly fail-open: a block is discarded only after the connection completed as a
-  wholly-successful probe (sentinel attribute present, every result `err=0`, clean unbind and
-  close); any deviation — a nonzero result, an unexpected operation, slapd exiting mid-probe —
-  flushes the withheld lines verbatim, and a crashed filter falls back to a passthrough `cat`
-  so slapd never loses its stderr. Restore probe logging with `WithHealthCheckProbeLogging()`
+  pipes slapd's log through a sentinel-aware filter that drops each probe's block. The probe
+  marks itself twice — the `aspire-healthcheck` sentinel attribute (logged on the `SRCH attr=`
+  line) and a no-op `(cn=aspire-healthcheck)` branch in its search filter (logged on the
+  `SRCH base=` line) — and either marker classifies the connection, on root-DSE searches only.
+  The filter is strictly fail-open: a block is discarded only after the connection completed as
+  a wholly-successful probe (marker present, every result `err=0`, clean unbind and close); any
+  deviation — a nonzero result, an unexpected operation, slapd exiting mid-probe — flushes the
+  withheld lines verbatim, and a crashed filter falls back to a passthrough `cat` so slapd
+  never loses its stderr. Restore probe logging with `WithHealthCheckProbeLogging()`
   (`LDAP_LOG_HEALTH_PROBES=yes` standalone).
+- **phpLDAPadmin's health check no longer generates LDAP query noise.** `WithPhpLdapAdmin`
+  health-checked the login page, which performs a real admin bind + root-DSE query on every
+  render — a continuous, un-filterable stream of `conn=N` blocks in the LDAP container's log.
+  The health check now polls the static `/robots.txt` (verified served without touching LDAP).
+  Behavior note: the admin container's health state no longer implies end-to-end LDAP
+  connectivity — that remains covered by the LDAP resource's own health check, which the admin
+  container `WaitFor`s.
 - `WithLogLevel(OpenLdapLogLevel)` — typed control over slapd's debug log level
   (`LDAP_LOGLEVEL`), previously not settable from the AppHost. Flags map to slapd's
   documented bits (`Stats` is the container default); undefined bits are rejected at the

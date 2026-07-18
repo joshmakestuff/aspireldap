@@ -28,9 +28,10 @@ public class ProbeLogFilterTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BuildBundledImageAsync(cts.Token);
 
-        // conn=1000: successful probe. conn=1001/1002: real search interleaved with a probe.
-        // conn=1003: probe whose search FAILS (err=32). conn=1004: whoami (non-probe shape).
-        // conn=1005: probe cut off by slapd exit.
+        // conn=1000: successful probe (attr-sentinel classified). conn=1001/1002: real search
+        // interleaved with a probe (filter-marker classified). conn=1003: probe whose search
+        // FAILS (err=32). conn=1004: whoami (non-probe shape). conn=1005: probe cut off by
+        // slapd exit.
         var fixture =
             "slapd starting\n" +
             "conn=1000 fd=12 ACCEPT from IP=172.17.0.1:39678 (IP=0.0.0.0:1389)\n" +
@@ -49,7 +50,7 @@ public class ProbeLogFilterTests : IDisposable
             "conn=1001 op=0 RESULT tag=97 err=0 text=\n" +
             "conn=1002 op=0 RESULT tag=97 err=0 text=\n" +
             "conn=1001 op=1 SRCH base=\"dc=example,dc=org\" scope=2 deref=0 filter=\"(uid=user01)\"\n" +
-            "conn=1002 op=1 SRCH base=\"\" scope=0 deref=0 filter=\"(objectClass=*)\"\n" +
+            "conn=1002 op=1 SRCH base=\"\" scope=0 deref=0 filter=\"(|(objectClass=*)(cn=aspire-healthcheck))\"\n" +
             "conn=1002 op=1 SRCH attr=namingContexts aspire-healthcheck\n" +
             "conn=1001 op=1 SEARCH RESULT tag=101 err=0 nentries=1 text=\n" +
             "conn=1002 op=1 SEARCH RESULT tag=101 err=0 nentries=1 text=\n" +
@@ -76,7 +77,7 @@ public class ProbeLogFilterTests : IDisposable
             "conn=1005 fd=22 ACCEPT from IP=172.17.0.1:39688 (IP=0.0.0.0:1389)\n" +
             "conn=1005 op=0 BIND dn=\"cn=admin,dc=example,dc=org\" method=128\n" +
             "conn=1005 op=0 RESULT tag=97 err=0 text=\n" +
-            "conn=1005 op=1 SRCH base=\"\" scope=0 deref=0 filter=\"(objectClass=*)\"\n" +
+            "conn=1005 op=1 SRCH base=\"\" scope=0 deref=0 filter=\"(|(objectClass=*)(cn=aspire-healthcheck))\"\n" +
             "conn=1005 op=1 SRCH attr=namingContexts aspire-healthcheck\n" +
             "daemon: shutdown requested and initiated.\n";
 
@@ -141,9 +142,10 @@ public class ProbeLogFilterTests : IDisposable
         Assert.True(run.ExitCode == 0, $"docker run failed: {run.Output}");
         await WaitForLdapReadyAsync(name, cts.Token);
 
-        // Mimic the AppHost health check exactly: authenticated root-DSE search with the sentinel.
+        // Mimic the AppHost health check exactly: authenticated root-DSE search carrying both
+        // markers (the sentinel attribute and the no-op filter branch).
         var probe = await LdapSearchAsync(name, cts.Token,
-            "-b", "", "-s", "base", "(objectClass=*)", "namingContexts", "aspire-healthcheck");
+            "-b", "", "-s", "base", "(|(objectClass=*)(cn=aspire-healthcheck))", "namingContexts", "aspire-healthcheck");
         Assert.True(probe.ExitCode == 0, $"probe-mimic search failed: {probe.Output}");
 
         var real = await LdapSearchAsync(name, cts.Token,
@@ -184,7 +186,7 @@ public class ProbeLogFilterTests : IDisposable
         await WaitForLdapReadyAsync(name, cts.Token);
 
         var probe = await LdapSearchAsync(name, cts.Token,
-            "-b", "", "-s", "base", "(objectClass=*)", "namingContexts", "aspire-healthcheck");
+            "-b", "", "-s", "base", "(|(objectClass=*)(cn=aspire-healthcheck))", "namingContexts", "aspire-healthcheck");
         Assert.True(probe.ExitCode == 0, $"probe-mimic search failed: {probe.Output}");
 
         await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
