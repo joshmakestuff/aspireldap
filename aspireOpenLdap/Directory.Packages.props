@@ -17,7 +17,7 @@
 
   <!-- LDIF (RFC 2849) reading/writing -->
   <ItemGroup>
-    <PackageVersion Include="LdifDotNet" Version="0.2.0" />
+    <PackageVersion Include="LdifDotNet" Version="0.3.0" />
   </ItemGroup>
 
   <!-- Microsoft.Extensions / runtime — keep on the current net10 servicing release -->
