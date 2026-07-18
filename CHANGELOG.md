@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0-preview.1 — 2026-07-18
 
 Fixes from a second (2026-07-17) adversarial code review, findings F01–F08, plus adoption of
 the [LdifDotNet](https://github.com/joshmakestuff/ldifdotnet) library for LDIF generation and
@@ -58,7 +58,7 @@ RFC 4514 DN handling (which unblocked F04 and F05).
 
 ### Changed
 
-- LDIF generation and DN handling are now backed by **LdifDotNet 0.2.0** (#23): the
+- LDIF generation and DN handling are now backed by **LdifDotNet 0.3.0** (#23, #30): the
   hand-maintained `LdifEncoder` (RFC 2849) and `DnEscaper` (RFC 4514) were deleted in favor of
   `LdifWriter` and the `Dn` API. The admin bind DN is composed once (escaped) and reused by the
   connection string, health check, dashboard command, and phpLDAPadmin — previously four
