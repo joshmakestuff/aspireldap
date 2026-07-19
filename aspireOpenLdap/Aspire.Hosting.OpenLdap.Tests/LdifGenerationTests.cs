@@ -84,22 +84,42 @@ public class LdapSeedLdifGeneratorTests
     }
 
     [Fact]
-    public void Plain_Ascii_Model_Generates_Readable_Ldif()
+    public void Fluent_Seed_Api_Generates_The_Exact_Expected_Records()
     {
-        var resource = CreateResource();
-        var model = new LdapSeedModel();
-        model.OrganizationalUnits.Add(new OrganizationalUnitEntry("people"));
-        model.Users.Add(new SeedUserEntry("user01", "password1", "people", "User One", "One", "user01@example.org"));
-        model.Groups.Add(new SeedGroupEntry("admins", ["user01"], null));
+        // Built through the PUBLIC fluent API consumers actually call — not by populating
+        // internal LdapSeedModel collections — then parsed back and asserted record-exactly.
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap")
+            .WithOrganizationalUnit("people")
+            .WithUser("user01", "password1", ou: "people", cn: "User One", sn: "One", mail: "user01@example.org")
+            .WithGroup("admins", ["user01"]);
 
-        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
+        var model = ldap.Resource.SeedModel;
+        Assert.NotNull(model);
+        var ldif = LdapSeedLdifGenerator.Generate(ldap.Resource, model!);
 
-        Assert.Contains("dn: ou=people,dc=example,dc=org\n", ldif);
-        Assert.Contains("dn: uid=user01,ou=people,dc=example,dc=org\n", ldif);
-        Assert.Contains("dn: cn=admins,dc=example,dc=org\n", ldif);
-        Assert.Contains("member: uid=user01,ou=people,dc=example,dc=org\n", ldif);
+        var records = LdifReader.Parse(ldif);
+        Assert.Equal(
+            [
+                "dc=example,dc=org",
+                "ou=people,dc=example,dc=org",
+                "uid=user01,ou=people,dc=example,dc=org",
+                "cn=admins,dc=example,dc=org",
+            ],
+            records.Select(r => r.Dn).ToArray());
+
+        var user = Assert.IsType<LdifContentRecord>(records[2]);
+        Assert.Equal("User One", Assert.Single(user["cn"]!.Values).AsString());
+        Assert.Equal("One", Assert.Single(user["sn"]!.Values).AsString());
+        Assert.Equal("user01@example.org", Assert.Single(user["mail"]!.Values).AsString());
+
+        var group = Assert.IsType<LdifContentRecord>(records[3]);
+        Assert.Equal(
+            "uid=user01,ou=people,dc=example,dc=org",
+            Assert.Single(group["member"]!.Values).AsString());
+
         // The password is stored hashed, never cleartext (F05).
-        Assert.Contains("userPassword: {SSHA}", ldif);
+        Assert.StartsWith("{SSHA}", Assert.Single(user["userPassword"]!.Values).AsString());
         Assert.DoesNotContain("password1", ldif);
     }
 
