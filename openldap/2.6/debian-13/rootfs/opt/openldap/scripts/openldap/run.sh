@@ -50,4 +50,11 @@ flags+=("$@")
 
 info "** Starting slapd **"
 debug "Startup cmd: ${command} ${flags[*]}"
-exec "${command}" "${flags[@]}"
+if is_boolean_yes "${LDAP_LOG_HEALTH_PROBES}"; then
+    exec "${command}" "${flags[@]}"
+fi
+# slapd's debug log goes to stderr; route it through the probe filter, whose output lands
+# on the container's original stderr. exec keeps slapd as PID 1 for signal handling; the
+# filter exits on its own when slapd closes the pipe. If the filter ever dies early, cat
+# takes over as a passthrough so slapd never hits a broken pipe (SIGPIPE) writing stderr.
+exec "${command}" "${flags[@]}" 2> >({ /opt/openldap/scripts/openldap/probe_log_filter.sh || true; exec cat; } >&2)
