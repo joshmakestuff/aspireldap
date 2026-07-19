@@ -1,8 +1,8 @@
 using System.DirectoryServices.Protocols;
-using System.Net;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
+using Aspire.OpenLdap;
 using LdifDotNet;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -54,11 +54,10 @@ public class LargeSeedHealthGatingTests
 
             var count = CountSubtreeEntries(connectionString!);
 
-            // base (dc=example,dc=org) + ou=people + UserCount users.
-            Assert.True(
-                count >= UserCount + 2,
-                $"Expected at least {UserCount + 2} entries the instant the resource reported healthy, " +
-                $"but only {count} were present — the health check went green before the seed finished.");
+            // Exactly base (dc=example,dc=org) + ou=people + UserCount users: fewer means the
+            // health check went green before the seed finished; more means something else got
+            // seeded that this test does not know about.
+            Assert.Equal(UserCount + 2, count);
         }
         finally
         {
@@ -94,42 +93,19 @@ public class LargeSeedHealthGatingTests
 
     private static int CountSubtreeEntries(string connectionString)
     {
-        string? endpoint = null, baseDn = null, bindDn = null, bindPassword = null;
-        foreach (var segment in connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var idx = segment.IndexOf('=');
-            if (idx < 0) continue;
-            var key = segment[..idx];
-            var value = segment[(idx + 1)..];
-            switch (key)
-            {
-                case "Endpoint": endpoint = value; break;
-                case "BaseDN": baseDn = value; break;
-                case "BindDN": bindDn = value; break;
-                case "BindPassword": bindPassword = value; break;
-            }
-        }
-
-        Assert.NotNull(endpoint);
-        Assert.NotNull(baseDn);
-        Assert.NotNull(bindDn);
-        Assert.NotNull(bindPassword);
-
-        var uri = new Uri(endpoint!);
-
-        using var connection = new LdapConnection(
-            new LdapDirectoryIdentifier(uri.Host, uri.Port, fullyQualifiedDnsHostName: false, connectionless: false))
-        {
-            AuthType = AuthType.Basic,
-            Credential = new NetworkCredential(bindDn, bindPassword),
-            Timeout = TimeSpan.FromSeconds(30),
-        };
-        connection.SessionOptions.ProtocolVersion = 3;
+        // The supported client path: OpenLdapConnectionStringBuilder handles the quoted/escaped
+        // values the hosting side emits (a naive Split(';') breaks on generated passwords
+        // containing ';' or quotes), and the factory owns connection configuration.
+        var settings = OpenLdapConnectionStringBuilder.Parse(connectionString);
+        var factory = new OpenLdapClientFactory(
+            settings,
+            new OpenLdapClientSettings { Timeout = TimeSpan.FromSeconds(30) });
+        using var connection = factory.CreateConnection();
 
         // Admin binds as the database rootDN, which is exempt from slapd's size/time limits,
         // so a single subtree search returns the full set.
         var request = new SearchRequest(
-            baseDn,
+            settings.BaseDn,
             "(objectClass=*)",
             SearchScope.Subtree,
             attributeList: "dn");
