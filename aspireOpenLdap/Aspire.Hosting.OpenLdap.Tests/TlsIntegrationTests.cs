@@ -91,4 +91,59 @@ public class TlsIntegrationTests
             File.Delete(wrongCaPath);
         }
     }
+
+    [Fact]
+    public async Task OptionalTls_Serves_Plain_Ldap_And_Ldaps_Side_By_Side()
+    {
+        // WithTls() WITHOUT WithRequiredTls(): the documented "LDAPS available, plain LDAP
+        // still accepted" mode, previously only the required-TLS path had a runtime witness.
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+
+        var appHost = await DistributedApplicationTestingBuilder
+            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(["--OpenLdap:TlsOptional=true"], cts.Token);
+
+        await using var app = await appHost.BuildAsync(cts.Token);
+        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
+        await app.StartAsync(cts.Token);
+        await notifications.WaitForResourceHealthyAsync("openldap", cts.Token);
+
+        var connectionString = await app.GetConnectionStringAsync("openldap", cts.Token);
+        Assert.NotNull(connectionString);
+        var settings = OpenLdapConnectionStringBuilder.Parse(connectionString!);
+
+        // Not required → the connection string stays plain ldap://, but advertises the CA so
+        // clients can opt into the LDAPS endpoint.
+        Assert.False(settings.UsesLdaps);
+        Assert.NotNull(settings.CaCertFile);
+
+        // Plain path serves.
+        var plainFactory = new OpenLdapClientFactory(settings, new OpenLdapClientSettings());
+        using (var connection = plainFactory.CreateConnection())
+        {
+            var response = (SearchResponse)connection.SendRequest(
+                new SearchRequest(settings.BaseDn, "(objectClass=*)", SearchScope.Base, "dn"));
+            Assert.Equal(ResultCode.Success, response.ResultCode);
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return; // Custom CA trust is refused up front on macOS.
+        }
+
+        // LDAPS is served side by side on the ldaps endpoint, trusted via the generated CA.
+        var ldapsEndpoint = app.GetEndpoint("openldap", "ldaps");
+        var ldapsSettings = new OpenLdapConnectionStringBuilder
+        {
+            Endpoint = new Uri($"ldaps://{ldapsEndpoint.Host}:{ldapsEndpoint.Port}"),
+            BaseDn = settings.BaseDn,
+            BindDn = settings.BindDn,
+            BindPassword = settings.BindPassword,
+            CaCertFile = settings.CaCertFile,
+        };
+        var ldapsFactory = new OpenLdapClientFactory(ldapsSettings, new OpenLdapClientSettings());
+        using var ldapsConnection = ldapsFactory.CreateConnection();
+        var ldapsResponse = (SearchResponse)ldapsConnection.SendRequest(
+            new SearchRequest(settings.BaseDn, "(objectClass=*)", SearchScope.Base, "dn"));
+        Assert.Equal(ResultCode.Success, ldapsResponse.ResultCode);
+    }
 }

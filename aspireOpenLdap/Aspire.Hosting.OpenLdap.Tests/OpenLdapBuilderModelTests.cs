@@ -28,6 +28,7 @@ public class OpenLdapBuilderModelTests
     [InlineData("c=US")]
     [InlineData("O=Acme")]
     [InlineData("o=Acme\\, Inc.,c=US")]
+    [InlineData("o=Acme\\; Inc.,c=US")] // escaped ';' is a legal value character
     public void WithBaseDn_Accepts_Supported_Well_Formed_Dns(string baseDn)
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -44,6 +45,8 @@ public class OpenLdapBuilderModelTests
     [InlineData("dc=exa\nmple,dc=org", "control characters")]            // LDIF line injection
     [InlineData("c=USA", "two-letter ISO 3166")]                         // country > 2 chars
     [InlineData("c=U1", "two-letter ISO 3166")]                          // country non-letter
+    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; (ldifdotnet#43)
+    [InlineData("dc=exa;mple,dc=org", "unescaped ';'")]                  // slapd rejects as olcSuffix
     public void WithBaseDn_Rejects_Invalid_Or_Unsupported_Dns(string baseDn, string expectedFragment)
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -187,6 +190,25 @@ public class OpenLdapBuilderModelTests
         Assert.Equal("cn=root,dc=late,dc=org", env["LDAP_USERNAME"]);
         Assert.Equal("1389", env["LDAP_PORT"]);
         Assert.False(env.ContainsKey("LDAP_CONNECTION"));
+    }
+
+    [Fact]
+    public void WithPhpLdapAdmin_Pins_The_Image_And_Registers_A_Health_Check()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        builder.AddOpenLdap("ldap").WithPhpLdapAdmin();
+
+        var admin = Assert.Single(builder.Resources.OfType<PhpLdapAdminResource>());
+
+        // The image pin is a claim ("2.3.11, not latest") that nothing else witnesses; a
+        // regression back to a floating tag would otherwise pass CI silently.
+        var image = Assert.Single(admin.Annotations.OfType<ContainerImageAnnotation>());
+        Assert.Contains("phpldapadmin", image.Image, StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrEmpty(image.Tag), "phpLDAPadmin image must carry an explicit tag");
+        Assert.NotEqual("latest", image.Tag);
+
+        // The static-asset health check (see #31) must stay registered.
+        Assert.NotEmpty(admin.Annotations.OfType<HealthCheckAnnotation>());
     }
 
     [Fact]

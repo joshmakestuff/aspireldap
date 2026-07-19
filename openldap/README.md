@@ -99,11 +99,31 @@ ldapsearch -x -H ldap://localhost:1389 -b "" -s base "(objectClass=*)" +
 | `LDAP_ACCESSLOG_DB` | `cn=accesslog` | Access-log database suffix |
 | `LDAP_ACCESSLOG_ADMIN_USERNAME` | `admin` | Access-log admin `cn` (root DN is `cn=<name>,<suffix>`) |
 | `LDAP_ACCESSLOG_ADMIN_PASSWORD` | `accesspassword` | Access-log admin password (`LDAP_ACCESSLOG_PASSWORD` is a deprecated alias) |
+| `LDAP_ACCESSLOG_LOGOPS` | `writes` | Operation classes to log (`olcAccessLogOps`) |
+| `LDAP_ACCESSLOG_LOGSUCCESS` | `TRUE` | Log successful operations only |
+| `LDAP_ACCESSLOG_LOGPURGE` | `07+00:00 01+00:00` | Purge age/interval (`olcAccessLogPurge`) |
+| `LDAP_ACCESSLOG_LOGOLD` | `(objectClass=*)` | Filter for logging old entry attributes |
+| `LDAP_ACCESSLOG_LOGOLDATTR` | `objectClass` | Attributes logged from old entries |
 | `LDAP_ENABLE_SYNCPROV` | `no` | Enable sync provider overlay |
+| `LDAP_SYNCPROV_CHECKPOINT` | `100 10` | Syncprov checkpoint ops/minutes (`LDAP_SYNCPROV_CHECKPPOINT` accepted as a legacy alias) |
+| `LDAP_SYNCPROV_SESSIONLOG` | `100` | Syncprov session log size |
+
+### Other
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LDAP_SUFFIX` | `$LDAP_ROOT` | Database suffix (`olcSuffix`) when it must differ from the root entry DN |
+| `LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR` | `no` | Load custom LDIFs with `ldapadd -c` (skip rejected entries instead of aborting) |
+| `BITNAMI_DEBUG` | `false` | Verbose bootstrap logging (shows suppressed command output) |
 
 ### Docker Secrets
 
-Any password variable supports a `_FILE` suffix. Set `LDAP_ADMIN_PASSWORD_FILE=/run/secrets/ldap_password` and the container will read the password from that file.
+These password variables support a `_FILE` suffix that reads the value from a file (e.g. a
+Docker secret): `LDAP_ADMIN_PASSWORD_FILE`, `LDAP_CONFIG_ADMIN_PASSWORD_FILE`, and
+`LDAP_ACCESSLOG_ADMIN_PASSWORD_FILE` (plus the deprecated `LDAP_ACCESSLOG_PASSWORD_FILE`
+alias). Set `LDAP_ADMIN_PASSWORD_FILE=/run/secrets/ldap_password` and the container reads the
+password from that file. If a configured `_FILE` path is missing or unreadable the container
+**refuses to start** — it never falls back to the default password.
 
 ## Bootstrapping
 
