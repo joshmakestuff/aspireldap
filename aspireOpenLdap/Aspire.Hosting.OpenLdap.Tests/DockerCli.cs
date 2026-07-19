@@ -29,8 +29,33 @@ internal static class DockerCli
         using var process = Process.Start(psi)!;
         var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // A timed-out docker operation must not leave the CLI (and whatever it is
+            // attached to) running past the test.
+            KillQuiet(process);
+            throw;
+        }
         return new DockerResult(process.ExitCode, await stdout + Environment.NewLine + await stderr);
+    }
+
+    private static void KillQuiet(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception)
+        {
+            // The process may have exited between the check and the kill.
+        }
     }
 
     public static void BestEffort(params string[] args)
@@ -48,7 +73,10 @@ internal static class DockerCli
                 psi.ArgumentList.Add(arg);
             }
             using var process = Process.Start(psi);
-            process?.WaitForExit(30_000);
+            if (process is not null && !process.WaitForExit(30_000))
+            {
+                KillQuiet(process);
+            }
         }
         catch (Exception)
         {
