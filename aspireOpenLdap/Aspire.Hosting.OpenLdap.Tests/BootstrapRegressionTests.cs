@@ -61,6 +61,37 @@ public class BootstrapRegressionTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Stale_Alias_File_Is_Ignored_When_Canonical_Is_Set()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        const string resolve =
+            ". /opt/openldap/scripts/libopenldap.sh && eval \"$(ldap_env)\" && printf 'resolved=%s' \"$LDAP_ACCESSLOG_ADMIN_PASSWORD\"";
+
+        // Migration path: the canonical setting was added while an obsolete alias _FILE
+        // reference (whose secret is no longer mounted) is still present. The alias is not
+        // the selected credential source, so the stale file must be ignored, not fatal.
+        var migration = await DockerAsync(cts.Token,
+            "run", "--rm",
+            "-e", "LDAP_ACCESSLOG_ADMIN_PASSWORD=canonical-pw",
+            "-e", "LDAP_ACCESSLOG_PASSWORD_FILE=/run/secrets/obsolete-missing",
+            "--entrypoint", "bash", image, "-c", resolve);
+        Assert.True(migration.ExitCode == 0, $"stale alias _FILE must not abort when canonical is set: {migration.Output}");
+        Assert.Contains("resolved=canonical-pw", migration.Output);
+        Assert.Contains("Ignoring LDAP_ACCESSLOG_PASSWORD", migration.Output);
+
+        // But when the alias IS the selected source (no canonical), an unreadable file stays
+        // fail-closed.
+        var selected = await DockerAsync(cts.Token,
+            "run", "--rm",
+            "-e", "LDAP_ACCESSLOG_PASSWORD_FILE=/run/secrets/obsolete-missing",
+            "--entrypoint", "bash", image, "-c", resolve);
+        Assert.True(selected.ExitCode != 0, "an unreadable alias _FILE that is the selected source must fail closed");
+        Assert.Contains("not readable", selected.Output);
+    }
+
     [Theory]
     [InlineData("LDAP_ACCESSLOG_ADMIN_PASSWORD_FILE")]
     [InlineData("LDAP_ACCESSLOG_PASSWORD_FILE")]
@@ -332,6 +363,134 @@ public class BootstrapRegressionTests : IDisposable
         Assert.True(slapcat.ExitCode == 0, $"slapcat failed: {slapcat.Output}");
         Assert.Contains("objectClass: country", slapcat.Output);
         Assert.Contains("c: US", slapcat.Output);
+    }
+
+    [Fact]
+    public async Task Escaped_Semicolon_Root_Bootstraps()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+        var name = NewContainer();
+
+        // '\;' is the RFC 4514-escaped form the model validation accepts (#35 rejects only
+        // the raw unescaped ';'); it must bootstrap and decode to a literal ';' in the value.
+        const string root = "o=Acme\\; Inc.";
+        var run = await DockerAsync(cts.Token,
+            "run", "-d", "--name", name,
+            "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
+            "-e", $"LDAP_ROOT={root}",
+            image);
+        Assert.True(run.ExitCode == 0, $"docker run failed: {run.Output}");
+        await WaitForLdapReadyAsync(name, $"cn=admin,{root}", AdminPassword, cts.Token);
+
+        var slapcat = await DockerAsync(cts.Token, "exec", name, "slapcat", "-b", root);
+        Assert.True(slapcat.ExitCode == 0, $"slapcat failed: {slapcat.Output}");
+        Assert.Contains("o: Acme; Inc.", slapcat.Output);
+    }
+
+    [Theory]
+    [InlineData("LDAP_USER_OU=a\nb", "must not contain line breaks")]
+    [InlineData("LDAP_SUFFIX=dc=x\ndc=y", "must not contain line breaks")]
+    [InlineData("LDAP_TLS_VERIFY_CLIENTS=bogus", "must be one of")]
+    public async Task Invalid_Config_Env_Is_Rejected_Before_Bootstrap(string envAssignment, string expectedFragment)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        // Line-break-bearing values would smuggle extra LDIF lines into a privileged
+        // cn=config apply; enum-invalid TLS client verification would misconfigure slapd.
+        // All must die at validation, before any LDIF is generated.
+        var run = await DockerAsync(cts.Token,
+            "run", "--rm", "-e", envAssignment, image);
+        Assert.True(run.ExitCode != 0, $"'{envAssignment}' must fail container validation");
+        Assert.Contains(expectedFragment, run.Output);
+    }
+
+    [Fact]
+    public async Task Unescaper_Preserves_A_Dangling_Backslash()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        // A dangling trailing backslash is invalid RFC 4514; it must stay literal (so slapd
+        // rejects the DN loudly) rather than being silently swallowed.
+        var run = await DockerAsync(cts.Token,
+            "run", "--rm", "--entrypoint", "bash", image,
+            "-c", ". /opt/openldap/scripts/libopenldap.sh && printf '[%s]' \"$(ldap_unescape_rdn_value 'Acme\\')\"");
+        Assert.True(run.ExitCode == 0, $"unescape run failed: {run.Output}");
+        Assert.Contains("[Acme\\]", run.Output);
+    }
+
+    [Theory]
+    [InlineData("LDAP_SYNCPROV_CHECKPOINT=7 7", "7 7")]     // canonical spelling
+    [InlineData("LDAP_SYNCPROV_CHECKPPOINT=9 9", "9 9")]    // legacy double-P alias
+    [InlineData("LDAP_ENABLE_SYNCPROV=no", "100 10")]       // neither → default
+    public async Task Syncprov_Checkpoint_Spelling_Resolves(string envAssignment, string expected)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        var run = await DockerAsync(cts.Token,
+            "run", "--rm", "-e", envAssignment, "--entrypoint", "bash", image,
+            "-c", ". /opt/openldap/scripts/libopenldap.sh && eval \"$(ldap_env)\" && printf 'checkpoint=[%s]' \"$LDAP_SYNCPROV_CHECKPOINT\"");
+        Assert.True(run.ExitCode == 0, $"resolution run failed: {run.Output}");
+        Assert.Contains($"checkpoint=[{expected}]", run.Output);
+    }
+
+    [Fact]
+    public async Task Custom_Ldif_Continue_On_Error_Skips_Rejects_But_Default_Fails_Loud()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        var ldifDir = Directory.CreateTempSubdirectory("aspire-openldap-continueonerror-").FullName;
+        try
+        {
+            // Middle entry is rejected (its parent dc=missing does not exist); the last entry
+            // is valid and must load when continue-on-error is enabled.
+            await File.WriteAllTextAsync(Path.Combine(ldifDir, "10-mixed.ldif"),
+                "dn: dc=example,dc=org\n" +
+                "objectClass: dcObject\n" +
+                "objectClass: organization\n" +
+                "dc: example\n" +
+                "o: example\n" +
+                "\n" +
+                "dn: ou=bad,dc=missing,dc=org\n" +
+                "objectClass: organizationalUnit\n" +
+                "ou: bad\n" +
+                "\n" +
+                "dn: ou=good,dc=example,dc=org\n" +
+                "objectClass: organizationalUnit\n" +
+                "ou: good\n", cts.Token);
+            WidenPermissionsForContainer(ldifDir);
+
+            // Default (fail-loud): a rejected entry aborts initialization.
+            var strict = await DockerAsync(cts.Token,
+                "run", "--rm",
+                "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
+                "-v", $"{ldifDir}:/ldifs:ro",
+                image);
+            Assert.True(strict.ExitCode != 0, "a rejected custom-LDIF entry must abort by default");
+
+            // Opt-in continue-on-error: rejects are skipped, later entries still load.
+            var name = NewContainer();
+            var lenient = await DockerAsync(cts.Token,
+                "run", "-d", "--name", name,
+                "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
+                "-e", "LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR=yes",
+                "-v", $"{ldifDir}:/ldifs:ro",
+                image);
+            Assert.True(lenient.ExitCode == 0, $"docker run failed: {lenient.Output}");
+            await WaitForLdapReadyAsync(name, "cn=admin,dc=example,dc=org", AdminPassword, cts.Token);
+
+            var slapcat = await DockerAsync(cts.Token, "exec", name, "slapcat", "-b", "dc=example,dc=org");
+            Assert.Contains("ou=good", slapcat.Output);
+            Assert.DoesNotContain("ou=bad", slapcat.Output);
+        }
+        finally
+        {
+            Directory.Delete(ldifDir, recursive: true);
+        }
     }
 
     [Fact]

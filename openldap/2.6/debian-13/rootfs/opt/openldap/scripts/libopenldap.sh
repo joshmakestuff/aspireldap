@@ -245,6 +245,19 @@ export LDAP_ENABLE_SYNCPROV="${LDAP_ENABLE_SYNCPROV:-no}"
 export LDAP_SYNCPROV_CHECKPOINT="${LDAP_SYNCPROV_CHECKPOINT:-${LDAP_SYNCPROV_CHECKPPOINT:-100 10}}"
 export LDAP_SYNCPROV_SESSIONLOG="${LDAP_SYNCPROV_SESSIONLOG:-100}"
 
+# The deprecated LDAP_ACCESSLOG_PASSWORD alias is honored only when the canonical
+# variable is absent (see the resolution block below), so once the canonical plain or
+# _FILE setting exists, the alias — including a stale, no-longer-mounted
+# LDAP_ACCESSLOG_PASSWORD_FILE — must be IGNORED here, not validated: failing on an
+# obsolete alias reference would break the normal migration where the canonical setting
+# is added before the alias is removed.
+if [[ -n "${LDAP_ACCESSLOG_ADMIN_PASSWORD:-}" || -n "${LDAP_ACCESSLOG_ADMIN_PASSWORD_FILE:-}" ]]; then
+    if [[ -n "${LDAP_ACCESSLOG_PASSWORD:-}" || -n "${LDAP_ACCESSLOG_PASSWORD_FILE:-}" ]]; then
+        warn "Ignoring LDAP_ACCESSLOG_PASSWORD(_FILE): the canonical LDAP_ACCESSLOG_ADMIN_PASSWORD is configured."
+    fi
+    unset LDAP_ACCESSLOG_PASSWORD LDAP_ACCESSLOG_PASSWORD_FILE
+fi
+
 # Docker secrets support: *_FILE env vars override the plain-text equivalents
 ldap_env_vars=(
     LDAP_ADMIN_PASSWORD

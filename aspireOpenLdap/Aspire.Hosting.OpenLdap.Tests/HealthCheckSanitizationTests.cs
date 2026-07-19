@@ -1,3 +1,4 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.OpenLdap;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -24,6 +25,26 @@ public class HealthCheckSanitizationTests
             new OpenLdapClientSettings { Timeout = TimeSpan.FromSeconds(5) });
         var healthCheck = new OpenLdapClientHealthCheck(factory);
 
+        var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+        Assert.Null(result.Exception);
+        Assert.Contains("Exception", result.Description);
+    }
+
+    [Fact]
+    public async Task Failed_Hosting_Health_Check_Reports_Type_But_Not_The_Exception()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap");
+
+        // Allocate the plain-LDAP endpoint at loopback port 1: connection refused fast, no
+        // server involved — drives the check into its failure catch blocks.
+        var endpoint = ldap.Resource.Annotations.OfType<EndpointAnnotation>()
+            .Single(e => e.Name == OpenLdapResource.LdapEndpointName);
+        endpoint.AllocatedEndpoint = new AllocatedEndpoint(endpoint, "127.0.0.1", 1);
+
+        var healthCheck = new OpenLdapHealthCheck(ldap.Resource);
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
