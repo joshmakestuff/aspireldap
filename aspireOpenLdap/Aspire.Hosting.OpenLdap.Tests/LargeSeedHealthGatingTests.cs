@@ -16,6 +16,8 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// observe a partially-seeded directory. The init daemon now binds <c>ldapi:///</c> only, so
 /// the public port opens only after setup (and thus the seed) completes.
 /// </summary>
+[Collection(AppHostCollection.Name)]
+[Trait("Category", "Integration")]
 public class LargeSeedHealthGatingTests
 {
     private const int UserCount = 1500;
@@ -31,21 +33,7 @@ public class LargeSeedHealthGatingTests
             var ldifPath = Path.Combine(seedDir, "00-seed.ldif");
             await File.WriteAllTextAsync(ldifPath, GenerateLargeSeed(UserCount), cts.Token);
 
-            // CreateTempSubdirectory makes a 0700 dir, but the OpenLDAP container runs as a
-            // non-root user (uid != the test host's) and must read the bind-mounted seed.
-            // Widen perms on Linux so the container can traverse the dir and read the LDIF.
-            // (Docker Desktop on Windows/macOS exposes mounts as world-accessible, which hid
-            // this when running the test locally.)
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(seedDir,
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-                File.SetUnixFileMode(ldifPath,
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite |
-                    UnixFileMode.GroupRead | UnixFileMode.OtherRead);
-            }
+            DockerCli.WidenPermissionsForContainer(seedDir);
 
             var appHost = await DistributedApplicationTestingBuilder
                 .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(

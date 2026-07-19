@@ -6,9 +6,11 @@ using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
+[Collection(AppHostCollection.Name)]
 public class OpenLdapResourceTests
 {
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task OpenLdap_Resource_Becomes_Healthy()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));

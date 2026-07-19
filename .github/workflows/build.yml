@@ -33,11 +33,20 @@ jobs:
         working-directory: aspireOpenLdap
         run: dotnet format AspireOpenLdap.slnx --verify-no-changes --no-restore
 
-      # Includes the Docker-backed integration tests (the bundled OpenLDAP image is
-      # built by the test AppHost on first use).
-      - name: Test
+      - name: Build
         working-directory: aspireOpenLdap
-        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-restore
+        run: dotnet build AspireOpenLdap.slnx --configuration Release --no-restore
+
+      # The fast suite must pass without Docker; nothing in it may start a container.
+      - name: Fast tests
+        working-directory: aspireOpenLdap
+        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category!=Integration"
+
+      # Docker-backed integration tests. Direct-docker classes share one bundled-image build
+      # (BundledImage); the AppHost tests build theirs through Aspire on first use.
+      - name: Integration tests
+        working-directory: aspireOpenLdap
+        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category=Integration"
 
       # Build the examples so they can't rot against the library. Build-only (no Docker / no run).
       - name: Build examples
