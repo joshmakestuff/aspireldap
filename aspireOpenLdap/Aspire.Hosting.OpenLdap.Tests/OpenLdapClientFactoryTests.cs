@@ -85,11 +85,6 @@ public class OpenLdapClientFactoryTests
     [Fact]
     public void CreateConnection_Succeeds_With_A_Valid_Ca_File()
     {
-        if (OperatingSystem.IsMacOS())
-        {
-            return; // Custom CA trust is refused up front on macOS (LDAP.framework limitation).
-        }
-
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=factory-test-ca", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         using var ca = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
@@ -98,6 +93,17 @@ public class OpenLdapClientFactoryTests
         try
         {
             var factory = CreateFactory(path);
+
+            if (OperatingSystem.IsMacOS())
+            {
+                // Explicit platform expectation, not a silent zero-assertion pass: macOS
+                // LDAP.framework supports neither the managed verification callback nor
+                // OpenSSL-style trust options, so custom CA trust is refused up front with
+                // the documented actionable message.
+                var ex = Assert.Throws<PlatformNotSupportedException>(() => factory.CreateConnection());
+                Assert.Contains(nameof(OpenLdapClientSettings.TrustConnectionStringCaCertificate), ex.Message);
+                return;
+            }
 
             using var connection = factory.CreateConnection();
             Assert.NotNull(connection);

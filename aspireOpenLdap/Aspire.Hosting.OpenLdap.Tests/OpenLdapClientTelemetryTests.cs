@@ -5,13 +5,17 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Integration test: a real Search issued through <see cref="OpenLdapClient"/> against the
-/// container must produce one <c>LDAP search</c> span and one duration measurement on the
+/// Integration test through the CONSUMER-FACING path: the client is registered with
+/// <see cref="OpenLdapClientExtensions.AddOpenLdapClient"/> and resolved from DI — exactly what
+/// the README tells users to do — not hand-assembled from factory internals. A real search
+/// through both <see cref="OpenLdapClient.Send"/> and <see cref="OpenLdapClient.SendAsync"/>
+/// must each produce one <c>LDAP search</c> span and one duration measurement on the
 /// <c>Aspire.OpenLdap</c> source/meter. Requires Docker (gated like the other integration tests).
 /// </summary>
 [Collection(AppHostCollection.Name)]
@@ -19,7 +23,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 public class OpenLdapClientTelemetryTests
 {
     [Fact]
-    public async Task Search_Through_OpenLdapClient_Emits_Span_And_DurationMetric()
+    public async Task Search_Through_Registered_OpenLdapClient_Emits_Spans_And_DurationMetrics()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
@@ -34,10 +38,15 @@ public class OpenLdapClientTelemetryTests
         var connectionString = await app.GetConnectionStringAsync("openldap", cts.Token);
         Assert.NotNull(connectionString);
 
-        var parsed = OpenLdapConnectionStringBuilder.Parse(connectionString!);
-        var settings = new OpenLdapClientSettings();
-        var factory = new OpenLdapClientFactory(parsed, settings);
-        using var client = new OpenLdapClient(factory.CreateConnection(), settings, parsed);
+        // Consumer-facing registration: AddOpenLdapClient reads the connection string from
+        // configuration, and OpenLdapClient comes out of DI.
+        var hostBuilder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+        hostBuilder.Configuration["ConnectionStrings:openldap"] = connectionString;
+        hostBuilder.AddOpenLdapClient("openldap");
+        using var host = hostBuilder.Build();
+
+        using var client = host.Services.GetRequiredService<OpenLdapClient>();
+        var baseDn = OpenLdapConnectionStringBuilder.Parse(connectionString!).BaseDn;
 
         // Listen for spans from the Aspire.OpenLdap activity source.
         var spans = new List<Activity>();
@@ -66,21 +75,33 @@ public class OpenLdapClientTelemetryTests
             (_, value, tags, _) => measurements.Add((value, tags.ToArray())));
         meterListener.Start();
 
-        var request = new SearchRequest(parsed.BaseDn, "(objectClass=*)", SearchScope.Subtree, attributeList: null);
-        var response = (SearchResponse)client.Send(request);
+        // Both public send paths against the same already-running resource: no second
+        // AppHost/container for the async witness.
+        var request = new SearchRequest(baseDn, "(objectClass=*)", SearchScope.Subtree, attributeList: null);
+        var syncResponse = (SearchResponse)client.Send(request);
+        var asyncResponse = (SearchResponse)await client.SendAsync(
+            new SearchRequest(baseDn, "(objectClass=*)", SearchScope.Subtree, attributeList: null),
+            cts.Token);
 
-        Assert.True(response.Entries.Count > 0, "Expected the directory's default tree to return entries.");
+        Assert.True(syncResponse.Entries.Count > 0, "Expected the directory's default tree to return entries.");
+        Assert.Equal(syncResponse.Entries.Count, asyncResponse.Entries.Count);
 
-        var span = Assert.Single(spans);
-        Assert.Equal("LDAP search", span.DisplayName);
-        Assert.Equal("search", span.GetTagItem("db.operation.name"));
-        Assert.Equal("openldap", span.GetTagItem("db.system.name"));
-        Assert.Equal(response.Entries.Count, span.GetTagItem("db.ldap.entries_returned"));
-        Assert.Equal(ActivityStatusCode.Ok, span.Status);
+        Assert.Equal(2, spans.Count);
+        Assert.All(spans, span =>
+        {
+            Assert.Equal("LDAP search", span.DisplayName);
+            Assert.Equal("search", span.GetTagItem("db.operation.name"));
+            Assert.Equal("openldap", span.GetTagItem("db.system.name"));
+            Assert.Equal(syncResponse.Entries.Count, span.GetTagItem("db.ldap.entries_returned"));
+            Assert.Equal(ActivityStatusCode.Ok, span.Status);
+        });
 
-        var measurement = Assert.Single(measurements);
-        Assert.True(measurement.Value > 0, "Duration should be positive.");
-        Assert.Contains(measurement.Tags, t => t.Key == "db.operation.name" && (string?)t.Value == "search");
-        Assert.Contains(measurement.Tags, t => t.Key == "db.system.name" && (string?)t.Value == "openldap");
+        Assert.Equal(2, measurements.Count);
+        Assert.All(measurements, measurement =>
+        {
+            Assert.True(measurement.Value > 0, "Duration should be positive.");
+            Assert.Contains(measurement.Tags, t => t.Key == "db.operation.name" && (string?)t.Value == "search");
+            Assert.Contains(measurement.Tags, t => t.Key == "db.system.name" && (string?)t.Value == "openldap");
+        });
     }
 }

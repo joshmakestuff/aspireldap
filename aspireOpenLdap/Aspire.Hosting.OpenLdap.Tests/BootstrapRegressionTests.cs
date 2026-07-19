@@ -388,18 +388,23 @@ public class BootstrapRegressionTests : IDisposable
     }
 
     [Fact]
-    public async Task Unescaper_Preserves_A_Dangling_Backslash()
+    public async Task Dangling_Backslash_Root_Is_Rejected_And_Never_Bootstraps()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
-        // A dangling trailing backslash is invalid RFC 4514; it must stay literal (so slapd
-        // rejects the DN loudly) rather than being silently swallowed.
+        // A dangling trailing backslash is invalid RFC 4514. End-to-end contract: the
+        // container must die loudly (slapd rejects the suffix at the privileged cn=config
+        // apply) and never serve a silently altered directory — the pre-fix unescaper
+        // swallowed the backslash, which would have bootstrapped "o=Acme" instead.
         var run = await DockerCli.RunAsync(cts.Token,
-            "run", "--rm", "--entrypoint", "bash", image,
-            "-c", ". /opt/openldap/scripts/libopenldap.sh && printf '[%s]' \"$(ldap_unescape_rdn_value 'Acme\\')\"");
-        Assert.True(run.ExitCode == 0, $"unescape run failed: {run.Output}");
-        Assert.Contains("[Acme\\]", run.Output);
+            "run", "--rm",
+            "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
+            "-e", "LDAP_ROOT=o=Acme\\",
+            image);
+        Assert.True(run.ExitCode != 0, "a dangling-backslash root must abort startup");
+        Assert.Contains("invalid per syntax", run.Output);
+        Assert.DoesNotContain("Starting slapd", run.Output);
     }
 
     [Fact]
