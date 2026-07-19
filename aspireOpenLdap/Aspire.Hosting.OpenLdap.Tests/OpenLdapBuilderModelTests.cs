@@ -45,8 +45,7 @@ public class OpenLdapBuilderModelTests
     [InlineData("dc=exa\nmple,dc=org", "control characters")]            // LDIF line injection
     [InlineData("c=USA", "two-letter ISO 3166")]                         // country > 2 chars
     [InlineData("c=U1", "two-letter ISO 3166")]                          // country non-letter
-    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; (ldifdotnet#43)
-    [InlineData("dc=exa;mple,dc=org", "unescaped ';'")]                  // slapd rejects as olcSuffix
+    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; (ldifdotnet#43); same pre-parser guard rejects it anywhere in the DN
     public void WithBaseDn_Rejects_Invalid_Or_Unsupported_Dns(string baseDn, string expectedFragment)
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -97,9 +96,8 @@ public class OpenLdapBuilderModelTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(65536)]
+    [InlineData(0)]     // lower bound (negative values hit the same branch)
+    [InlineData(65536)] // upper bound
     public void Out_Of_Range_Ports_Fail_At_The_Fluent_Call(int port)
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -286,9 +284,8 @@ public class OpenLdapBuilderModelTests
     }
 
     [Theory]
-    [InlineData(4096)]  // gap in slapd's defined levels
-    [InlineData(8192)]
-    [InlineData(-1)]
+    [InlineData(4096)]  // representative undefined positive bit (gap in slapd's defined levels)
+    [InlineData(-1)]    // negative / all-bits
     public void WithLogLevel_Rejects_Undefined_Bits(int raw)
     {
         var builder = DistributedApplication.CreateBuilder();

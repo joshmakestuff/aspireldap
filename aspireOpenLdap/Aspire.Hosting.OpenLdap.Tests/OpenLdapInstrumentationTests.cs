@@ -24,13 +24,14 @@ public class OpenLdapInstrumentationTests
     }
 
     [Theory]
+    // Every explicitly non-error code gets its own row (dropping one from the switch must
+    // fail here); a single representative covers the default error branch.
     [InlineData(ResultCode.Success, false)]
     [InlineData(ResultCode.CompareTrue, false)]
     [InlineData(ResultCode.CompareFalse, false)]
     [InlineData(ResultCode.Referral, false)]
+    [InlineData(ResultCode.ReferralV2, false)]
     [InlineData(ResultCode.NoSuchObject, true)]
-    [InlineData(ResultCode.OperationsError, true)]
-    [InlineData(ResultCode.ProtocolError, true)]
     public void IsErrorCode_ClassifiesResultCodes(ResultCode code, bool expectedError)
         => Assert.Equal(expectedError, OpenLdapInstrumentation.IsErrorCode(code));
 

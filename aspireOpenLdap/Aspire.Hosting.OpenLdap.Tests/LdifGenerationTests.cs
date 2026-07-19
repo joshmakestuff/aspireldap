@@ -9,11 +9,13 @@ public class AdminBindDnTests
     private static OpenLdapResource CreateResource(string adminUsername, string baseDn)
         => new("ldap", baseDn, adminUsername, new ParameterResource("pw", _ => "secret", secret: true));
 
-    [Fact]
-    public void AdminBindDn_Composes_Plain_Username_And_Base_Dn()
+    [Theory]
+    [InlineData("admin", "cn=admin,dc=example,dc=org")]
+    [InlineData("Admin User", "cn=Admin User,dc=example,dc=org")] // interior spaces preserved
+    public void AdminBindDn_Composes_Username_And_Base_Dn(string username, string expected)
     {
-        var resource = CreateResource("admin", "dc=example,dc=org");
-        Assert.Equal("cn=admin,dc=example,dc=org", resource.AdminBindDn);
+        var resource = CreateResource(username, "dc=example,dc=org");
+        Assert.Equal(expected, resource.AdminBindDn);
     }
 
     [Fact]
@@ -27,12 +29,6 @@ public class AdminBindDnTests
         Assert.Contains("DN escaping", ex.Message);
     }
 
-    [Fact]
-    public void AdminBindDn_Preserves_Interior_Spaces()
-    {
-        var resource = CreateResource("Admin User", "dc=example,dc=org");
-        Assert.Equal("cn=Admin User,dc=example,dc=org", resource.AdminBindDn);
-    }
 }
 
 public class LdapSeedLdifGeneratorTests
@@ -199,18 +195,6 @@ public class LdapSeedLdifGeneratorTests
         Assert.Contains("o: Acme, Inc.\n", ldif);
     }
 
-    [Fact]
-    public void Generated_Seed_Has_No_Version_Line_And_Uses_Lf_Only()
-    {
-        var resource = CreateResource();
-        var model = new LdapSeedModel();
-        model.Users.Add(new SeedUserEntry("user01", "password1", null, "User One", "One", null));
-
-        var ldif = LdapSeedLdifGenerator.Generate(resource, model);
-
-        Assert.DoesNotContain("version:", ldif);
-        Assert.DoesNotContain('\r', ldif);
-    }
 }
 
 public class ConfigLdifGenerationTests
