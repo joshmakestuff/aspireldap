@@ -42,6 +42,8 @@ public class OpenLdapBuilderModelTests
     [InlineData("ou=corp,dc=example,dc=org", "not a supported root")]    // unsupported leading RDN
     [InlineData("cn=a+sn=b,dc=example,dc=org", "multi-valued leading")]  // multi-valued leading RDN
     [InlineData("dc=exa\nmple,dc=org", "control characters")]            // LDIF line injection
+    [InlineData("c=USA", "two-letter ISO 3166")]                         // country > 2 chars
+    [InlineData("c=U1", "two-letter ISO 3166")]                          // country non-letter
     public void WithBaseDn_Rejects_Invalid_Or_Unsupported_Dns(string baseDn, string expectedFragment)
     {
         var builder = DistributedApplication.CreateBuilder();

@@ -11,9 +11,10 @@ namespace Aspire.OpenLdap;
 /// </summary>
 /// <remarks>
 /// The mapping helpers are deliberately PII-safe: they record operation type, server
-/// address/port, search scope, control OIDs (never values), result codes, and entry
-/// <em>counts</em> — but never search filters, DNs, entry attributes, control values, or
-/// paging-cookie bytes.
+/// address/port, search scope, control OIDs (never values), result codes, exception
+/// <em>types</em>, and entry <em>counts</em> — but never search filters, DNs, entry
+/// attributes, control values, paging-cookie bytes, or exception messages (server-supplied
+/// diagnostics can embed directory data).
 /// </remarks>
 internal static class OpenLdapInstrumentation
 {
@@ -135,7 +136,10 @@ internal static class OpenLdapInstrumentation
         if (failure is not null)
         {
             activity.SetStatus(ActivityStatusCode.Error, code?.ToString() ?? failure.GetType().Name);
-            activity.AddException(failure);
+            // Only the exception TYPE is recorded (mirroring the metric tags). Exception
+            // messages can carry server-supplied diagnostics — DNs, matched values, referral
+            // URLs — which the no-PII contract above promises never to export.
+            activity.SetTag("error.type", failure.GetType().FullName);
         }
         else if (IsErrorCode(code))
         {
