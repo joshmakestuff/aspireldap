@@ -162,11 +162,14 @@ public class OpenLdapBuilderModelTests
     public void WithTls_Missing_File_Fails_At_Model_Construction()
     {
         var builder = DistributedApplication.CreateBuilder();
+        // A unique, never-created directory under the temp path: portable (no Windows-only
+        // drive-letter assumption) and guaranteed absent on any machine.
+        var missingDir = Path.Combine(Path.GetTempPath(), $"aspire-openldap-missing-{Guid.NewGuid():N}");
         var ex = Assert.Throws<DistributedApplicationException>(() =>
             builder.AddOpenLdap("ldap").WithTls(
-                "Z:\\does\\not\\exist\\server.crt",
-                "Z:\\does\\not\\exist\\server.key",
-                "Z:\\does\\not\\exist\\ca.crt"));
+                Path.Combine(missingDir, "server.crt"),
+                Path.Combine(missingDir, "server.key"),
+                Path.Combine(missingDir, "ca.crt")));
         Assert.Contains("not found", ex.Message);
     }
 
