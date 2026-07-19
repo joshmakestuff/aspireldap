@@ -24,13 +24,14 @@ public class OpenLdapInstrumentationTests
     }
 
     [Theory]
+    // Every explicitly non-error code gets its own row (dropping one from the switch must
+    // fail here); a single representative covers the default error branch.
     [InlineData(ResultCode.Success, false)]
     [InlineData(ResultCode.CompareTrue, false)]
     [InlineData(ResultCode.CompareFalse, false)]
     [InlineData(ResultCode.Referral, false)]
+    [InlineData(ResultCode.ReferralV2, false)]
     [InlineData(ResultCode.NoSuchObject, true)]
-    [InlineData(ResultCode.OperationsError, true)]
-    [InlineData(ResultCode.ProtocolError, true)]
     public void IsErrorCode_ClassifiesResultCodes(ResultCode code, bool expectedError)
         => Assert.Equal(expectedError, OpenLdapInstrumentation.IsErrorCode(code));
 
@@ -63,6 +64,12 @@ public class OpenLdapInstrumentationTests
         request.Controls.Add(new PageResultRequestControl(500));
 
         OpenLdapInstrumentation.SetRequestTags(activity, request, "search", "ldap.example.com", 389);
+
+        // EXACT request-tag key set: any new tag (a filter, a base DN, an attribute list)
+        // fails here even before the value-level PII guard below.
+        Assert.Equal(
+            ["db.system.name", "db.operation.name", "server.address", "server.port", "db.ldap.scope", "db.ldap.controls"],
+            activity.TagObjects.Select(t => t.Key).ToArray());
 
         Assert.Equal("openldap", activity.GetTagItem("db.system.name"));
         Assert.Equal("search", activity.GetTagItem("db.operation.name"));
@@ -108,6 +115,9 @@ public class OpenLdapInstrumentationTests
         Assert.Equal(ActivityStatusCode.Error, activity.Status);
         Assert.Equal(typeof(DirectoryOperationException).FullName, activity.GetTagItem("error.type"));
 
+        // EXACT response-tag key set for the exception path: the type tag and nothing else.
+        Assert.Equal(["error.type"], activity.TagObjects.Select(t => t.Key).ToArray());
+
         Assert.Empty(activity.Events);
         foreach (var tag in activity.TagObjects)
         {
@@ -118,17 +128,29 @@ public class OpenLdapInstrumentationTests
     [Fact]
     public void BuildMetricTags_AreLowCardinality()
     {
-        var tags = OpenLdapInstrumentation.BuildMetricTags("search", "ldap.example.com", 389, ResultCode.Success, failure: null);
-        var keys = tags.Select(t => t.Key).ToList();
+        // EXACT allowlists, not per-key Contains: adding any tag — a DN, a filter, a
+        // control value, an exception message — changes the key set and fails this test.
+        var success = OpenLdapInstrumentation.BuildMetricTags(
+            "search", "ldap.example.com", 389, ResultCode.Success, failure: null);
+        Assert.Equal(
+            ["db.system.name", "db.operation.name", "server.address", "server.port", "db.response.status_code"],
+            success.Select(t => t.Key).ToArray());
+        Assert.Equal("openldap", success.Single(t => t.Key == "db.system.name").Value);
+        Assert.Equal("search", success.Single(t => t.Key == "db.operation.name").Value);
+        Assert.Equal("ldap.example.com", success.Single(t => t.Key == "server.address").Value);
+        Assert.Equal(389, success.Single(t => t.Key == "server.port").Value);
+        Assert.Equal((int)ResultCode.Success, success.Single(t => t.Key == "db.response.status_code").Value);
 
-        Assert.Contains("db.system.name", keys);
-        Assert.Contains("db.operation.name", keys);
-        Assert.Contains("server.address", keys);
-        Assert.Contains("server.port", keys);
-        Assert.Contains("db.response.status_code", keys);
-
-        // High-cardinality / PII keys must never be metric tags.
-        Assert.DoesNotContain("db.ldap.entries_returned", keys);
-        Assert.DoesNotContain("db.ldap.controls", keys);
+        // Failure path: the exception contributes its TYPE as error.type and nothing else —
+        // the sentinel DN in its message must not reach any tag value.
+        const string sentinel = "cn=sentinel-user,ou=people,dc=example,dc=org";
+        var failure = OpenLdapInstrumentation.BuildMetricTags(
+            "search", "ldap.example.com", 389, code: null,
+            new System.DirectoryServices.Protocols.DirectoryOperationException($"No such object: {sentinel}"));
+        Assert.Equal(
+            ["db.system.name", "db.operation.name", "server.address", "server.port", "error.type"],
+            failure.Select(t => t.Key).ToArray());
+        Assert.Equal(typeof(DirectoryOperationException).FullName, failure.Single(t => t.Key == "error.type").Value);
+        Assert.All(failure, t => Assert.DoesNotContain(sentinel, t.Value?.ToString() ?? string.Empty));
     }
 }

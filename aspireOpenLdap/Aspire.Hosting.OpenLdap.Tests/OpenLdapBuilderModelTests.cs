@@ -45,8 +45,7 @@ public class OpenLdapBuilderModelTests
     [InlineData("dc=exa\nmple,dc=org", "control characters")]            // LDIF line injection
     [InlineData("c=USA", "two-letter ISO 3166")]                         // country > 2 chars
     [InlineData("c=U1", "two-letter ISO 3166")]                          // country non-letter
-    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; (ldifdotnet#43)
-    [InlineData("dc=exa;mple,dc=org", "unescaped ';'")]                  // slapd rejects as olcSuffix
+    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; (ldifdotnet#43); same pre-parser guard rejects it anywhere in the DN
     public void WithBaseDn_Rejects_Invalid_Or_Unsupported_Dns(string baseDn, string expectedFragment)
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -97,9 +96,8 @@ public class OpenLdapBuilderModelTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(65536)]
+    [InlineData(0)]     // lower bound (negative values hit the same branch)
+    [InlineData(65536)] // upper bound
     public void Out_Of_Range_Ports_Fail_At_The_Fluent_Call(int port)
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -164,11 +162,14 @@ public class OpenLdapBuilderModelTests
     public void WithTls_Missing_File_Fails_At_Model_Construction()
     {
         var builder = DistributedApplication.CreateBuilder();
+        // A unique, never-created directory under the temp path: portable (no Windows-only
+        // drive-letter assumption) and guaranteed absent on any machine.
+        var missingDir = Path.Combine(Path.GetTempPath(), $"aspire-openldap-missing-{Guid.NewGuid():N}");
         var ex = Assert.Throws<DistributedApplicationException>(() =>
             builder.AddOpenLdap("ldap").WithTls(
-                "Z:\\does\\not\\exist\\server.crt",
-                "Z:\\does\\not\\exist\\server.key",
-                "Z:\\does\\not\\exist\\ca.crt"));
+                Path.Combine(missingDir, "server.crt"),
+                Path.Combine(missingDir, "server.key"),
+                Path.Combine(missingDir, "ca.crt")));
         Assert.Contains("not found", ex.Message);
     }
 
@@ -200,15 +201,19 @@ public class OpenLdapBuilderModelTests
 
         var admin = Assert.Single(builder.Resources.OfType<PhpLdapAdminResource>());
 
-        // The image pin is a claim ("2.3.11, not latest") that nothing else witnesses; a
-        // regression back to a floating tag would otherwise pass CI silently.
+        // The image pin is a claim that nothing else witnesses; assert the EXACT repository
+        // and tag so a silent re-pin (or drift back to a floating tag) fails here. Bumping
+        // the pin deliberately means updating this test — that is the point.
         var image = Assert.Single(admin.Annotations.OfType<ContainerImageAnnotation>());
-        Assert.Contains("phpldapadmin", image.Image, StringComparison.OrdinalIgnoreCase);
-        Assert.False(string.IsNullOrEmpty(image.Tag), "phpLDAPadmin image must carry an explicit tag");
-        Assert.NotEqual("latest", image.Tag);
+        Assert.Equal("phpldapadmin/phpldapadmin", image.Image);
+        Assert.Equal("2.3.11", image.Tag);
 
-        // The static-asset health check (see #31) must stay registered.
-        Assert.NotEmpty(admin.Annotations.OfType<HealthCheckAnnotation>());
+        // The static-asset health check (see #31) must stay registered with exactly this
+        // configuration. Aspire encodes {resource}_{endpoint}_{path}_{status} in the check
+        // key, so a wrong path (e.g. the login page, which floods the LDAP log) or status
+        // fails deterministically.
+        var health = Assert.Single(admin.Annotations.OfType<HealthCheckAnnotation>());
+        Assert.Equal("ldap-admin_http_/robots.txt_200_check", health.Key);
     }
 
     [Fact]
@@ -286,9 +291,8 @@ public class OpenLdapBuilderModelTests
     }
 
     [Theory]
-    [InlineData(4096)]  // gap in slapd's defined levels
-    [InlineData(8192)]
-    [InlineData(-1)]
+    [InlineData(4096)]  // representative undefined positive bit (gap in slapd's defined levels)
+    [InlineData(-1)]    // negative / all-bits
     public void WithLogLevel_Rejects_Undefined_Bits(int raw)
     {
         var builder = DistributedApplication.CreateBuilder();

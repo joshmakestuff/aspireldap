@@ -34,12 +34,13 @@ public class OpenSslSubjectHashTests
     public void EnsureTrustDirectory_Stages_Pem_Under_Its_Subject_Hash_Name()
     {
         var caPath = Path.Combine(Path.GetTempPath(), $"aspire-openldap-test-ca-{Guid.NewGuid():N}.crt");
+        string? trustDir = null;
         try
         {
             using var cert = CreateSelfSigned("CN=Aspire OpenLDAP Probe CA");
             File.WriteAllText(caPath, cert.ExportCertificatePem());
 
-            var trustDir = OpenLdapUnixTlsTrust.EnsureTrustDirectory(caPath);
+            trustDir = OpenLdapUnixTlsTrust.EnsureTrustDirectory(caPath);
 
             var hashedPath = Path.Combine(trustDir, "60d2801f.0");
             Assert.True(File.Exists(hashedPath), $"expected staged CA at {hashedPath}");
@@ -51,6 +52,7 @@ public class OpenSslSubjectHashTests
         finally
         {
             File.Delete(caPath);
+            DeleteTrustDir(trustDir);
         }
     }
 
@@ -59,6 +61,7 @@ public class OpenSslSubjectHashTests
     {
         var caPath1 = Path.Combine(Path.GetTempPath(), $"aspire-openldap-test-ca-{Guid.NewGuid():N}.crt");
         var caPath2 = Path.Combine(Path.GetTempPath(), $"aspire-openldap-test-ca-{Guid.NewGuid():N}.crt");
+        string? trustDir1 = null, trustDir2 = null;
         try
         {
             using var ca1 = CreateSelfSigned("CN=First CA");
@@ -66,16 +69,29 @@ public class OpenSslSubjectHashTests
             File.WriteAllText(caPath1, ca1.ExportCertificatePem());
             File.WriteAllText(caPath2, ca2.ExportCertificatePem());
 
+            trustDir1 = OpenLdapUnixTlsTrust.EnsureTrustDirectory(caPath1);
+            trustDir2 = OpenLdapUnixTlsTrust.EnsureTrustDirectory(caPath2);
+
             // Different CA content must never share a directory — libldap trusts everything in
             // the configured directory, so a shared path would silently widen trust.
-            Assert.NotEqual(
-                OpenLdapUnixTlsTrust.EnsureTrustDirectory(caPath1),
-                OpenLdapUnixTlsTrust.EnsureTrustDirectory(caPath2));
+            Assert.NotEqual(trustDir1, trustDir2);
         }
         finally
         {
             File.Delete(caPath1);
             File.Delete(caPath2);
+            DeleteTrustDir(trustDir1);
+            DeleteTrustDir(trustDir2);
+        }
+    }
+
+    // Trust directories are content-addressed under the system temp path; the freshly
+    // generated per-run CAs above are unique, so deleting them cannot race another test.
+    private static void DeleteTrustDir(string? trustDir)
+    {
+        if (trustDir is not null && Directory.Exists(trustDir))
+        {
+            Directory.Delete(trustDir, recursive: true);
         }
     }
 
