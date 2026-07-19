@@ -58,6 +58,27 @@ public class ConnectionStringTests
     }
 
     [Fact]
+    public void QuotedParameterValue_Manifest_Expression_Carries_The_Quotes()
+    {
+        // At deployment time the manifest substitutes the parameter's raw value with no code
+        // of ours running, so the expression itself must carry the connection-string quotes —
+        // otherwise a deployed password containing ';' or edge whitespace corrupts the
+        // connection string even though the same secret works during local AppHost resolution.
+        var parameter = new Aspire.Hosting.ApplicationModel.ParameterResource("pw", _ => "unused", secret: true);
+        var quoted = new Aspire.Hosting.ApplicationModel.QuotedParameterValue(parameter);
+
+        Assert.Equal(
+            $"\"{parameter.ValueExpression}\"",
+            ((Aspire.Hosting.ApplicationModel.IManifestExpressionProvider)quoted).ValueExpression);
+
+        // The deployed shape — literal quotes around a substituted raw value — parses back
+        // losslessly for any value without embedded double quotes.
+        var parsed = OpenLdapConnectionStringBuilder.Parse(
+            "Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\" se;cret \"");
+        Assert.Equal(" se;cret ", parsed.BindPassword);
+    }
+
+    [Fact]
     public void Duplicate_Keys_Are_Rejected()
     {
         Assert.Throws<FormatException>(() => OpenLdapConnectionStringBuilder.Parse(

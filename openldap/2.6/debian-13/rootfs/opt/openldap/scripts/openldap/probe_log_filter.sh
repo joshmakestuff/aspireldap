@@ -84,7 +84,10 @@ while true; do
             flush_stale
             continue
         fi
-        break # EOF: slapd exited.
+        # EOF: slapd exited. read(1) also leaves an unterminated final line in $line —
+        # fold it into $partial so the tail flush below emits it (fail-open).
+        partial+="$line"
+        break
     fi
 
     if [[ "$line" =~ conn=([0-9]+) ]]; then
