@@ -940,6 +940,51 @@ public static class OpenLdapResourceBuilderExtensions
         return builder.WithBindMount(source, "/ldifs", isReadOnly);
     }
 
+    private const OpenLdapLogLevel KnownLogLevels =
+        OpenLdapLogLevel.Trace | OpenLdapLogLevel.Packets | OpenLdapLogLevel.Args |
+        OpenLdapLogLevel.Connections | OpenLdapLogLevel.Ber | OpenLdapLogLevel.Filter |
+        OpenLdapLogLevel.Config | OpenLdapLogLevel.Acl | OpenLdapLogLevel.Stats |
+        OpenLdapLogLevel.StatsExtra | OpenLdapLogLevel.Shell | OpenLdapLogLevel.Parse |
+        OpenLdapLogLevel.Sync | OpenLdapLogLevel.Urgent;
+
+    /// <summary>
+    /// Sets slapd's debug log level (<c>LDAP_LOGLEVEL</c>). Defaults to
+    /// <see cref="OpenLdapLogLevel.Stats"/> — connection/operation/result lines. Combine flags
+    /// for more detail (e.g. <c>Stats | Config</c>), or pass <see cref="OpenLdapLogLevel.None"/>
+    /// to silence slapd's debug output entirely.
+    /// </summary>
+    /// <remarks>
+    /// Health-check probe connections are filtered out of the stats log independently of this
+    /// level — see <see cref="WithHealthCheckProbeLogging"/> to bring them back.
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithLogLevel(
+        this IResourceBuilder<OpenLdapResource> builder,
+        OpenLdapLogLevel level)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        if ((level & ~KnownLogLevels) != OpenLdapLogLevel.None)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(level), level, "Value contains bits that are not defined slapd log levels.");
+        }
+        return builder.WithEnvironment("LDAP_LOGLEVEL", ((int)level).ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// Keeps the AppHost health-check probe's connection lines in the container log
+    /// (<c>LDAP_LOG_HEALTH_PROBES</c>). By default the container drops the stats-log block of
+    /// each wholly-successful probe (identified by the <c>aspire-healthcheck</c> sentinel
+    /// attribute in its root DSE search) so continuous polling doesn't drown out real traffic;
+    /// probes that fail in any way are always logged in full.
+    /// </summary>
+    public static IResourceBuilder<OpenLdapResource> WithHealthCheckProbeLogging(
+        this IResourceBuilder<OpenLdapResource> builder,
+        bool enabled = true)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder.WithEnvironment("LDAP_LOG_HEALTH_PROBES", enabled ? "yes" : "no");
+    }
+
     /// <summary>
     /// Enables anonymous LDAP binding on the container.
     /// </summary>
@@ -1004,6 +1049,13 @@ public static class OpenLdapResourceBuilderExtensions
             .WithImage(PhpLdapAdminResource.DefaultImageName, PhpLdapAdminResource.DefaultImageTag)
             .WithHttpEndpoint(targetPort: PhpLdapAdminResource.ContainerHttpPort, name: PhpLdapAdminResource.HttpEndpointName)
             .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", loginObjectClass ?? "inetOrgPerson")
+            // The image is a Laravel app whose default log channel is a file inside the
+            // container ('daily'), so LDAP failures — unreachable server, bad admin bind —
+            // never reach the container log or the dashboard console. Route the app log to
+            // stderr, at 'info' so failures (ERROR) and login attempts (INFO) surface while
+            // the per-page-render DEBUG dumps (full root-DSE etc.) stay suppressed.
+            .WithEnvironment("LOG_CHANNEL", "stderr")
+            .WithEnvironment("LOG_LEVEL", "info")
             // All parent-derived settings resolve when the admin container starts, so fluent
             // calls chained on the parent AFTER WithPhpLdapAdmin (WithBaseDn, WithAdminUsername,
             // WithTls().WithRequiredTls()) still take effect here.
@@ -1029,10 +1081,12 @@ public static class OpenLdapResourceBuilderExtensions
                     context.EnvironmentVariables["LDAPTLS_REQCERT"] = "never";
                 }
             })
-            // The login page only renders 200 when the LDAP bind succeeds (it does a root-DSE
-            // query during page construction), so this also doubles as an end-to-end connectivity
-            // probe between the admin container and the LDAP server.
-            .WithHttpHealthCheck(path: "/", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)
+            // Deliberately a static asset, not the login page: the login page performs a real
+            // admin bind + root-DSE query on every render, so health-polling it flooded the
+            // LDAP container's log with un-filterable query noise (#31). LDAP connectivity is
+            // covered by the parent resource's own health check plus WaitFor below; this check
+            // only proves the admin container serves HTTP.
+            .WithHttpHealthCheck(path: "/robots.txt", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)
             .WaitFor(builder);
 
         configureContainer?.Invoke(admin);

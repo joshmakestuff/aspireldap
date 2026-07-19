@@ -43,6 +43,7 @@ ldapsearch -x -H ldap://localhost:1389 -b "" -s base "(objectClass=*)" +
 | `LDAP_ADMIN_USERNAME` | `admin` | Admin CN component (admin DN = `cn={username},{root}`) |
 | `LDAP_ADMIN_PASSWORD` | `adminpassword` | Admin password |
 | `LDAP_LOGLEVEL` | `256` | slapd debug log level |
+| `LDAP_LOG_HEALTH_PROBES` | `no` | Log Aspire health-check probe connections (sentinel-marked, wholly-successful probe blocks are filtered from the stats log by default; failed probes always log in full) |
 | `LDAP_ULIMIT_NOFILES` | `1024` | File descriptor limit |
 | `LDAP_ALLOW_ANON_BINDING` | `yes` | Allow anonymous LDAP binds |
 | `LDAP_PASSWORD_HASH` | `{SSHA}` | Password hashing algorithm |

@@ -37,6 +37,8 @@ builder.Build().Run();
 - `WithAnonymousBinding(...)` — allow unauthenticated binds.
 - `WithTls(...)` / `WithRequiredTls(...)` — enable LDAPS; auto-generates a self-signed cert if you don't supply one.
 - `WithPhpLdapAdmin(...)` — add a sibling phpLDAPadmin UI container.
+- `WithLogLevel(...)` — set slapd's debug log level (default `Stats`: connection/operation/result lines).
+- `WithHealthCheckProbeLogging(...)` — keep the health-check probe's connections in the container log. By default the container filters out each wholly-successful probe block so the dashboard console isn't drowned in probe noise; probes that fail in any way always log in full.
 
 A health check that hits the LDAP root DSE is registered automatically.
 

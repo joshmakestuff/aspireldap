@@ -45,13 +45,16 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
 
             var bindDn = resource.AdminBindDn;
 
-            // Root DSE query: base DN = "", scope = Base.
-            // The "aspire-healthcheck" attribute is a sentinel — slapd logs the attribute list
-            // verbatim, so a downstream log parser can drop healthcheck probes by matching this
-            // name. slapd returns nothing for it since it's not a real attribute.
+            // Root DSE query: base DN = "", scope = Base. The probe marks itself twice so the
+            // container's log filter (probe_log_filter.sh) can identify it unambiguously:
+            // the "aspire-healthcheck" sentinel attribute (slapd logs the attribute list
+            // verbatim; slapd returns nothing for it since it's not a real attribute), and the
+            // "(cn=aspire-healthcheck)" branch of the filter (semantically a no-op alongside
+            // (objectClass=*), logged by slapd on the SRCH line — value case-normalized, hence
+            // the lowercase token).
             var request = new SearchRequest(
                 distinguishedName: "",
-                ldapFilter: "(objectClass=*)",
+                ldapFilter: "(|(objectClass=*)(cn=aspire-healthcheck))",
                 searchScope: SearchScope.Base,
                 attributeList: ["namingContexts", "aspire-healthcheck"]);
 
