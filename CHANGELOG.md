@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+### Fixed
+
+Findings from a third (2026-07-19) adversarial code review (R1–R3, B1–B4):
+
+- **`LDAP_ACCESSLOG_ADMIN_PASSWORD` was silently ignored** (B1, high). The env block
+  unconditionally rebuilt it from the differently-named `LDAP_ACCESSLOG_PASSWORD`, so a
+  configured access-log admin password was reset to the known default `accesspassword` — the
+  access-log database (potentially sensitive query/write history) stayed readable with a
+  documented default even when the user believed the password was changed.
+  `LDAP_ACCESSLOG_ADMIN_PASSWORD` is now canonical (matching its `_FILE` Docker-secret name);
+  `LDAP_ACCESSLOG_PASSWORD` remains a deprecated alias honored only when the canonical
+  variable is absent, in plain and `_FILE` form. Both are now documented.
+- **DN validation and container bootstrap now agree on root-RDN semantics** (R1).
+  `WithBaseDn("c=USA")` passed model validation but died mid-bootstrap on an opaque
+  `olcSuffix: value #0 invalid per syntax` (the country attribute takes a two-character
+  Country String); both the model validation and the container's own validation now reject
+  non-two-letter `c=` roots up front. Hex escapes in the root RDN value (`o=Acme\2C Inc.`)
+  were unescaped by stripping the backslash — emitting a mangled second naming value
+  (`o: Acme2C Inc.`) alongside the server-derived correct one; the bootstrap now decodes
+  RFC 4514 escapes properly (hex pairs, UTF-8 octet sequences, escaped separators).
+- **Default-tree user passwords are now stored hashed** (R2). The built-in
+  `LDAP_USERS`/`LDAP_PASSWORDS` tree loaded `userPassword` values verbatim, so a default
+  `slapcat` showed base64-recoverable cleartext (`LDAP_PASSWORD_HASH` only governs the
+  password-modify extended operation, not `ldapadd`). They are hashed with `slappasswd`
+  (`{SSHA}`) like the admin and typed-seed passwords; cleartext binds still work.
+- **A configured but missing/unloadable client CA certificate now fails closed** (B2).
+  `CaCertFile` pointing at a nonexistent or non-PEM file silently fell back to the platform
+  trust store — the effective TLS trust policy could differ from configuration with only a
+  generic handshake error (or none) as a symptom. `CreateConnection()` now throws an
+  actionable error naming the path; opting out of custom trust remains explicit via
+  `TrustConnectionStringCaCertificate = false`. The connection is also disposed if trust
+  configuration fails partway.
+- **Published manifests now quote the bind password expression** (B3). The manifest path
+  substitutes the password parameter at deployment time — after quoting used to happen — so
+  a deployed password containing `;` or edge whitespace corrupted the connection string even
+  though it worked locally. The manifest expression now carries the connection-string quotes.
+  Known limit: embedded double quotes cannot be escaped at deploy time and fail loudly at
+  client parse time.
+- **Telemetry no longer records exception messages** (B4). Failure spans called
+  `Activity.AddException`, whose event includes the exception message — LDAP server
+  diagnostics can embed DNs and other directory data, contradicting the integration's no-PII
+  telemetry contract. Failures now record only the sanitized `error.type` (exception type
+  name), matching the metric tags.
+- **The probe log filter no longer drops an unterminated final log line** (R3). When slapd
+  died mid-line, the EOF read path discarded the partial line it had consumed, losing the
+  tail of the fatal message — contradicting the filter's fail-open contract. The fragment is
+  now flushed with the rest of the withheld output.
+
 ### Added
 
 - **Health-check probe traffic no longer floods the container log** (#31). The Aspire health

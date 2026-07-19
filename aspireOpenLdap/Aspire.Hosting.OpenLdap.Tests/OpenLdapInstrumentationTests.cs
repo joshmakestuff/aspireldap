@@ -94,6 +94,28 @@ public class OpenLdapInstrumentationTests
     }
 
     [Fact]
+    public void SetResponseTags_RecordsExceptionType_ButNeverItsMessage()
+    {
+        using var activity = new Activity("test");
+        activity.Start();
+
+        // Server-supplied diagnostics routinely embed DNs; none of this text may be exported.
+        var failure = new DirectoryOperationException(
+            "No such object: cn=sentinel-user,ou=people,dc=example,dc=org");
+
+        OpenLdapInstrumentation.SetResponseTags(activity, response: null, code: null, failure);
+
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Equal(typeof(DirectoryOperationException).FullName, activity.GetTagItem("error.type"));
+
+        Assert.Empty(activity.Events);
+        foreach (var tag in activity.TagObjects)
+        {
+            Assert.DoesNotContain("sentinel-user", tag.Value?.ToString() ?? string.Empty);
+        }
+    }
+
+    [Fact]
     public void BuildMetricTags_AreLowCardinality()
     {
         var tags = OpenLdapInstrumentation.BuildMetricTags("search", "ldap.example.com", 389, ResultCode.Success, failure: null);

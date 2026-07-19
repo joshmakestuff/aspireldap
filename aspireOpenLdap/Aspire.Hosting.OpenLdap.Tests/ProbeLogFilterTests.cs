@@ -128,6 +128,44 @@ public class ProbeLogFilterTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("fatal: assertion failed")]                       // unterminated only
+    [InlineData("slapd starting\nfatal: assertion failed")]       // terminated then unterminated
+    public async Task Filter_Preserves_Unterminated_Final_Line(string fixture)
+    {
+        // An abrupt slapd death can end the log mid-line; the fail-open contract says that
+        // fragment must still surface. (read(1) reports EOF while leaving the consumed
+        // partial line in the variable — the filter must not drop it.)
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var image = await BuildBundledImageAsync(cts.Token);
+
+        var fixtureDir = Directory.CreateTempSubdirectory("aspire-openldap-probefilter-").FullName;
+        try
+        {
+            // WriteAllText adds no trailing newline: the final line is unterminated.
+            await File.WriteAllTextAsync(Path.Combine(fixtureDir, "fixture.log"), fixture, cts.Token);
+            WidenPermissionsForContainer(fixtureDir);
+
+            var run = await DockerAsync(cts.Token,
+                "run", "--rm",
+                "-v", $"{fixtureDir}:/fixture:ro",
+                "--entrypoint", "bash",
+                image,
+                "-c", "/opt/openldap/scripts/openldap/probe_log_filter.sh < /fixture/fixture.log");
+            Assert.True(run.ExitCode == 0, $"filter run failed: {run.Output}");
+
+            Assert.Contains("fatal: assertion failed", run.Output);
+            if (fixture.Contains('\n'))
+            {
+                Assert.Contains("slapd starting", run.Output);
+            }
+        }
+        finally
+        {
+            Directory.Delete(fixtureDir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task Running_Container_Filters_Probe_Searches_But_Logs_Real_Traffic()
     {

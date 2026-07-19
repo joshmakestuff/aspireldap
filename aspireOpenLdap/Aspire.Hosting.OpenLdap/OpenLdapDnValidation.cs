@@ -67,6 +67,21 @@ internal static class OpenLdapDnValidation
                 "The container bootstrap and the seed generator can create root entries for 'dc=', 'o=', and 'c=' bases.",
                 paramName);
         }
+
+        // The country attribute uses OpenLDAP's two-character Country String syntax; anything
+        // else passes DN parsing here but fails container bootstrap with an opaque
+        // "olcSuffix: value #0 invalid per syntax".
+        if (string.Equals(root.Type, "c", StringComparison.OrdinalIgnoreCase))
+        {
+            var country = root.Value;
+            if (country.Length != 2 || !char.IsAsciiLetter(country[0]) || !char.IsAsciiLetter(country[1]))
+            {
+                throw new ArgumentException(
+                    $"Base DN '{baseDn}' uses 'c={country}' as its root, but the country naming attribute " +
+                    "requires a two-letter ISO 3166 code (e.g. 'c=US').",
+                    paramName);
+            }
+        }
     }
 
     /// <summary>

@@ -236,7 +236,9 @@ export LDAP_ACCESSLOG_LOGOLD="${LDAP_ACCESSLOG_LOGOLD:-(objectClass=*)}"
 export LDAP_ACCESSLOG_LOGOLDATTR="${LDAP_ACCESSLOG_LOGOLDATTR:-objectClass}"
 export LDAP_ACCESSLOG_ADMIN_USERNAME="${LDAP_ACCESSLOG_ADMIN_USERNAME:-admin}"
 export LDAP_ACCESSLOG_ADMIN_DN="${LDAP_ACCESSLOG_ADMIN_USERNAME/#/cn=},${LDAP_ACCESSLOG_DB:-cn=accesslog}"
-export LDAP_ACCESSLOG_ADMIN_PASSWORD="${LDAP_ACCESSLOG_PASSWORD:-accesspassword}"
+# LDAP_ACCESSLOG_ADMIN_PASSWORD is resolved below, after Docker-secret (*_FILE) handling,
+# so both the canonical name and the deprecated LDAP_ACCESSLOG_PASSWORD alias work in
+# plain and _FILE form.
 export LDAP_ENABLE_SYNCPROV="${LDAP_ENABLE_SYNCPROV:-no}"
 export LDAP_SYNCPROV_CHECKPPOINT="${LDAP_SYNCPROV_CHECKPPOINT:-100 10}"
 export LDAP_SYNCPROV_SESSIONLOG="${LDAP_SYNCPROV_SESSIONLOG:-100}"
@@ -246,6 +248,7 @@ ldap_env_vars=(
     LDAP_ADMIN_PASSWORD
     LDAP_CONFIG_ADMIN_PASSWORD
     LDAP_ACCESSLOG_ADMIN_PASSWORD
+    LDAP_ACCESSLOG_PASSWORD
 )
 for env_var in "${ldap_env_vars[@]}"; do
     file_env_var="${env_var}_FILE"
@@ -260,6 +263,16 @@ for env_var in "${ldap_env_vars[@]}"; do
 done
 unset ldap_env_vars
 
+# LDAP_ACCESSLOG_ADMIN_PASSWORD is the canonical variable (it matches the *_FILE secret
+# name above). LDAP_ACCESSLOG_PASSWORD is a deprecated alias, honored only when the
+# canonical variable is absent — it used to take precedence and silently reset an
+# explicitly configured LDAP_ACCESSLOG_ADMIN_PASSWORD back to the default.
+if [[ -z "${LDAP_ACCESSLOG_ADMIN_PASSWORD:-}" && -n "${LDAP_ACCESSLOG_PASSWORD:-}" ]]; then
+    warn "LDAP_ACCESSLOG_PASSWORD is deprecated; use LDAP_ACCESSLOG_ADMIN_PASSWORD instead."
+    export LDAP_ACCESSLOG_ADMIN_PASSWORD="${LDAP_ACCESSLOG_PASSWORD}"
+fi
+export LDAP_ACCESSLOG_ADMIN_PASSWORD="${LDAP_ACCESSLOG_ADMIN_PASSWORD:-accesspassword}"
+
 # Pre-hash passwords using slappasswd. printf '%s' with a QUOTED expansion is deliberate:
 # an unquoted echo would word-split/glob the value, silently hashing a different password
 # than the one later used to bind (collapsed spaces, expanded wildcards).
@@ -267,6 +280,56 @@ export LDAP_ENCRYPTED_ADMIN_PASSWORD="$(printf '%s' "$LDAP_ADMIN_PASSWORD" | sla
 export LDAP_ENCRYPTED_CONFIG_ADMIN_PASSWORD="$(printf '%s' "$LDAP_CONFIG_ADMIN_PASSWORD" | slappasswd -n -T /dev/stdin)"
 export LDAP_ENCRYPTED_ACCESSLOG_ADMIN_PASSWORD="$(printf '%s' "$LDAP_ACCESSLOG_ADMIN_PASSWORD" | slappasswd -n -T /dev/stdin)"
 EOF
+}
+
+########################
+# Split a DN string on unescaped comma/semicolon separators into the caller's
+# ldap_dn_rdns array (o=Acme\, Inc.,c=US must not split mid-value).
+########################
+ldap_split_rdns() {
+    local dn="$1" current="" ch
+    local -i i escaped=0
+    ldap_dn_rdns=()
+    for (( i = 0; i < ${#dn}; i++ )); do
+        ch="${dn:i:1}"
+        if (( escaped )); then
+            current+="$ch"
+            escaped=0
+        elif [[ "$ch" == "\\" ]]; then
+            current+="$ch"
+            escaped=1
+        elif [[ "$ch" == "," || "$ch" == ";" ]]; then
+            ldap_dn_rdns+=("$current")
+            current=""
+        else
+            current+="$ch"
+        fi
+    done
+    ldap_dn_rdns+=("$current")
+}
+
+########################
+# Decode one RFC 4514-escaped attribute value: \XX hex pairs become the byte they
+# encode (consecutive pairs reassemble UTF-8), \c becomes the literal character c.
+########################
+ldap_unescape_rdn_value() {
+    local value="$1" out="" ch hex
+    local -i i
+    for (( i = 0; i < ${#value}; i++ )); do
+        ch="${value:i:1}"
+        if [[ "$ch" == "\\" ]]; then
+            hex="${value:i+1:2}"
+            if [[ "$hex" =~ ^[0-9A-Fa-f][0-9A-Fa-f]$ ]]; then
+                printf -v ch '%b' "\\x${hex}"
+                (( i += 2 ))
+            else
+                ch="${value:i+1:1}"
+                (( i += 1 ))
+            fi
+        fi
+        out+="$ch"
+    done
+    printf '%s' "$out"
 }
 
 ########################
@@ -326,7 +389,19 @@ ldap_validate() {
     # dying mid-bootstrap at "Creating LDAP default tree".
     local root_type="${LDAP_ROOT%%=*}"
     case "$(tr '[:upper:]' '[:lower:]' <<< "$root_type")" in
-        dc|o|c) ;;
+        dc|o) ;;
+        c)
+            # The country attribute uses the two-character Country String syntax; a longer
+            # value would otherwise die mid-bootstrap with an opaque "olcSuffix: value #0
+            # invalid per syntax" from ldapmodify.
+            local -a ldap_dn_rdns=()
+            ldap_split_rdns "$LDAP_ROOT"
+            local root_value
+            root_value="$(ldap_unescape_rdn_value "${ldap_dn_rdns[0]#*=}")"
+            if (( ${#root_value} != 2 )); then
+                print_validation_error "A c= LDAP_ROOT needs a two-character country code (got 'c=${root_value}')"
+            fi
+            ;;
         *) print_validation_error "LDAP_ROOT must begin with a dc=, o= or c= component (got '${root_type}=')" ;;
     esac
 
@@ -636,40 +711,28 @@ ldap_apply_access() {
 ldap_create_tree() {
     info "Creating LDAP default tree"
     # The LEADING RDN of LDAP_ROOT names the root entry, so it drives the object class
-    # and must appear as an attribute. Split it off at the first UNESCAPED comma
-    # (o=Acme\, Inc.,c=US must not split mid-value), then unescape the value.
-    local first_rdn="" ch escaped=0
-    local -i i
-    for (( i = 0; i < ${#LDAP_ROOT}; i++ )); do
-        ch="${LDAP_ROOT:i:1}"
-        if (( escaped )); then
-            first_rdn+="$ch"
-            escaped=0
-        elif [[ "$ch" == "\\" ]]; then
-            first_rdn+="$ch"
-            escaped=1
-        elif [[ "$ch" == "," ]]; then
-            break
-        else
-            first_rdn+="$ch"
-        fi
-    done
-    local root_type root_value rest root_entry
-    root_type="$(tr '[:upper:]' '[:lower:]' <<< "${first_rdn%%=*}")"
-    root_value="$(sed -E 's/\\(.)/\1/g' <<< "${first_rdn#*=}")"
-    rest="${LDAP_ROOT:i+1}"
+    # and must appear as an attribute. Split the DN on unescaped separators only
+    # (o=Acme\, Inc.,c=US must not split mid-value), then DECODE the value's RFC 4514
+    # escapes — hex pairs included, so \2C becomes a comma, not the literal text "2C" —
+    # or the emitted attribute would disagree with the value slapd derives from the DN.
+    local -a ldap_dn_rdns=()
+    ldap_split_rdns "$LDAP_ROOT"
+    local root_type root_value root_entry
+    root_type="$(tr '[:upper:]' '[:lower:]' <<< "${ldap_dn_rdns[0]%%=*}")"
+    root_value="$(ldap_unescape_rdn_value "${ldap_dn_rdns[0]#*=}")"
 
     case "$root_type" in
         dc)
             # organization requires an o attribute; use the first o= elsewhere in the
-            # DN, falling back to the dc value. Split on commas only (not spaces), so
-            # an o value containing spaces survives.
+            # DN, falling back to the dc value.
             local o="$root_value" attr
-            local -a root=()
-            IFS=';,' read -r -a root <<< "$rest"
-            for attr in "${root[@]}"; do
-                if [[ $attr = o=* ]]; then
-                    o="${attr:2}"
+            local -i n
+            for (( n = 1; n < ${#ldap_dn_rdns[@]}; n++ )); do
+                # Tolerate insignificant whitespace after the separator ("dc=x, o=y").
+                attr="${ldap_dn_rdns[n]}"
+                while [[ "$attr" == ' '* ]]; do attr="${attr# }"; done
+                if [[ $attr = [oO]=* ]]; then
+                    o="$(ldap_unescape_rdn_value "${attr#*=}")"
                     break
                 fi
             done
@@ -710,7 +773,11 @@ EOF
     read -r -a users <<< "$(tr ',;' ' ' <<< "${LDAP_USERS}")"
     read -r -a passwords <<< "$(tr ',;' ' ' <<< "${LDAP_PASSWORDS}")"
     local index=0
+    local hashed_password
     for user in "${users[@]}"; do
+        # Hash at rest like the admin and typed-seed passwords; a raw userPassword loaded
+        # via ldapadd is stored verbatim — LDAP_PASSWORD_HASH does not retroactively apply.
+        hashed_password="$(printf '%s' "${passwords[$index]}" | slappasswd -n -T /dev/stdin)"
         cat >> "${LDAP_SHARE_DIR}/tree.ldif" << EOF
 # User $user creation
 dn: ${user/#/cn=},${LDAP_USER_OU/#/ou=},${LDAP_ROOT}
@@ -719,7 +786,7 @@ sn: Bar$((index + 1))
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
-userPassword: ${passwords[$index]}
+userPassword: ${hashed_password}
 uid: $user
 uidNumber: $((index + 1000))
 gidNumber: $((index + 1000))

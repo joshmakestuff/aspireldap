@@ -175,7 +175,15 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
 /// </summary>
 internal sealed class QuotedParameterValue(ParameterResource parameter) : IValueProvider, IManifestExpressionProvider
 {
-    public string ValueExpression => parameter.ValueExpression;
+    /// <summary>
+    /// The manifest path substitutes the parameter's value at deployment time, when no code of
+    /// ours runs — so the expression is wrapped in literal connection-string quotes up front.
+    /// That keeps deployed values containing semicolons or leading/trailing whitespace intact.
+    /// The one thing quoting-at-manifest-time cannot express is embedded double quotes (the
+    /// parser requires them doubled); such a password fails loudly at client parse time rather
+    /// than silently binding with the wrong secret.
+    /// </summary>
+    public string ValueExpression => "\"" + parameter.ValueExpression + "\"";
 
     public async ValueTask<string?> GetValueAsync(CancellationToken cancellationToken = default)
     {
