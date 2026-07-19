@@ -14,6 +14,8 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// container must produce one <c>LDAP search</c> span and one duration measurement on the
 /// <c>Aspire.OpenLdap</c> source/meter. Requires Docker (gated like the other integration tests).
 /// </summary>
+[Collection(AppHostCollection.Name)]
+[Trait("Category", "Integration")]
 public class OpenLdapClientTelemetryTests
 {
     [Fact]

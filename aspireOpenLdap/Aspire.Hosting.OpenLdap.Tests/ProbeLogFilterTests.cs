@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using Aspire.Hosting.ApplicationModel;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
@@ -15,6 +13,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// <item><c>LDAP_LOG_HEALTH_PROBES=yes</c> disables the filter entirely.</item>
 /// </list>
 /// </summary>
+[Trait("Category", "Integration")]
 public class ProbeLogFilterTests : IDisposable
 {
     private const string AdminDn = "cn=admin,dc=example,dc=org";
@@ -26,7 +25,7 @@ public class ProbeLogFilterTests : IDisposable
     public async Task Filter_Drops_Only_Wholly_Successful_Probe_Blocks()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
 
         // conn=1000: successful probe (attr-sentinel classified). conn=1001/1002: real search
         // interleaved with a probe (filter-marker classified). conn=1003: probe whose search
@@ -85,9 +84,9 @@ public class ProbeLogFilterTests : IDisposable
         try
         {
             await File.WriteAllTextAsync(Path.Combine(fixtureDir, "fixture.log"), fixture, cts.Token);
-            WidenPermissionsForContainer(fixtureDir);
+            DockerCli.WidenPermissionsForContainer(fixtureDir);
 
-            var run = await DockerAsync(cts.Token,
+            var run = await DockerCli.RunAsync(cts.Token,
                 "run", "--rm",
                 "-v", $"{fixtureDir}:/fixture:ro",
                 "--entrypoint", "bash",
@@ -137,16 +136,16 @@ public class ProbeLogFilterTests : IDisposable
         // fragment must still surface. (read(1) reports EOF while leaving the consumed
         // partial line in the variable — the filter must not drop it.)
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
 
         var fixtureDir = Directory.CreateTempSubdirectory("aspire-openldap-probefilter-").FullName;
         try
         {
             // WriteAllText adds no trailing newline: the final line is unterminated.
             await File.WriteAllTextAsync(Path.Combine(fixtureDir, "fixture.log"), fixture, cts.Token);
-            WidenPermissionsForContainer(fixtureDir);
+            DockerCli.WidenPermissionsForContainer(fixtureDir);
 
-            var run = await DockerAsync(cts.Token,
+            var run = await DockerCli.RunAsync(cts.Token,
                 "run", "--rm",
                 "-v", $"{fixtureDir}:/fixture:ro",
                 "--entrypoint", "bash",
@@ -170,15 +169,15 @@ public class ProbeLogFilterTests : IDisposable
     public async Task Running_Container_Filters_Probe_Searches_But_Logs_Real_Traffic()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
         var name = NewContainer();
 
-        var run = await DockerAsync(cts.Token,
+        var run = await DockerCli.RunAsync(cts.Token,
             "run", "-d", "--name", name,
             "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
             image);
         Assert.True(run.ExitCode == 0, $"docker run failed: {run.Output}");
-        await WaitForLdapReadyAsync(name, cts.Token);
+        await DockerCli.WaitForLdapReadyAsync(name, AdminDn, AdminPassword, cts.Token);
 
         // Mimic the AppHost health check exactly: authenticated root-DSE search carrying both
         // markers (the sentinel attribute and the no-op filter branch).
@@ -193,7 +192,7 @@ public class ProbeLogFilterTests : IDisposable
         // The filter releases/drops blocks as each conn closes; allow a beat for log delivery.
         await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
 
-        var logs = await DockerAsync(cts.Token, "logs", name);
+        var logs = await DockerCli.RunAsync(cts.Token, "logs", name);
         // Only assert on the foreground daemon's output — the init-phase slapd (ldapi-only,
         // unfiltered) legitimately logs its own bootstrap operations.
         var daemonLogs = logs.Output[logs.Output.LastIndexOf("** Starting slapd **", StringComparison.Ordinal)..];
@@ -212,16 +211,16 @@ public class ProbeLogFilterTests : IDisposable
     public async Task Opt_Out_Env_Keeps_Probe_Lines()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
         var name = NewContainer();
 
-        var run = await DockerAsync(cts.Token,
+        var run = await DockerCli.RunAsync(cts.Token,
             "run", "-d", "--name", name,
             "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
             "-e", "LDAP_LOG_HEALTH_PROBES=yes",
             image);
         Assert.True(run.ExitCode == 0, $"docker run failed: {run.Output}");
-        await WaitForLdapReadyAsync(name, cts.Token);
+        await DockerCli.WaitForLdapReadyAsync(name, AdminDn, AdminPassword, cts.Token);
 
         var probe = await LdapSearchAsync(name, cts.Token,
             "-b", "", "-s", "base", "(|(objectClass=*)(cn=aspire-healthcheck))", "namingContexts", "aspire-healthcheck");
@@ -229,7 +228,7 @@ public class ProbeLogFilterTests : IDisposable
 
         await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
 
-        var logs = await DockerAsync(cts.Token, "logs", name);
+        var logs = await DockerCli.RunAsync(cts.Token, "logs", name);
         Assert.Contains("aspire-healthcheck", logs.Output);
     }
 
@@ -241,34 +240,7 @@ public class ProbeLogFilterTests : IDisposable
             "-x", "-H", "ldap://localhost:1389",
             "-D", AdminDn, "-w", AdminPassword,
         ];
-        return DockerAsync(ct, [.. baseArgs, .. searchArgs]);
-    }
-
-    private static async Task WaitForLdapReadyAsync(string container, CancellationToken ct)
-    {
-        while (true)
-        {
-            var whoami = await DockerAsync(ct,
-                "exec", container, "ldapwhoami",
-                "-x", "-H", "ldap://localhost:1389",
-                "-D", AdminDn, "-w", AdminPassword);
-            if (whoami.ExitCode == 0)
-            {
-                return;
-            }
-            await Task.Delay(TimeSpan.FromSeconds(1), ct);
-        }
-    }
-
-    private static async Task<string> BuildBundledImageAsync(CancellationToken cancellationToken)
-    {
-        var contextDir = OpenLdapResource.DefaultDockerContextPath;
-        Assert.True(Directory.Exists(contextDir), $"bundled docker context not found at {contextDir}");
-
-        const string tag = "aspire-openldap-probefiltertests";
-        var build = await DockerAsync(cancellationToken, "build", "-q", "-t", tag, contextDir);
-        Assert.True(build.ExitCode == 0, $"docker build failed: {build.Output}");
-        return tag;
+        return DockerCli.RunAsync(ct, [.. baseArgs, .. searchArgs]);
     }
 
     private string NewContainer()
@@ -278,69 +250,11 @@ public class ProbeLogFilterTests : IDisposable
         return name;
     }
 
-    private static void WidenPermissionsForContainer(string dir)
-    {
-        // The container runs as a non-root user and must traverse/read the bind-mounted fixture.
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-        File.SetUnixFileMode(dir,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        foreach (var file in Directory.GetFiles(dir))
-        {
-            File.SetUnixFileMode(file,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite |
-                UnixFileMode.GroupRead | UnixFileMode.OtherRead);
-        }
-    }
-
-    private sealed record DockerResult(int ExitCode, string Output);
-
-    private static async Task<DockerResult> DockerAsync(CancellationToken cancellationToken, params string[] args)
-    {
-        var psi = new ProcessStartInfo("docker")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var arg in args)
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        using var process = Process.Start(psi)!;
-        var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        return new DockerResult(process.ExitCode, await stdout + Environment.NewLine + await stderr);
-    }
-
     public void Dispose()
     {
         foreach (var container in _containers)
         {
-            try
-            {
-                var psi = new ProcessStartInfo("docker")
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                };
-                psi.ArgumentList.Add("rm");
-                psi.ArgumentList.Add("-f");
-                psi.ArgumentList.Add(container);
-                using var process = Process.Start(psi);
-                process?.WaitForExit(30_000);
-            }
-            catch (Exception)
-            {
-                // Best-effort cleanup.
-            }
+            DockerCli.BestEffort("rm", "-f", container);
         }
     }
 }

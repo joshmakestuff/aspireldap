@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
@@ -18,6 +17,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// <item>admin passwords must be hashed byte-exactly (no shell word-splitting/globbing).</item>
 /// </list>
 /// </summary>
+[Trait("Category", "Integration")]
 public class InitializationIntegrityTests : IDisposable
 {
     private readonly List<string> _containers = [];
@@ -27,7 +27,7 @@ public class InitializationIntegrityTests : IDisposable
     public async Task Failed_Seed_Fails_Loudly_And_Restart_Over_Partial_Data_Is_Refused()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
 
         var seedDir = Directory.CreateTempSubdirectory("aspire-openldap-badseed-").FullName;
         try
@@ -48,13 +48,13 @@ public class InitializationIntegrityTests : IDisposable
                 "cn: Orphan\n" +
                 "sn: User\n",
                 cts.Token);
-            WidenPermissionsForContainer(seedDir);
+            DockerCli.WidenPermissionsForContainer(seedDir);
 
             var name = NewName("container");
             var volume = NewName("volume");
             const string password = "test-admin-password";
 
-            var first = await DockerAsync(cts.Token,
+            var first = await DockerCli.RunAsync(cts.Token,
                 "run", "--name", name,
                 "-v", $"{volume}:/data/openldap",
                 "-v", $"{seedDir}:/ldifs:ro",
@@ -69,7 +69,7 @@ public class InitializationIntegrityTests : IDisposable
             Assert.Contains("[redacted]", first.Output);
             Assert.DoesNotContain(password, first.Output);
 
-            var restart = await DockerAsync(cts.Token, "start", "-a", name);
+            var restart = await DockerCli.RunAsync(cts.Token, "start", "-a", name);
 
             Assert.NotEqual(0, restart.ExitCode);
             Assert.Contains("completed-initialization marker", restart.Output);
@@ -89,10 +89,10 @@ public class InitializationIntegrityTests : IDisposable
     public async Task Admin_Password_Bytes_Are_Preserved_Exactly(string password)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
 
         var name = NewName("container");
-        _ = await DockerAsync(cts.Token,
+        _ = await DockerCli.RunAsync(cts.Token,
             "run", "-d", "--name", name,
             "-e", $"LDAP_ADMIN_PASSWORD={password}",
             image);
@@ -104,7 +104,7 @@ public class InitializationIntegrityTests : IDisposable
         DockerResult whoami;
         do
         {
-            whoami = await DockerAsync(cts.Token,
+            whoami = await DockerCli.RunAsync(cts.Token,
                 "exec", "-e", $"PROBE_PW={password}", name,
                 "bash", "-c", "ldapwhoami -H ldapi:/// -D \"cn=admin,dc=example,dc=org\" -w \"$PROBE_PW\"");
             if (whoami.ExitCode == 0)
@@ -125,11 +125,11 @@ public class InitializationIntegrityTests : IDisposable
         // default tree": the generated root entry assumed dcObject/organization and never
         // emitted the naming c attribute (F04).
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
 
         var name = NewName("container");
         const string password = "test-admin-password";
-        _ = await DockerAsync(cts.Token,
+        _ = await DockerCli.RunAsync(cts.Token,
             "run", "-d", "--name", name,
             "-e", "LDAP_ROOT=c=US",
             "-e", $"LDAP_ADMIN_PASSWORD={password}",
@@ -139,7 +139,7 @@ public class InitializationIntegrityTests : IDisposable
         DockerResult search;
         do
         {
-            search = await DockerAsync(cts.Token,
+            search = await DockerCli.RunAsync(cts.Token,
                 "exec", name,
                 "ldapsearch", "-x", "-H", "ldapi:///", "-D", "cn=admin,c=US", "-w", password,
                 "-b", "c=US", "-s", "base", "(objectClass=*)");
@@ -162,7 +162,7 @@ public class InitializationIntegrityTests : IDisposable
         // (a) the seeded user can still bind with the original cleartext password and
         // (b) the directory holds only the hash at rest.
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
 
         const string userPassword = "user-s3cret!";
         var resource = new OpenLdapResource(
@@ -176,10 +176,10 @@ public class InitializationIntegrityTests : IDisposable
         try
         {
             await File.WriteAllTextAsync(Path.Combine(seedDir, "00-seed.ldif"), ldif, cts.Token);
-            WidenPermissionsForContainer(seedDir);
+            DockerCli.WidenPermissionsForContainer(seedDir);
 
             var name = NewName("container");
-            _ = await DockerAsync(cts.Token,
+            _ = await DockerCli.RunAsync(cts.Token,
                 "run", "-d", "--name", name,
                 "-v", $"{seedDir}:/ldifs:ro",
                 "-e", "LDAP_ADMIN_PASSWORD=test-admin-password",
@@ -189,7 +189,7 @@ public class InitializationIntegrityTests : IDisposable
             DockerResult whoami;
             do
             {
-                whoami = await DockerAsync(cts.Token,
+                whoami = await DockerCli.RunAsync(cts.Token,
                     "exec", "-e", $"PROBE_PW={userPassword}", name,
                     "bash", "-c", "ldapwhoami -x -H ldapi:/// -D \"uid=user01,dc=example,dc=org\" -w \"$PROBE_PW\"");
                 if (whoami.ExitCode == 0)
@@ -203,7 +203,7 @@ public class InitializationIntegrityTests : IDisposable
             Assert.Contains("dn:uid=user01,dc=example,dc=org", whoami.Output);
 
             // At rest, only the salted hash: slapcat must show {SSHA} and never the cleartext.
-            var slapcat = await DockerAsync(cts.Token, "exec", name, "slapcat", "-b", "dc=example,dc=org");
+            var slapcat = await DockerCli.RunAsync(cts.Token, "exec", name, "slapcat", "-b", "dc=example,dc=org");
             Assert.Equal(0, slapcat.ExitCode);
             // slapcat may emit the value plainly or base64-encoded ("e1NTSEF9" is base64 of
             // a "{SSHA}"-prefixed value); either way it must be the hash.
@@ -226,10 +226,10 @@ public class InitializationIntegrityTests : IDisposable
     public async Task Invalid_Dn_Inputs_Are_Rejected_Before_Bootstrap()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BuildBundledImageAsync(cts.Token);
+        var image = await BundledImage.GetAsync(cts.Token);
 
         // Unsupported root naming attribute: fail at validation, never reach tree creation.
-        var badRoot = await DockerAsync(cts.Token,
+        var badRoot = await DockerCli.RunAsync(cts.Token,
             "run", "--name", NewName("container"),
             "-e", "LDAP_ROOT=ou=nope,dc=example,dc=org",
             "-e", "LDAP_ADMIN_PASSWORD=t",
@@ -240,7 +240,7 @@ public class InitializationIntegrityTests : IDisposable
 
         // DN-special characters in the admin username can never bind consistently (the
         // container composes cn={username},{root} verbatim): fail at validation.
-        var badUser = await DockerAsync(cts.Token,
+        var badUser = await DockerCli.RunAsync(cts.Token,
             "run", "--name", NewName("container"),
             "-e", "LDAP_ADMIN_USERNAME=Doe, John",
             "-e", "LDAP_ADMIN_PASSWORD=t",
@@ -250,17 +250,6 @@ public class InitializationIntegrityTests : IDisposable
         Assert.DoesNotContain("Starting slapd", badUser.Output);
     }
 
-    private async Task<string> BuildBundledImageAsync(CancellationToken cancellationToken)
-    {
-        var contextDir = OpenLdapResource.DefaultDockerContextPath;
-        Assert.True(Directory.Exists(contextDir), $"bundled docker context not found at {contextDir}");
-
-        const string tag = "aspire-openldap-inittests";
-        var build = await DockerAsync(cancellationToken, "build", "-q", "-t", tag, contextDir);
-        Assert.True(build.ExitCode == 0, $"docker build failed: {build.Output}");
-        return tag;
-    }
-
     private string NewName(string kind)
     {
         var name = $"aspire-openldap-inittest-{kind}-{Guid.NewGuid():N}";
@@ -268,80 +257,15 @@ public class InitializationIntegrityTests : IDisposable
         return name;
     }
 
-    private static void WidenPermissionsForContainer(string dir)
-    {
-        // The container runs as a non-root user and must traverse/read the bind-mounted seed
-        // (see LargeSeedHealthGatingTests for the full rationale).
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-        File.SetUnixFileMode(dir,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        foreach (var file in Directory.GetFiles(dir))
-        {
-            File.SetUnixFileMode(file,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite |
-                UnixFileMode.GroupRead | UnixFileMode.OtherRead);
-        }
-    }
-
-    private sealed record DockerResult(int ExitCode, string Output);
-
-    private static async Task<DockerResult> DockerAsync(CancellationToken cancellationToken, params string[] args)
-    {
-        var psi = new ProcessStartInfo("docker")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var arg in args)
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        using var process = Process.Start(psi)!;
-        var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        return new DockerResult(process.ExitCode, await stdout + Environment.NewLine + await stderr);
-    }
-
     public void Dispose()
     {
         foreach (var container in _containers)
         {
-            RunQuiet("rm", "-f", container);
+            DockerCli.BestEffort("rm", "-f", container);
         }
         foreach (var volume in _volumes)
         {
-            RunQuiet("volume", "rm", "-f", volume);
-        }
-
-        static void RunQuiet(params string[] args)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo("docker")
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                };
-                foreach (var arg in args)
-                {
-                    psi.ArgumentList.Add(arg);
-                }
-                using var process = Process.Start(psi);
-                process?.WaitForExit(30_000);
-            }
-            catch
-            {
-                // Best-effort cleanup only.
-            }
+            DockerCli.BestEffort("volume", "rm", "-f", volume);
         }
     }
 }
