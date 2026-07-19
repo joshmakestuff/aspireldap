@@ -146,17 +146,20 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
             // Cancellation is the caller's shutdown/timeout, not LDAP unhealthiness.
             throw;
         }
+        // Only the exception TYPE is reported below, never the exception object: LDAP
+        // diagnostics can embed server-supplied directory data (DNs, matched values), and
+        // health reporters log HealthCheckResult exceptions — same no-PII rule as telemetry.
         catch (LdapException ex) when (ex.ErrorCode == InvalidCredentialsResultCode)
         {
-            return HealthCheckResult.Unhealthy(DescribeAuthFailure(), ex);
+            return HealthCheckResult.Unhealthy(DescribeAuthFailure());
         }
         catch (LdapException ex)
         {
-            return HealthCheckResult.Unhealthy("LDAP connection failed.", ex);
+            return HealthCheckResult.Unhealthy($"LDAP connection failed ({ex.GetType().Name}, error {ex.ErrorCode}).");
         }
         catch (Exception ex)
         {
-            return HealthCheckResult.Unhealthy("Unexpected error during LDAP health check.", ex);
+            return HealthCheckResult.Unhealthy($"Unexpected error during LDAP health check ({ex.GetType().Name}).");
         }
     }
 

@@ -240,8 +240,23 @@ export LDAP_ACCESSLOG_ADMIN_DN="${LDAP_ACCESSLOG_ADMIN_USERNAME/#/cn=},${LDAP_AC
 # so both the canonical name and the deprecated LDAP_ACCESSLOG_PASSWORD alias work in
 # plain and _FILE form.
 export LDAP_ENABLE_SYNCPROV="${LDAP_ENABLE_SYNCPROV:-no}"
-export LDAP_SYNCPROV_CHECKPPOINT="${LDAP_SYNCPROV_CHECKPPOINT:-100 10}"
+# LDAP_SYNCPROV_CHECKPOINT is canonical; LDAP_SYNCPROV_CHECKPPOINT (historical double-P
+# typo) is honored as a fallback so existing configurations keep working.
+export LDAP_SYNCPROV_CHECKPOINT="${LDAP_SYNCPROV_CHECKPOINT:-${LDAP_SYNCPROV_CHECKPPOINT:-100 10}}"
 export LDAP_SYNCPROV_SESSIONLOG="${LDAP_SYNCPROV_SESSIONLOG:-100}"
+
+# The deprecated LDAP_ACCESSLOG_PASSWORD alias is honored only when the canonical
+# variable is absent (see the resolution block below), so once the canonical plain or
+# _FILE setting exists, the alias — including a stale, no-longer-mounted
+# LDAP_ACCESSLOG_PASSWORD_FILE — must be IGNORED here, not validated: failing on an
+# obsolete alias reference would break the normal migration where the canonical setting
+# is added before the alias is removed.
+if [[ -n "${LDAP_ACCESSLOG_ADMIN_PASSWORD:-}" || -n "${LDAP_ACCESSLOG_ADMIN_PASSWORD_FILE:-}" ]]; then
+    if [[ -n "${LDAP_ACCESSLOG_PASSWORD:-}" || -n "${LDAP_ACCESSLOG_PASSWORD_FILE:-}" ]]; then
+        warn "Ignoring LDAP_ACCESSLOG_PASSWORD(_FILE): the canonical LDAP_ACCESSLOG_ADMIN_PASSWORD is configured."
+    fi
+    unset LDAP_ACCESSLOG_PASSWORD LDAP_ACCESSLOG_PASSWORD_FILE
+fi
 
 # Docker secrets support: *_FILE env vars override the plain-text equivalents
 ldap_env_vars=(
@@ -257,7 +272,11 @@ for env_var in "${ldap_env_vars[@]}"; do
             export "${env_var}=$(< "${!file_env_var}")"
             unset "${file_env_var}"
         else
-            warn "Skipping export of '${env_var}'. '${!file_env_var:-}' is not readable."
+            # An explicitly configured secret file that can't be read must NOT fall back to
+            # the well-known default password — that fail-open would persist default
+            # credentials into the data volume. Refuse to start instead.
+            error "'${env_var}' is configured via '${file_env_var}', but '${!file_env_var:-}' is not readable. Fix the secret mount/path (or unset ${file_env_var}) — refusing to fall back to the default password."
+            exit 1
         fi
     fi
 done
@@ -318,6 +337,12 @@ ldap_unescape_rdn_value() {
     for (( i = 0; i < ${#value}; i++ )); do
         ch="${value:i:1}"
         if [[ "$ch" == "\\" ]]; then
+            if (( i + 1 >= ${#value} )); then
+                # A dangling trailing backslash is not a valid escape; keep it literal
+                # rather than silently dropping it (slapd will reject the DN loudly).
+                out+="$ch"
+                break
+            fi
             hex="${value:i+1:2}"
             if [[ "$hex" =~ ^[0-9A-Fa-f][0-9A-Fa-f]$ ]]; then
                 printf -v ch '%b' "\\x${hex}"
@@ -373,11 +398,20 @@ ldap_validate() {
     # so reject it outright. Usernames additionally become the verbatim cn value of a
     # bind DN with no escaping applied, so DN special characters can never bind
     # consistently — reject those too.
-    for var in LDAP_ROOT LDAP_ADMIN_USERNAME LDAP_CONFIG_ADMIN_USERNAME; do
+    # Every one of these is interpolated into generated LDIF (some applied with the
+    # privileged EXTERNAL identity against cn=config), so a line break would smuggle
+    # extra LDIF lines into a root-level apply.
+    for var in LDAP_ROOT LDAP_SUFFIX LDAP_ADMIN_USERNAME LDAP_CONFIG_ADMIN_USERNAME \
+        LDAP_USER_OU LDAP_GROUP_OU LDAP_GROUP LDAP_ACCESSLOG_DB LDAP_ACCESSLOG_ADMIN_USERNAME; do
         if [[ "${!var}" == *$'\n'* ]] || [[ "${!var}" == *$'\r'* ]]; then
             print_validation_error "$var must not contain line breaks"
         fi
     done
+
+    case "$LDAP_TLS_VERIFY_CLIENTS" in
+        never|allow|try|demand) ;;
+        *) print_validation_error "LDAP_TLS_VERIFY_CLIENTS must be one of: never, allow, try, demand (got '${LDAP_TLS_VERIFY_CLIENTS}')" ;;
+    esac
     for var in LDAP_ADMIN_USERNAME LDAP_CONFIG_ADMIN_USERNAME; do
         if [[ "${!var}" =~ [,+\"\\\<\>\;] ]] || [[ "${!var}" =~ ^[\#\ ] ]] || [[ "${!var}" =~ \ $ ]]; then
             print_validation_error "$var must not contain DN special characters (, + \" \\ < > ; a leading '#' or space, or a trailing space): it is used verbatim as the cn value of a bind DN"
@@ -777,7 +811,14 @@ EOF
     for user in "${users[@]}"; do
         # Hash at rest like the admin and typed-seed passwords; a raw userPassword loaded
         # via ldapadd is stored verbatim — LDAP_PASSWORD_HASH does not retroactively apply.
-        hashed_password="$(printf '%s' "${passwords[$index]}" | slappasswd -n -T /dev/stdin)"
+        # A value already carrying an RFC 3112 {SCHEME} prefix passes through untouched
+        # (mirrors the .NET LdapPasswordHasher rule) — re-hashing it would make the
+        # account's real password the literal hash text.
+        if [[ "${passwords[$index]}" =~ ^\{[A-Za-z0-9./-]+\} ]]; then
+            hashed_password="${passwords[$index]}"
+        else
+            hashed_password="$(printf '%s' "${passwords[$index]}" | slappasswd -n -T /dev/stdin)"
+        fi
         cat >> "${LDAP_SHARE_DIR}/tree.ldif" << EOF
 # User $user creation
 dn: ${user/#/cn=},${LDAP_USER_OU/#/ou=},${LDAP_ROOT}
@@ -1120,7 +1161,7 @@ dn: olcOverlay=syncprov,olcDatabase={2}mdb,cn=config
 objectClass: olcOverlayConfig
 objectClass: olcSyncProvConfig
 olcOverlay: syncprov
-olcSpCheckpoint: $LDAP_SYNCPROV_CHECKPPOINT
+olcSpCheckpoint: $LDAP_SYNCPROV_CHECKPOINT
 olcSpSessionLog: $LDAP_SYNCPROV_SESSIONLOG
 EOF
     debug_execute ldapadd -Q -Y EXTERNAL -H "ldapi:///" -f "${LDAP_SHARE_DIR}/syncprov_create_overlay.ldif"
