@@ -188,6 +188,34 @@ public class OpenLdapBuilderModelTests
     }
 
     [Fact]
+    public async Task WithPhpLdapAdmin_Routes_App_Log_To_Stderr()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        builder.AddOpenLdap("ldap").WithPhpLdapAdmin();
+
+        var admin = Assert.Single(builder.Resources.OfType<PhpLdapAdminResource>());
+        var env = await EvaluateEnvironmentAsync(admin);
+
+        // Without these the Laravel app logs to a file inside the container and LDAP
+        // failures (unreachable server, bad admin bind) never reach the container log.
+        Assert.Equal("stderr", env["LOG_CHANNEL"]);
+        Assert.Equal("info", env["LOG_LEVEL"]);
+    }
+
+    [Fact]
+    public async Task WithPhpLdapAdmin_Log_Env_Can_Be_Overridden()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        builder.AddOpenLdap("ldap").WithPhpLdapAdmin(admin =>
+            admin.WithEnvironment("LOG_LEVEL", "debug"));
+
+        var admin = Assert.Single(builder.Resources.OfType<PhpLdapAdminResource>());
+        var env = await EvaluateEnvironmentAsync(admin);
+
+        Assert.Equal("debug", env["LOG_LEVEL"]);
+    }
+
+    [Fact]
     public async Task WithPhpLdapAdmin_Respects_Tls_Required_Later()
     {
         var dir = Directory.CreateTempSubdirectory("aspire-ldap-tls-test");

@@ -24,6 +24,12 @@
   Behavior note: the admin container's health state no longer implies end-to-end LDAP
   connectivity — that remains covered by the LDAP resource's own health check, which the admin
   container `WaitFor`s.
+- **phpLDAPadmin errors now surface in the container log.** The image's Laravel app logs to
+  a file inside the container by default, so LDAP failures — unreachable server, bad admin
+  bind credentials — produced a 500 page with nothing in the dashboard console.
+  `WithPhpLdapAdmin` now sets `LOG_CHANNEL=stderr` and `LOG_LEVEL=info` (both overridable
+  via the configure callback): connection and bind failures log as `ERROR`, login attempts
+  as a one-line `INFO`, while the app's per-page-render `DEBUG` dumps stay suppressed.
 - `WithLogLevel(OpenLdapLogLevel)` — typed control over slapd's debug log level
   (`LDAP_LOGLEVEL`), previously not settable from the AppHost. Flags map to slapd's
   documented bits (`Stats` is the container default); undefined bits are rejected at the

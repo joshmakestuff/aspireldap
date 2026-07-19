@@ -1049,6 +1049,13 @@ public static class OpenLdapResourceBuilderExtensions
             .WithImage(PhpLdapAdminResource.DefaultImageName, PhpLdapAdminResource.DefaultImageTag)
             .WithHttpEndpoint(targetPort: PhpLdapAdminResource.ContainerHttpPort, name: PhpLdapAdminResource.HttpEndpointName)
             .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", loginObjectClass ?? "inetOrgPerson")
+            // The image is a Laravel app whose default log channel is a file inside the
+            // container ('daily'), so LDAP failures — unreachable server, bad admin bind —
+            // never reach the container log or the dashboard console. Route the app log to
+            // stderr, at 'info' so failures (ERROR) and login attempts (INFO) surface while
+            // the per-page-render DEBUG dumps (full root-DSE etc.) stay suppressed.
+            .WithEnvironment("LOG_CHANNEL", "stderr")
+            .WithEnvironment("LOG_LEVEL", "info")
             // All parent-derived settings resolve when the admin container starts, so fluent
             // calls chained on the parent AFTER WithPhpLdapAdmin (WithBaseDn, WithAdminUsername,
             // WithTls().WithRequiredTls()) still take effect here.
