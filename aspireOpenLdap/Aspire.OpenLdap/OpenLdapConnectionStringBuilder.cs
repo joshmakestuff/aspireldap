@@ -10,7 +10,9 @@ namespace Aspire.OpenLdap;
 /// </code>
 /// Values containing semicolons, double quotes, or leading/trailing whitespace are double-quoted
 /// with embedded quotes doubled (<c>BindPassword="ab;c""d"</c>), so arbitrary passwords and DNs
-/// round-trip. <c>CaCertFile</c> is optional and only present when TLS is enabled on the server.
+/// round-trip. The endpoint port is optional: a portless endpoint resolves to the scheme
+/// default (389 for <c>ldap</c>, 636 for <c>ldaps</c>). <c>CaCertFile</c> is optional and only
+/// present when TLS is enabled on the server.
 /// </summary>
 public sealed class OpenLdapConnectionStringBuilder
 {
@@ -20,7 +22,7 @@ public sealed class OpenLdapConnectionStringBuilder
     private const string BindPasswordKey = "BindPassword";
     private const string CaCertFileKey = "CaCertFile";
 
-    /// <summary>The LDAP server endpoint (<c>ldap://host:port</c> or <c>ldaps://host:port</c>).</summary>
+    /// <summary>The LDAP server endpoint (<c>ldap://host[:port]</c> or <c>ldaps://host[:port]</c>; a missing port resolves to 389/636).</summary>
     public required Uri Endpoint { get; init; }
 
     /// <summary>The directory's base DN / suffix (e.g. <c>dc=example,dc=org</c>).</summary>
@@ -96,9 +98,19 @@ public sealed class OpenLdapConnectionStringBuilder
         {
             throw new FormatException($"'{EndpointKey}' must include a host: '{endpointRaw}'.");
         }
-        if (endpoint.Port <= 0)
+        if (endpoint.Port == 0)
         {
-            throw new FormatException($"'{EndpointKey}' must include an explicit port: '{endpointRaw}'.");
+            throw new FormatException($"'{EndpointKey}' port 0 is not valid: '{endpointRaw}'.");
+        }
+        if (endpoint.Port < 0)
+        {
+            // Portless endpoints are supported and resolve to the scheme default. System.Uri
+            // registers ldap (389) but not ldaps, so a portless ldaps URI arrives with -1 and
+            // the 636 default is filled in here.
+            endpoint = new UriBuilder(endpoint)
+            {
+                Port = string.Equals(endpoint.Scheme, "ldaps", StringComparison.Ordinal) ? 636 : 389,
+            }.Uri;
         }
         if (endpoint.AbsolutePath is not ("" or "/") || !string.IsNullOrEmpty(endpoint.Query))
         {

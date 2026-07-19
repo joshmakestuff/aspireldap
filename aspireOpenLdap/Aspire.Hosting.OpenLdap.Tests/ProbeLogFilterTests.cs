@@ -127,14 +127,14 @@ public class ProbeLogFilterTests : IDisposable
         }
     }
 
-    [Theory]
-    [InlineData("fatal: assertion failed")]                       // unterminated only
-    [InlineData("slapd starting\nfatal: assertion failed")]       // terminated then unterminated
-    public async Task Filter_Preserves_Unterminated_Final_Line(string fixture)
+    [Fact]
+    public async Task Filter_Preserves_Unterminated_Final_Line()
     {
         // An abrupt slapd death can end the log mid-line; the fail-open contract says that
         // fragment must still surface. (read(1) reports EOF while leaving the consumed
-        // partial line in the variable — the filter must not drop it.)
+        // partial line in the variable — the filter must not drop it.) The terminated line
+        // before it exercises the same shell read branch as a fixture with no prior lines.
+        const string fixture = "slapd starting\nfatal: assertion failed";
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
@@ -154,10 +154,7 @@ public class ProbeLogFilterTests : IDisposable
             Assert.True(run.ExitCode == 0, $"filter run failed: {run.Output}");
 
             Assert.Contains("fatal: assertion failed", run.Output);
-            if (fixture.Contains('\n'))
-            {
-                Assert.Contains("slapd starting", run.Output);
-            }
+            Assert.Contains("slapd starting", run.Output);
         }
         finally
         {
@@ -189,13 +186,12 @@ public class ProbeLogFilterTests : IDisposable
             "-b", "dc=example,dc=org", "(objectClass=organization)");
         Assert.True(real.ExitCode == 0, $"real search failed: {real.Output}");
 
-        // The filter releases/drops blocks as each conn closes; allow a beat for log delivery.
-        await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
-
-        var logs = await DockerCli.RunAsync(cts.Token, "logs", name);
+        // The filter releases/drops blocks as each conn closes; poll (bounded, not a fixed
+        // sleep) until the real search's block has been delivered to the log.
         // Only assert on the foreground daemon's output — the init-phase slapd (ldapi-only,
         // unfiltered) legitimately logs its own bootstrap operations.
-        var daemonLogs = logs.Output[logs.Output.LastIndexOf("** Starting slapd **", StringComparison.Ordinal)..];
+        var daemonLogs = await PollDaemonLogsAsync(name,
+            logs => logs.Contains("SRCH base=\"dc=example,dc=org\"", StringComparison.Ordinal), cts.Token);
 
         // The probe block is gone: no sentinel, no root-DSE search line.
         Assert.DoesNotContain("aspire-healthcheck", daemonLogs);
@@ -226,10 +222,32 @@ public class ProbeLogFilterTests : IDisposable
             "-b", "", "-s", "base", "(|(objectClass=*)(cn=aspire-healthcheck))", "namingContexts", "aspire-healthcheck");
         Assert.True(probe.ExitCode == 0, $"probe-mimic search failed: {probe.Output}");
 
-        await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
+        var logs = await PollDaemonLogsAsync(name,
+            logs => logs.Contains("aspire-healthcheck", StringComparison.Ordinal), cts.Token);
+        Assert.Contains("aspire-healthcheck", logs);
+    }
 
-        var logs = await DockerCli.RunAsync(cts.Token, "logs", name);
-        Assert.Contains("aspire-healthcheck", logs.Output);
+    /// <summary>
+    /// Polls <c>docker logs</c> (bounded by <paramref name="ct"/> and a 60 s deadline) until
+    /// the foreground daemon's slice satisfies <paramref name="condition"/>, returning that
+    /// slice. Returns the last observed slice on deadline so the caller's asserts produce a
+    /// real diagnostic instead of a timeout.
+    /// </summary>
+    private static async Task<string> PollDaemonLogsAsync(string container, Func<string, bool> condition, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        string daemonLogs;
+        while (true)
+        {
+            var logs = await DockerCli.RunAsync(ct, "logs", container);
+            var start = logs.Output.LastIndexOf("** Starting slapd **", StringComparison.Ordinal);
+            daemonLogs = start < 0 ? logs.Output : logs.Output[start..];
+            if (condition(daemonLogs) || DateTime.UtcNow >= deadline)
+            {
+                return daemonLogs;
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(250), ct);
+        }
     }
 
     private static Task<DockerResult> LdapSearchAsync(string container, CancellationToken ct, params string[] searchArgs)

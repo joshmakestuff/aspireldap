@@ -82,12 +82,13 @@ public class InitializationIntegrityTests : IDisposable
         }
     }
 
-    [Theory]
-    [InlineData("  lead  in  trail  ")]
-    [InlineData("glob*?[a-z]  chars")]
-    [InlineData("quo\"te'semi;Ünïcode")]
-    public async Task Admin_Password_Bytes_Are_Preserved_Exactly(string password)
+    [Fact]
+    public async Task Admin_Password_Bytes_Are_Preserved_Exactly()
     {
+        // One composite password covering every byte-mangling class the printf fix guards:
+        // leading/trailing and interior whitespace runs, glob characters, both quote kinds,
+        // a semicolon, and non-ASCII — one container start instead of three.
+        const string password = "  lead  glob*?[a-z]  quo\"te'semi;Ünïcode  ";
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 

@@ -343,26 +343,8 @@ public class BootstrapRegressionTests : IDisposable
         Assert.DoesNotContain("invalid per syntax", run.Output);
     }
 
-    [Fact]
-    public async Task Two_Letter_Country_Root_Bootstraps()
-    {
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BundledImage.GetAsync(cts.Token);
-        var name = NewContainer();
-
-        var run = await DockerCli.RunAsync(cts.Token,
-            "run", "-d", "--name", name,
-            "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
-            "-e", "LDAP_ROOT=c=US",
-            image);
-        Assert.True(run.ExitCode == 0, $"docker run failed: {run.Output}");
-        await DockerCli.WaitForLdapReadyAsync(name, "cn=admin,c=US", AdminPassword, cts.Token);
-
-        var slapcat = await DockerCli.RunAsync(cts.Token, "exec", name, "slapcat", "-b", "c=US");
-        Assert.True(slapcat.ExitCode == 0, $"slapcat failed: {slapcat.Output}");
-        Assert.Contains("objectClass: country", slapcat.Output);
-        Assert.Contains("c: US", slapcat.Output);
-    }
+    // The positive two-letter c= root bootstrap is covered by
+    // InitializationIntegrityTests.Country_Base_Dn_Initializes_With_Country_Root_Entry.
 
     [Fact]
     public async Task Escaped_Semicolon_Root_Bootstraps()
@@ -406,34 +388,40 @@ public class BootstrapRegressionTests : IDisposable
     }
 
     [Fact]
-    public async Task Unescaper_Preserves_A_Dangling_Backslash()
+    public async Task Dangling_Backslash_Root_Is_Rejected_And_Never_Bootstraps()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
-        // A dangling trailing backslash is invalid RFC 4514; it must stay literal (so slapd
-        // rejects the DN loudly) rather than being silently swallowed.
+        // A dangling trailing backslash is invalid RFC 4514. End-to-end contract: the
+        // container must die loudly (slapd rejects the suffix at the privileged cn=config
+        // apply) and never serve a silently altered directory — the pre-fix unescaper
+        // swallowed the backslash, which would have bootstrapped "o=Acme" instead.
         var run = await DockerCli.RunAsync(cts.Token,
-            "run", "--rm", "--entrypoint", "bash", image,
-            "-c", ". /opt/openldap/scripts/libopenldap.sh && printf '[%s]' \"$(ldap_unescape_rdn_value 'Acme\\')\"");
-        Assert.True(run.ExitCode == 0, $"unescape run failed: {run.Output}");
-        Assert.Contains("[Acme\\]", run.Output);
+            "run", "--rm",
+            "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
+            "-e", "LDAP_ROOT=o=Acme\\",
+            image);
+        Assert.True(run.ExitCode != 0, "a dangling-backslash root must abort startup");
+        Assert.Contains("invalid per syntax", run.Output);
+        Assert.DoesNotContain("Starting slapd", run.Output);
     }
 
-    [Theory]
-    [InlineData("LDAP_SYNCPROV_CHECKPOINT=7 7", "7 7")]     // canonical spelling
-    [InlineData("LDAP_SYNCPROV_CHECKPPOINT=9 9", "9 9")]    // legacy double-P alias
-    [InlineData("LDAP_ENABLE_SYNCPROV=no", "100 10")]       // neither → default
-    public async Task Syncprov_Checkpoint_Spelling_Resolves(string envAssignment, string expected)
+    [Fact]
+    public async Task Syncprov_Checkpoint_Legacy_Double_P_Alias_Resolves()
     {
+        // Only the non-obvious compatibility behavior gets a Docker case: the historical
+        // LDAP_SYNCPROV_CHECKPPOINT (double-P) spelling must keep feeding the canonical
+        // variable. Canonical passthrough and the default are plain Bash parameter expansion.
+        // Runtime syncprov application coverage is tracked by #38.
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
         var run = await DockerCli.RunAsync(cts.Token,
-            "run", "--rm", "-e", envAssignment, "--entrypoint", "bash", image,
+            "run", "--rm", "-e", "LDAP_SYNCPROV_CHECKPPOINT=9 9", "--entrypoint", "bash", image,
             "-c", ". /opt/openldap/scripts/libopenldap.sh && eval \"$(ldap_env)\" && printf 'checkpoint=[%s]' \"$LDAP_SYNCPROV_CHECKPOINT\"");
         Assert.True(run.ExitCode == 0, $"resolution run failed: {run.Output}");
-        Assert.Contains($"checkpoint=[{expected}]", run.Output);
+        Assert.Contains("checkpoint=[9 9]", run.Output);
     }
 
     [Fact]
