@@ -96,6 +96,9 @@ ldapsearch -x -H ldap://localhost:1389 -b "" -s base "(objectClass=*)" +
 | `LDAP_PPOLICY_USE_LOCKOUT` | `no` | Account lockout |
 | `LDAP_PPOLICY_HASH_CLEARTEXT` | `no` | Auto-hash cleartext passwords |
 | `LDAP_ENABLE_ACCESSLOG` | `no` | Enable access log overlay |
+| `LDAP_ACCESSLOG_DB` | `cn=accesslog` | Access-log database suffix |
+| `LDAP_ACCESSLOG_ADMIN_USERNAME` | `admin` | Access-log admin `cn` (root DN is `cn=<name>,<suffix>`) |
+| `LDAP_ACCESSLOG_ADMIN_PASSWORD` | `accesspassword` | Access-log admin password (`LDAP_ACCESSLOG_PASSWORD` is a deprecated alias) |
 | `LDAP_ENABLE_SYNCPROV` | `no` | Enable sync provider overlay |
 
 ### Docker Secrets

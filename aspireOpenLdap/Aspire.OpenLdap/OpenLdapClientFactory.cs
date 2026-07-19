@@ -56,18 +56,26 @@ public sealed class OpenLdapClientFactory
             Credential = new NetworkCredential(_connectionString.BindDn, _connectionString.BindPassword),
             Timeout = _settings.Timeout,
         };
-        connection.SessionOptions.ProtocolVersion = 3;
-
-        if (_connectionString.UsesLdaps)
+        try
         {
-            connection.SessionOptions.SecureSocketLayer = true;
-            if (_settings.TrustConnectionStringCaCertificate && _caCertificate.Value is { } ca)
-            {
-                ConfigureCustomTrust(connection, ca, endpoint.Host);
-            }
-        }
+            connection.SessionOptions.ProtocolVersion = 3;
 
-        return connection;
+            if (_connectionString.UsesLdaps)
+            {
+                connection.SessionOptions.SecureSocketLayer = true;
+                if (_settings.TrustConnectionStringCaCertificate && _caCertificate.Value is { } ca)
+                {
+                    ConfigureCustomTrust(connection, ca, endpoint.Host);
+                }
+            }
+
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -116,15 +124,33 @@ public sealed class OpenLdapClientFactory
 
     private X509Certificate2? LoadCaCertificate()
     {
-        if (string.IsNullOrWhiteSpace(_connectionString.CaCertFile))
-        {
-            return null;
-        }
-        if (!File.Exists(_connectionString.CaCertFile))
+        var caCertFile = _connectionString.CaCertFile;
+        if (string.IsNullOrWhiteSpace(caCertFile))
         {
             return null;
         }
 
-        return OpenLdapCertificateValidation.LoadPemCertificate(_connectionString.CaCertFile);
+        // A configured CaCertFile is an explicit trust choice. Falling back to the platform
+        // trust store when it can't be honored would silently change the trust policy, so a
+        // missing or unloadable file fails closed instead.
+        if (!File.Exists(caCertFile))
+        {
+            throw new InvalidOperationException(
+                $"The connection string's CaCertFile '{caCertFile}' does not exist. The CA certificate " +
+                "is required to validate the LDAPS server certificate; fix the path, or set " +
+                $"{nameof(OpenLdapClientSettings.TrustConnectionStringCaCertificate)} to false to use " +
+                "the system trust store instead.");
+        }
+
+        try
+        {
+            return OpenLdapCertificateValidation.LoadPemCertificate(caCertFile);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"The connection string's CaCertFile '{caCertFile}' could not be loaded as a PEM " +
+                $"certificate: {ex.Message}", ex);
+        }
     }
 }
