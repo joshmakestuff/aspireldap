@@ -4,6 +4,30 @@
 
 ### Fixed
 
+Findings from a fourth (2026-07-19) hardening review, run with the lens playbook extracted
+from the first three reviews (#34–#37):
+
+- **An unreadable `*_FILE` secret now refuses to start the container** (#34). A configured
+  but missing/unreadable secret file (typo'd path, absent mount) used to log one WARN and
+  boot with the well-known default password, which the init marker then persisted into the
+  data volume. The README's Docker-secrets section now enumerates the exact supported `_FILE`
+  variables instead of claiming "any password variable".
+- **`WithBaseDn` rejects unescaped `;` in DN values** (#35). RFC 4514 requires `;` escaped;
+  slapd rejects the unescaped form as a database suffix, so it previously passed model
+  validation and died mid-bootstrap with the opaque `olcSuffix: value #0 invalid per syntax`.
+  String-level guard until LdifDotNet enforces this in `Dn.Parse` (ldifdotnet#43); `\;`
+  remains accepted.
+- **Round-4 low-severity sweep** (#36): pre-hashed `{SCHEME}` values in `LDAP_PASSWORDS` now
+  pass through instead of being double-hashed (matching the typed-seed rule); the shell RDN
+  unescaper preserves a dangling trailing backslash instead of silently dropping it; the
+  container's line-break validation now also covers `LDAP_SUFFIX`, the user/group OU and
+  group names, and the accesslog DB/username (all interpolated into privileged cn=config
+  LDIF), and `LDAP_TLS_VERIFY_CLIENTS` is enum-checked; health checks report only the
+  exception type, never the exception object (LDAP diagnostics can embed directory data —
+  same rule as telemetry); `DisableTlsHostnameValidation` in a configuration where it cannot
+  apply now throws instead of being silently ignored; `LDAP_SYNCPROV_CHECKPOINT` is the
+  canonical spelling (the historical `CHECKPPOINT` double-P typo remains a fallback alias).
+
 Findings from a third (2026-07-19) adversarial code review (R1–R3, B1–B4):
 
 - **`LDAP_ACCESSLOG_ADMIN_PASSWORD` was silently ignored** (B1, high). The env block
@@ -52,6 +76,13 @@ Findings from a third (2026-07-19) adversarial code review (R1–R3, B1–B4):
 
 ### Added
 
+- **Runtime witnesses for previously untested modes and claims** (#37): TLS enabled without
+  `WithRequiredTls` (plain LDAP and LDAPS served side by side), custom-LDIF loading with
+  default-tree suppression, restart over a completed data volume preserving data, `_FILE`
+  secret resolution (plain, alias, unreadable-refusal, and end-to-end admin bind), the
+  accesslog deprecation warning, and the phpLDAPadmin image pin. The image README now
+  documents the previously implemented-but-undocumented env vars (`LDAP_SUFFIX`, accesslog
+  and syncprov tuning, `LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR`, `BITNAMI_DEBUG`).
 - **Health-check probe traffic no longer floods the container log** (#31). The Aspire health
   check polls continuously, and at the default `stats` log level each probe emitted a ~7-line
   `conn=N` block — drowning real activity in the dashboard's console view. The container now

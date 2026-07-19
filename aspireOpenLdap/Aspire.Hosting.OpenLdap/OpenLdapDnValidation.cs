@@ -24,6 +24,7 @@ internal static class OpenLdapDnValidation
     public static void ValidateBaseDn(string baseDn, string paramName)
     {
         RejectControlCharacters(baseDn, paramName, "Base DN");
+        RejectUnescapedSemicolons(baseDn, paramName);
 
         IReadOnlyList<RelativeDistinguishedName> rdns;
         try
@@ -103,6 +104,36 @@ internal static class OpenLdapDnValidation
                 "The container init composes the admin bind DN from this value verbatim, so such " +
                 "usernames cannot bind consistently — use a username without DN special characters.",
                 paramName);
+        }
+    }
+
+    /// <summary>
+    /// Temporary strictness patch: LdifDotNet's <c>Dn.Parse</c> currently accepts an unescaped
+    /// <c>;</c> inside values (ldifdotnet#43), but RFC 4514 requires it escaped and slapd
+    /// rejects such a DN as an <c>olcSuffix</c> value — an opaque mid-bootstrap death. The
+    /// check must run at the string level: after parsing, <c>a\;b</c> and <c>a;b</c> are
+    /// indistinguishable. Remove once LdifDotNet enforces this in the parser.
+    /// </summary>
+    private static void RejectUnescapedSemicolons(string baseDn, string paramName)
+    {
+        var escaped = false;
+        foreach (var c in baseDn)
+        {
+            if (escaped)
+            {
+                escaped = false;
+            }
+            else if (c == '\\')
+            {
+                escaped = true;
+            }
+            else if (c == ';')
+            {
+                throw new ArgumentException(
+                    $"Base DN '{baseDn}' contains an unescaped ';'. RFC 4514 requires ';' to be " +
+                    "escaped inside DN values (write it as '\\;'), and OpenLDAP rejects the " +
+                    "unescaped form as a database suffix.", paramName);
+            }
         }
     }
 

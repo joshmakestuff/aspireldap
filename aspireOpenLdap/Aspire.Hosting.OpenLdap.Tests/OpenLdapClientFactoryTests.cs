@@ -62,6 +62,26 @@ public class OpenLdapClientFactoryTests
         Assert.NotNull(connection);
     }
 
+    [Theory]
+    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=c", true)]                    // plain ldap
+    [InlineData("Endpoint=ldaps://h:1636;BaseDN=a;BindDN=b;BindPassword=c", true)]                   // ldaps, no CA file
+    [InlineData("Endpoint=ldaps://h:1636;BaseDN=a;BindDN=b;BindPassword=c;CaCertFile=x", false)]     // custom trust disabled
+    public void CreateConnection_Rejects_Inert_DisableTlsHostnameValidation(string connectionString, bool trustCa)
+    {
+        // The setting only modifies the custom-CA trust path; any configuration where that
+        // path is not in play must fail loud instead of silently ignoring the opt-out.
+        var factory = new OpenLdapClientFactory(
+            OpenLdapConnectionStringBuilder.Parse(connectionString),
+            new OpenLdapClientSettings
+            {
+                DisableTlsHostnameValidation = true,
+                TrustConnectionStringCaCertificate = trustCa,
+            });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => factory.CreateConnection());
+        Assert.Contains("DisableTlsHostnameValidation", ex.Message);
+    }
+
     [Fact]
     public void CreateConnection_Succeeds_With_A_Valid_Ca_File()
     {

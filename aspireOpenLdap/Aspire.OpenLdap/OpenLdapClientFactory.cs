@@ -29,6 +29,22 @@ public sealed class OpenLdapClientFactory
     /// <summary>Creates a new <see cref="LdapConnection"/>. Caller owns disposal.</summary>
     public LdapConnection CreateConnection()
     {
+        // DisableTlsHostnameValidation only modifies the custom-CA trust path; in any other
+        // configuration it would be silently inert. Reject the contradiction so the caller
+        // learns their setting does nothing instead of believing hostname checks are relaxed.
+        if (_settings.DisableTlsHostnameValidation
+            && (!_connectionString.UsesLdaps
+                || !_settings.TrustConnectionStringCaCertificate
+                || string.IsNullOrWhiteSpace(_connectionString.CaCertFile)))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(OpenLdapClientSettings.DisableTlsHostnameValidation)} is set, but it only " +
+                "applies when connecting over ldaps:// with " +
+                $"{nameof(OpenLdapClientSettings.TrustConnectionStringCaCertificate)} enabled and a " +
+                "CaCertFile in the connection string. As configured, the setting would be silently " +
+                "ignored — remove it, or enable custom-CA trust.");
+        }
+
         var endpoint = _connectionString.Endpoint;
 
         // On the Linux native-trust path, dial an IP literal: libldap checks the cert against

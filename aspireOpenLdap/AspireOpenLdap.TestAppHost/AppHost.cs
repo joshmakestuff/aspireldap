@@ -19,4 +19,11 @@ if (string.Equals(builder.Configuration["OpenLdap:Tls"], "true", StringCompariso
     ldap.WithTls().WithRequiredTls();
 }
 
+// TLS enabled but NOT required (--OpenLdap:TlsOptional=true): LDAPS is served alongside
+// plain LDAP — the mode WithTls() alone configures.
+if (string.Equals(builder.Configuration["OpenLdap:TlsOptional"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    ldap.WithTls();
+}
+
 builder.Build().Run();
