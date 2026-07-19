@@ -17,9 +17,11 @@ public class HealthCheckSanitizationTests
     [Fact]
     public async Task Failed_Client_Health_Check_Reports_Type_But_Not_The_Exception()
     {
-        // Loopback port 1: connection refused fast, no server involved.
+        // A just-released ephemeral port: connection refused fast, no server involved, and no
+        // assumption that a fixed well-known port is unbound on this machine.
+        var closedPort = LoopbackTcpServer.ReserveClosedPort();
         var connectionString = OpenLdapConnectionStringBuilder.Parse(
-            "Endpoint=ldap://127.0.0.1:1;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=x");
+            $"Endpoint=ldap://127.0.0.1:{closedPort};BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=x");
         var factory = new OpenLdapClientFactory(
             connectionString,
             new OpenLdapClientSettings { Timeout = TimeSpan.FromSeconds(5) });
@@ -38,11 +40,12 @@ public class HealthCheckSanitizationTests
         var builder = DistributedApplication.CreateBuilder();
         var ldap = builder.AddOpenLdap("ldap");
 
-        // Allocate the plain-LDAP endpoint at loopback port 1: connection refused fast, no
-        // server involved — drives the check into its failure catch blocks.
+        // Allocate the plain-LDAP endpoint at a just-released ephemeral port: connection
+        // refused fast — drives the check into its failure catch blocks deterministically
+        // without assuming a fixed well-known port is unbound.
         var endpoint = ldap.Resource.Annotations.OfType<EndpointAnnotation>()
             .Single(e => e.Name == OpenLdapResource.LdapEndpointName);
-        endpoint.AllocatedEndpoint = new AllocatedEndpoint(endpoint, "127.0.0.1", 1);
+        endpoint.AllocatedEndpoint = new AllocatedEndpoint(endpoint, "127.0.0.1", LoopbackTcpServer.ReserveClosedPort());
 
         var healthCheck = new OpenLdapHealthCheck(ldap.Resource);
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
