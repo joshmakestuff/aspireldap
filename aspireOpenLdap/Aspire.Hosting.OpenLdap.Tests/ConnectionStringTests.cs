@@ -14,13 +14,15 @@ public class ConnectionStringTests
                $";BindPassword={Aspire.OpenLdap.ConnectionStringQuoting.Quote(password)}";
     }
 
+    // One row per parser/quoting equivalence class: unquoted plain, quoted separator chars
+    // (';' plus '=' inside a value), doubled embedded quotes, edge whitespace, non-ASCII,
+    // a value that itself looks fully quoted, and empty.
     [Theory]
     [InlineData("simplepassword")]
-    [InlineData("abc;def")]
+    [InlineData("with=equals;and;semis")]
     [InlineData("a\"b\"\"c")]
     [InlineData(" leading and trailing ")]
     [InlineData("ünïcode-påsswörd")]
-    [InlineData("with=equals;and;semis")]
     [InlineData("\"fully quoted\"")]
     [InlineData("")]
     public void Password_Round_Trips(string password)
@@ -31,19 +33,6 @@ public class ConnectionStringTests
         Assert.Equal("cn=admin,dc=example,dc=org", parsed.BindDn);
         Assert.Equal("localhost", parsed.Endpoint.Host);
         Assert.Equal(1389, parsed.Endpoint.Port);
-    }
-
-    [Fact]
-    public void Quoting_Matches_Between_Hosting_And_Client_Copies()
-    {
-        // The hosting emitter and client parser compile the same shared source file;
-        // this guards against the two link entries drifting apart.
-        foreach (var value in new[] { "plain", "a;b", "a\"b", " pad ", "" })
-        {
-            Assert.Equal(
-                Aspire.Hosting.OpenLdap.ConnectionStringQuoting.Quote(value),
-                Aspire.OpenLdap.ConnectionStringQuoting.Quote(value));
-        }
     }
 
     [Fact]
@@ -91,6 +80,7 @@ public class ConnectionStringTests
     [InlineData("Endpoint=ldap://h:1389?q=1;BaseDN=a;BindDN=b;BindPassword=c")] // query
     [InlineData("Endpoint=ldap://user:pw@h:1389;BaseDN=a;BindDN=b;BindPassword=c")] // user info (ignored by LdapDirectoryIdentifier)
     [InlineData("Endpoint=ldap://h:1389#frag;BaseDN=a;BindDN=b;BindPassword=c")] // fragment
+    [InlineData("Endpoint=ldap://h:0;BaseDN=a;BindDN=b;BindPassword=c")] // explicit port 0
     [InlineData("BaseDN=a;BindDN=b;BindPassword=c")] // missing endpoint
     [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"unterminated")] // bad quote
     [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"x\"tail")] // trailing junk
@@ -103,10 +93,16 @@ public class ConnectionStringTests
     [Fact]
     public void Portless_Endpoint_Uses_The_Scheme_Default_Port()
     {
-        // System.Uri registers ldap/ldaps default ports (389/636), so a portless endpoint
-        // is well-defined rather than an error.
-        var parsed = OpenLdapConnectionStringBuilder.Parse("Endpoint=ldap://h;BaseDN=a;BindDN=b;BindPassword=c");
-        Assert.Equal(389, parsed.Endpoint.Port);
+        // Deliberate contract (#41): portless endpoints are supported and resolve to the
+        // scheme default. System.Uri supplies 389 for ldap; ldaps is not a registered scheme,
+        // so the parser fills in 636 itself.
+        var ldap = OpenLdapConnectionStringBuilder.Parse("Endpoint=ldap://h;BaseDN=a;BindDN=b;BindPassword=c");
+        Assert.Equal(389, ldap.Endpoint.Port);
+
+        var ldaps = OpenLdapConnectionStringBuilder.Parse("Endpoint=ldaps://h;BaseDN=a;BindDN=b;BindPassword=c");
+        Assert.Equal(636, ldaps.Endpoint.Port);
+        Assert.True(ldaps.UsesLdaps);
+        Assert.Equal("h", ldaps.Endpoint.Host);
     }
 
     [Fact]

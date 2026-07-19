@@ -17,6 +17,8 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// Windows it exercises the <c>VerifyServerCertificate</c> callback. Regression guard for the
 /// review finding that generated-CA LDAPS failed on Linux before the first request.
 /// </summary>
+[Collection(AppHostCollection.Name)]
+[Trait("Category", "Integration")]
 public class TlsIntegrationTests
 {
     [Fact]
