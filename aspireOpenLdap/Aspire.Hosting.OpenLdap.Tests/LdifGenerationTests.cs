@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
+using LdifDotNet;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
@@ -54,11 +55,32 @@ public class LdapSeedLdifGeneratorTests
         // Every hostile value must have been base64-encoded or hashed; none may appear raw.
         Assert.DoesNotContain("word: injected", ldif);
         Assert.DoesNotContain("Seán", ldif);
-        Assert.Contains("userPassword: {SSHA}", ldif);
-        Assert.Contains("cn:: ", ldif);
-        Assert.Contains("sn:: ", ldif);
-        Assert.Contains("mail:: ", ldif);
-        Assert.Contains("dn: uid=user01,dc=example,dc=org\n", ldif);
+
+        // Parse the LDIF back the way a consumer (slapd/ldapadd) sees it and assert the
+        // EXACT decoded shape: the hostile newline must not have created an extra record,
+        // and must not have smuggled an extra attribute into the user entry.
+        var records = LdifReader.Parse(ldif);
+        var user = Assert.IsType<LdifContentRecord>(
+            Assert.Single(records, r => r.Dn == "uid=user01,dc=example,dc=org"));
+
+        Assert.Equal(
+            ["cn", "mail", "objectClass", "sn", "uid", "userPassword"],
+            user.Attributes.Select(a => a.Name).Order().ToArray());
+
+        // Exact decoded values — dropping or altering any of them fails, not just the
+        // presence of a "cn:: " marker.
+        Assert.Equal("user01", Assert.Single(user["uid"]!.Values).AsString());
+        Assert.Equal(" Seán Ó Briain ", Assert.Single(user["cn"]!.Values).AsString());
+        Assert.Equal("Ó Briain", Assert.Single(user["sn"]!.Values).AsString());
+        Assert.Equal("seán@example.org", Assert.Single(user["mail"]!.Values).AsString());
+
+        // The password is hashed: the injected text exists nowhere in the decoded entry,
+        // and the hash value itself is newline-free (a raw "\n" here is what would have
+        // become a second attribute line).
+        var password = Assert.Single(user["userPassword"]!.Values).AsString();
+        Assert.StartsWith("{SSHA}", password);
+        Assert.DoesNotContain("injected", password);
+        Assert.DoesNotContain('\n', password);
     }
 
     [Fact]
@@ -147,8 +169,13 @@ public class LdapSeedLdifGeneratorTests
 
         var ldif = LdapSeedLdifGenerator.Generate(resource, model);
 
+        // Encoded on the wire (a raw non-ASCII dn: line is invalid LDIF) ...
         Assert.Contains("dn:: ", ldif);
         Assert.DoesNotContain("dn: ou=people,dc=büro", ldif);
+
+        // ... and decodes back to the EXACT intended DN, byte-for-byte.
+        var records = LdifReader.Parse(ldif);
+        Assert.Contains(records, r => r.Dn == "ou=people,dc=büro,dc=example");
     }
 
     [Fact]
@@ -199,6 +226,10 @@ public class LdapSeedLdifGeneratorTests
 
 public class ConfigLdifGenerationTests
 {
+    // These parse the generated cn=config LDIF and assert record/change semantics — what
+    // the privileged ldapmodify apply actually consumes. Runtime application of overlays
+    // and ACLs remains tracked by #38.
+
     [Fact]
     public void Overlay_Ldif_Contains_Module_List_And_Overlay_Entry()
     {
@@ -207,30 +238,45 @@ public class ConfigLdifGenerationTests
         var ldif = OpenLdapResourceBuilderExtensions.GenerateOverlayLdif([overlay]);
 
         Assert.DoesNotContain("version:", ldif);
-        Assert.Contains("dn: cn=module{1},cn=config\n", ldif);
-        Assert.Contains("olcModuleLoad: memberof.so\n", ldif);
-        Assert.Contains("\n\ndn: olcOverlay=memberof,olcDatabase={2}mdb,cn=config\n", ldif);
-        Assert.Contains("objectClass: olcOverlayConfig\n", ldif);
-        Assert.Contains("objectClass: olcMemberOf\n", ldif);
-        Assert.Contains("olcOverlay: memberof\n", ldif);
-        Assert.Contains("olcMemberOfGroupOC: groupOfNames\n", ldif);
-        Assert.EndsWith("\n", ldif);
+
+        var records = LdifReader.Parse(ldif);
+        Assert.Equal(2, records.Count);
+
+        // The module list must precede the overlay entry — slapd rejects an overlay whose
+        // module is not loaded yet, so record ORDER is part of the contract.
+        var module = Assert.IsType<LdifContentRecord>(records[0]);
+        Assert.Equal("cn=module{1},cn=config", module.Dn);
+        Assert.Equal("memberof.so", Assert.Single(module["olcModuleLoad"]!.Values).AsString());
+
+        var overlayRecord = Assert.IsType<LdifContentRecord>(records[1]);
+        Assert.Equal("olcOverlay=memberof,olcDatabase={2}mdb,cn=config", overlayRecord.Dn);
+        Assert.Equal(
+            ["olcOverlayConfig", "olcMemberOf"],
+            overlayRecord["objectClass"]!.Values.Select(v => v.AsString()).ToArray());
+        Assert.Equal("memberof", Assert.Single(overlayRecord["olcOverlay"]!.Values).AsString());
+        Assert.Equal("groupOfNames", Assert.Single(overlayRecord["olcMemberOfGroupOC"]!.Values).AsString());
     }
 
     [Fact]
     public void Access_Ldif_Is_A_Single_Modify_With_Ordered_Rules()
     {
-        var ldif = OpenLdapResourceBuilderExtensions.GenerateAccessLdif(
-        [
-            "to dn.subtree=\"ou=entity,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=entity,dc=example,dc=org\" write by * break",
-            "to attrs=userPassword by self write by * break",
-        ]);
+        const string rule0 = "to dn.subtree=\"ou=entity,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=entity,dc=example,dc=org\" write by * break";
+        const string rule1 = "to attrs=userPassword by self write by * break";
+        var ldif = OpenLdapResourceBuilderExtensions.GenerateAccessLdif([rule0, rule1]);
 
         Assert.DoesNotContain("version:", ldif);
-        Assert.Contains("dn: olcDatabase={2}mdb,cn=config\n", ldif);
-        Assert.Contains("changetype: modify\n", ldif);
-        Assert.Contains("add: olcAccess\n", ldif);
-        Assert.Contains("olcAccess: {0}to dn.subtree=\"ou=entity,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=entity,dc=example,dc=org\" write by * break\n", ldif);
-        Assert.Contains("olcAccess: {1}to attrs=userPassword by self write by * break\n", ldif);
+
+        // Exactly one modify record against the mdb database: an extra record, a different
+        // target DN, a changed modification type, or reordered rules all fail.
+        var records = LdifReader.Parse(ldif);
+        var modify = Assert.IsType<LdifModifyRecord>(Assert.Single(records));
+        Assert.Equal("olcDatabase={2}mdb,cn=config", modify.Dn);
+
+        var modification = Assert.Single(modify.Modifications);
+        Assert.Equal(LdifModificationType.Add, modification.Type);
+        Assert.Equal("olcAccess", modification.AttributeName);
+        Assert.Equal(
+            [$"{{0}}{rule0}", $"{{1}}{rule1}"],
+            modification.Values.Select(v => v.AsString()).ToArray());
     }
 }

@@ -201,15 +201,19 @@ public class OpenLdapBuilderModelTests
 
         var admin = Assert.Single(builder.Resources.OfType<PhpLdapAdminResource>());
 
-        // The image pin is a claim ("2.3.11, not latest") that nothing else witnesses; a
-        // regression back to a floating tag would otherwise pass CI silently.
+        // The image pin is a claim that nothing else witnesses; assert the EXACT repository
+        // and tag so a silent re-pin (or drift back to a floating tag) fails here. Bumping
+        // the pin deliberately means updating this test — that is the point.
         var image = Assert.Single(admin.Annotations.OfType<ContainerImageAnnotation>());
-        Assert.Contains("phpldapadmin", image.Image, StringComparison.OrdinalIgnoreCase);
-        Assert.False(string.IsNullOrEmpty(image.Tag), "phpLDAPadmin image must carry an explicit tag");
-        Assert.NotEqual("latest", image.Tag);
+        Assert.Equal("phpldapadmin/phpldapadmin", image.Image);
+        Assert.Equal("2.3.11", image.Tag);
 
-        // The static-asset health check (see #31) must stay registered.
-        Assert.NotEmpty(admin.Annotations.OfType<HealthCheckAnnotation>());
+        // The static-asset health check (see #31) must stay registered with exactly this
+        // configuration. Aspire encodes {resource}_{endpoint}_{path}_{status} in the check
+        // key, so a wrong path (e.g. the login page, which floods the LDAP log) or status
+        // fails deterministically.
+        var health = Assert.Single(admin.Annotations.OfType<HealthCheckAnnotation>());
+        Assert.Equal("ldap-admin_http_/robots.txt_200_check", health.Key);
     }
 
     [Fact]
