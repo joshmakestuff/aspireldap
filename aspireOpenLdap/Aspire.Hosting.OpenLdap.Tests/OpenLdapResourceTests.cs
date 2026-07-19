@@ -1,33 +1,13 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.Testing;
-using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
-[Collection(AppHostCollection.Name)]
+// The becomes-healthy smoke test that used to live here was deleted (#41): the telemetry
+// integration starts the same default AppHost, waits for health, and performs a real search.
 public class OpenLdapResourceTests
 {
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task OpenLdap_Resource_Becomes_Healthy()
-    {
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-
-        var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(cts.Token);
-
-        await using var app = await appHost.BuildAsync(cts.Token);
-
-        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-
-        await app.StartAsync(cts.Token);
-
-        // The bundled Dockerfile is built on first run, so this may take a while on a cold machine.
-        await notifications.WaitForResourceHealthyAsync("openldap", cts.Token);
-    }
-
     [Fact]
     public void WithDataVolume_Default_Name_Is_Scoped_To_The_AppHost()
     {

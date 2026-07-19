@@ -127,14 +127,14 @@ public class ProbeLogFilterTests : IDisposable
         }
     }
 
-    [Theory]
-    [InlineData("fatal: assertion failed")]                       // unterminated only
-    [InlineData("slapd starting\nfatal: assertion failed")]       // terminated then unterminated
-    public async Task Filter_Preserves_Unterminated_Final_Line(string fixture)
+    [Fact]
+    public async Task Filter_Preserves_Unterminated_Final_Line()
     {
         // An abrupt slapd death can end the log mid-line; the fail-open contract says that
         // fragment must still surface. (read(1) reports EOF while leaving the consumed
-        // partial line in the variable — the filter must not drop it.)
+        // partial line in the variable — the filter must not drop it.) The terminated line
+        // before it exercises the same shell read branch as a fixture with no prior lines.
+        const string fixture = "slapd starting\nfatal: assertion failed";
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
@@ -154,10 +154,7 @@ public class ProbeLogFilterTests : IDisposable
             Assert.True(run.ExitCode == 0, $"filter run failed: {run.Output}");
 
             Assert.Contains("fatal: assertion failed", run.Output);
-            if (fixture.Contains('\n'))
-            {
-                Assert.Contains("slapd starting", run.Output);
-            }
+            Assert.Contains("slapd starting", run.Output);
         }
         finally
         {
