@@ -239,12 +239,6 @@ export LDAP_ACCESSLOG_ADMIN_DN="${LDAP_ACCESSLOG_ADMIN_USERNAME/#/cn=},${LDAP_AC
 # LDAP_ACCESSLOG_ADMIN_PASSWORD is resolved below, after Docker-secret (*_FILE) handling,
 # so both the canonical name and the deprecated LDAP_ACCESSLOG_PASSWORD alias work in
 # plain and _FILE form.
-export LDAP_ENABLE_SYNCPROV="${LDAP_ENABLE_SYNCPROV:-no}"
-# LDAP_SYNCPROV_CHECKPOINT is canonical; LDAP_SYNCPROV_CHECKPPOINT (historical double-P
-# typo) is honored as a fallback so existing configurations keep working.
-export LDAP_SYNCPROV_CHECKPOINT="${LDAP_SYNCPROV_CHECKPOINT:-${LDAP_SYNCPROV_CHECKPPOINT:-100 10}}"
-export LDAP_SYNCPROV_SESSIONLOG="${LDAP_SYNCPROV_SESSIONLOG:-100}"
-
 # The deprecated LDAP_ACCESSLOG_PASSWORD alias is honored only when the canonical
 # variable is absent (see the resolution block below), so once the canonical plain or
 # _FILE setting exists, the alias — including a stale, no-longer-mounted
@@ -719,7 +713,7 @@ ldap_add_custom_schemas() {
 # WithOverlay(...) API, mounted at /overlays.ldif. Applied ONLINE here — after the
 # custom schemas are loaded (so referenced objectClasses/attributes like umGroupOfNames
 # and memberOf exist) and before the data load (so e.g. memberof populates as the seed
-# loads). Mirrors how ppolicy/syncprov overlays are configured.
+# loads). Mirrors how the ppolicy overlay is configured.
 ########################
 ldap_add_overlays() {
     [[ -s /overlays.ldif ]] || return 0
@@ -937,9 +931,6 @@ ldap_initialize() {
         if is_boolean_yes "$LDAP_ENABLE_ACCESSLOG"; then
             ldap_enable_accesslog
         fi
-        if is_boolean_yes "$LDAP_ENABLE_SYNCPROV"; then
-            ldap_enable_syncprov
-        fi
         # Load custom LDIFs or default tree
         if [[ -d "$LDAP_CUSTOM_LDIF_DIR" ]] && ! is_dir_empty "$LDAP_CUSTOM_LDIF_DIR"; then
             ldap_add_custom_ldifs
@@ -1148,21 +1139,4 @@ olcAccessLogOld: $LDAP_ACCESSLOG_LOGOLD
 olcAccessLogOldAttr: $LDAP_ACCESSLOG_LOGOLDATTR
 EOF
     debug_execute ldapadd -Q -Y EXTERNAL -H "ldapi:///" -f "${LDAP_SHARE_DIR}/accesslog_create_overlay.ldif"
-}
-
-########################
-# Enable sync provider overlay
-########################
-ldap_enable_syncprov() {
-    info "Configuring Sync Provider"
-    ldap_load_module "/usr/lib/ldap" "syncprov.so"
-    cat > "${LDAP_SHARE_DIR}/syncprov_create_overlay.ldif" << EOF
-dn: olcOverlay=syncprov,olcDatabase={2}mdb,cn=config
-objectClass: olcOverlayConfig
-objectClass: olcSyncProvConfig
-olcOverlay: syncprov
-olcSpCheckpoint: $LDAP_SYNCPROV_CHECKPOINT
-olcSpSessionLog: $LDAP_SYNCPROV_SESSIONLOG
-EOF
-    debug_execute ldapadd -Q -Y EXTERNAL -H "ldapi:///" -f "${LDAP_SHARE_DIR}/syncprov_create_overlay.ldif"
 }
