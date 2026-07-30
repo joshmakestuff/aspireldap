@@ -248,7 +248,7 @@ public class ConfigLdifGenerationTests
 {
     // These parse the generated cn=config LDIF and assert record/change semantics — what
     // the privileged ldapmodify apply actually consumes. Runtime application of overlays
-    // and ACLs remains tracked by #38.
+    // and ACLs is covered by OverlayAccessControlIntegrationTests.
 
     [Fact]
     public void Overlay_Ldif_Contains_Module_List_And_Overlay_Entry()
