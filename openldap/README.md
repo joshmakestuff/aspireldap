@@ -104,9 +104,6 @@ ldapsearch -x -H ldap://localhost:1389 -b "" -s base "(objectClass=*)" +
 | `LDAP_ACCESSLOG_LOGPURGE` | `07+00:00 01+00:00` | Purge age/interval (`olcAccessLogPurge`) |
 | `LDAP_ACCESSLOG_LOGOLD` | `(objectClass=*)` | Filter for logging old entry attributes |
 | `LDAP_ACCESSLOG_LOGOLDATTR` | `objectClass` | Attributes logged from old entries |
-| `LDAP_ENABLE_SYNCPROV` | `no` | Enable sync provider overlay |
-| `LDAP_SYNCPROV_CHECKPOINT` | `100 10` | Syncprov checkpoint ops/minutes (`LDAP_SYNCPROV_CHECKPPOINT` accepted as a legacy alias) |
-| `LDAP_SYNCPROV_SESSIONLOG` | `100` | Syncprov session log size |
 
 ### Other
 

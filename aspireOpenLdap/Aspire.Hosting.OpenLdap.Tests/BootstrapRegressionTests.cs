@@ -408,23 +408,6 @@ public class BootstrapRegressionTests : IDisposable
     }
 
     [Fact]
-    public async Task Syncprov_Checkpoint_Legacy_Double_P_Alias_Resolves()
-    {
-        // Only the non-obvious compatibility behavior gets a Docker case: the historical
-        // LDAP_SYNCPROV_CHECKPPOINT (double-P) spelling must keep feeding the canonical
-        // variable. Canonical passthrough and the default are plain Bash parameter expansion.
-        // Runtime syncprov application coverage is tracked by #38.
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var image = await BundledImage.GetAsync(cts.Token);
-
-        var run = await DockerCli.RunAsync(cts.Token,
-            "run", "--rm", "-e", "LDAP_SYNCPROV_CHECKPPOINT=9 9", "--entrypoint", "bash", image,
-            "-c", ". /opt/openldap/scripts/libopenldap.sh && eval \"$(ldap_env)\" && printf 'checkpoint=[%s]' \"$LDAP_SYNCPROV_CHECKPOINT\"");
-        Assert.True(run.ExitCode == 0, $"resolution run failed: {run.Output}");
-        Assert.Contains("checkpoint=[9 9]", run.Output);
-    }
-
-    [Fact]
     public async Task Custom_Ldif_Continue_On_Error_Skips_Rejects_But_Default_Fails_Loud()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));

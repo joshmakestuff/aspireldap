@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Removed
+
+- **The syncprov toggle is gone** (`LDAP_ENABLE_SYNCPROV`, `LDAP_SYNCPROV_CHECKPOINT` and its
+  legacy `CHECKPPOINT` alias, `LDAP_SYNCPROV_SESSIONLOG`). The overlay was inherited from the
+  upstream bootstrap script for multi-instance replication, which is out of scope for a
+  dev-time integration; nothing in the Aspire hosting API exposed it and it defaulted to off.
+  Re-introducing syncprov as first-class change-notification support (RFC 4533
+  refreshAndPersist — "subscribe" to a query/filter) is tracked by #53.
+
 ### Fixed
 
 Findings from a fourth (2026-07-19) hardening review, run with the lens playbook extracted
