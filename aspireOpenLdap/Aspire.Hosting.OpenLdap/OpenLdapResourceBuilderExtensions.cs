@@ -789,17 +789,37 @@ public static class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
-    /// Grants <c>olcAccess</c> rules on the main (mdb) database so non-root principals — e.g. a
-    /// dedicated service account — can read or write chosen subtrees. Each <paramref name="rules"/>
-    /// entry is a full <c>olcAccess</c> rule body <em>without</em> the <c>{N}</c> ordering prefix,
-    /// for example:
-    /// <code>to dn.subtree="ou=entity,dc=umd,dc=edu" by dn.exact="uid=svc,..." write by * break</code>
-    /// Rules are prepended (indices <c>{0}</c>, <c>{1}</c>, …) ahead of the server defaults, so end
-    /// each with <c>by * break</c> to let the remaining ACLs still apply. Applied online at start.
+    /// Declares the <c>olcAccess</c> rules for the main (mdb) database so non-root principals —
+    /// e.g. a dedicated service account — can read or write chosen subtrees. Each
+    /// <paramref name="rules"/> entry is a full <c>olcAccess</c> rule body <em>without</em> the
+    /// <c>{N}</c> ordering prefix; slapd evaluates them in the given order and the first
+    /// matching <c>to</c> clause wins. Applied online at start.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The declared rules are the <b>complete</b> access policy, not an addition to defaults:
+    /// the bundled image's mdb database ships with no <c>olcAccess</c> rules, and the moment any
+    /// rule exists slapd's implicit final rule is <c>to * by * none</c> (verified against the
+    /// bundled image — unmatched targets and rules that fall through via <c>by * break</c> are
+    /// both denied, including the auth access simple binds need on <c>userPassword</c>). A lone
+    /// restricting rule therefore breaks every non-admin bind and read. A complete policy looks
+    /// like:
+    /// <code>
+    /// .WithAccessControl(
+    ///     // binds keep working (put this FIRST so a later subtree rule cannot shadow it)
+    ///     "to attrs=userPassword by anonymous auth by self write by * none",
+    ///     // the actual grant/restriction
+    ///     "to dn.subtree=\"ou=secret,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=users,dc=example,dc=org\" read by * none",
+    ///     // everything else stays readable to authenticated users
+    ///     "to * by users read by * none")
+    /// </code>
+    /// <c>by * break</c> only continues into the <em>later rules in this list</em> — there are no
+    /// server defaults to fall back to.
+    /// </para>
+    /// <para>
     /// Like overlays, access rules are part of the seed-once bootstrap (they configure the database,
     /// not the data): applying new rules to an already-seeded data volume requires resetting the volume.
+    /// </para>
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithAccessControl(
         this IResourceBuilder<OpenLdapResource> builder,
