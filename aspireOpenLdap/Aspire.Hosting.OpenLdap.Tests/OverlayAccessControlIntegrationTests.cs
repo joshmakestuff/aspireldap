@@ -34,10 +34,10 @@ public class OverlayAccessControlIntegrationTests
         // memberOf is operational (overlay-maintained), so it must be requested explicitly.
         // Its presence proves the whole chain: module load + olcOverlay entry applied via
         // ldapadd -Y EXTERNAL, and applied BEFORE the data load so seed-time group members
-        // were populated.
+        // were populated. (SendRequest throws on non-success result codes, so the entry-shape
+        // assertions below are the real checks — no ResultCode assert needed.)
         var response = (SearchResponse)connection.SendRequest(
             new SearchRequest(AliceDn, "(objectClass=*)", SearchScope.Base, "memberOf"));
-        Assert.Equal(ResultCode.Success, response.ResultCode);
 
         var entry = Assert.Single(response.Entries.Cast<SearchResultEntry>());
         var memberOf = entry.Attributes["memberOf"];
@@ -54,31 +54,33 @@ public class OverlayAccessControlIntegrationTests
 
         var admin = await GetAdminSettingsAsync(app, cts.Token);
 
-        // Both non-root binds succeeding is itself a witness: with the declared rules applied,
-        // slapd's implicit default is deny, so binds only work through the generated
-        // "attrs=userPassword ... by anonymous auth" rule.
+        // Explicit Bind() is the auth-rule witness. CreateConnection never binds (SDS.P binds
+        // lazily on the first request), and with the rules applied slapd's implicit default is
+        // deny — verified empirically: without the generated "attrs=userPassword ... by
+        // anonymous auth" rule these binds fail with invalid credentials, so succeeding here
+        // proves that rule landed.
         using var svcConnection = CreateUserConnection(admin, SvcDn, "svc-password");
         using var aliceConnection = CreateUserConnection(admin, AliceDn, "alice-password");
+        svcConnection.Bind();
+        aliceConnection.Bind();
 
-        // The granted principal reads the restricted subtree.
+        // The granted principal reads the restricted subtree (rule {1}). SendRequest throws
+        // on non-success codes, so the entry-shape assertions are the real checks.
         var svcSearch = (SearchResponse)svcConnection.SendRequest(new SearchRequest(
             admin.BaseDn, "(cn=classified)", SearchScope.Subtree, "cn"));
-        Assert.Equal(ResultCode.Success, svcSearch.ResultCode);
         var classified = Assert.Single(svcSearch.Entries.Cast<SearchResultEntry>());
         Assert.Equal("cn=classified,ou=secret,dc=example,dc=org", classified.DistinguishedName);
 
-        // Another authenticated user gets nothing from the restricted subtree — the entry is
-        // silently invisible, not merely unreadable.
+        // Another authenticated user gets nothing from the restricted subtree — an ACL-denied
+        // search returns Success with zero entries (silent invisibility), never an error code.
         var aliceSearch = (SearchResponse)aliceConnection.SendRequest(new SearchRequest(
             admin.BaseDn, "(cn=classified)", SearchScope.Subtree, "cn"));
-        Assert.Equal(ResultCode.Success, aliceSearch.ResultCode);
         Assert.Empty(aliceSearch.Entries.Cast<SearchResultEntry>());
 
-        // But the deny is scoped: outside ou=secret the catch-all read rule still applies,
-        // so alice sees ordinary entries.
+        // But the deny is scoped: outside ou=secret the catch-all read rule ({2}) still
+        // applies, so alice sees ordinary entries.
         var aliceReadsSvc = (SearchResponse)aliceConnection.SendRequest(new SearchRequest(
             SvcDn, "(objectClass=*)", SearchScope.Base, "uid"));
-        Assert.Equal(ResultCode.Success, aliceReadsSvc.ResultCode);
         Assert.Single(aliceReadsSvc.Entries.Cast<SearchResultEntry>());
     }
 
@@ -113,12 +115,15 @@ public class OverlayAccessControlIntegrationTests
     private static LdapConnection CreateUserConnection(
         OpenLdapConnectionStringBuilder admin, string bindDn, string password)
     {
+        // Carry CaCertFile so the copy stays faithful if this scenario is ever combined with
+        // TLS — dropping it would silently swap custom CA trust for the platform store.
         var settings = new OpenLdapConnectionStringBuilder
         {
             Endpoint = admin.Endpoint,
             BaseDn = admin.BaseDn,
             BindDn = bindDn,
             BindPassword = password,
+            CaCertFile = admin.CaCertFile,
         };
         return new OpenLdapClientFactory(settings, new OpenLdapClientSettings()).CreateConnection();
     }
