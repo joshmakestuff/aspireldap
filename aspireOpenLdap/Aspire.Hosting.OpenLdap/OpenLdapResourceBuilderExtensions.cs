@@ -753,6 +753,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <remarks>
     /// Overlays are part of the seed-once bootstrap: enabling one on an already-seeded data
     /// volume requires resetting the volume so the bootstrap (and any seed-time population) re-runs.
+    /// The declaration is validated here — and declaring the same overlay name twice throws —
+    /// so mistakes fail at model construction rather than during container bootstrap.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithOverlay(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -760,8 +762,15 @@ public static class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(overlay);
+        overlay.Validate();
 
         var resource = builder.Resource;
+        if (resource.Overlays?.Any(o => string.Equals(o.Name, overlay.Name, StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            throw new DistributedApplicationException(
+                $"Overlay '{overlay.Name}' is already declared on resource '{resource.Name}'. " +
+                "Each overlay can be added once; combine its settings into a single declaration.");
+        }
         if (resource.Overlays is null)
         {
             resource.Overlays = [];
