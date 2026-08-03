@@ -13,7 +13,8 @@
   relative to the AppHost project.
 - **BREAKING — `OpenLdapOverlay.MemberOf(..., dangling)` takes a typed enum** (#61). The
   parameter changed from a free string to `OpenLdapMemberOfDanglingPolicy`
-  (`Ignore`/`Drop`/`Error`), so an unsupported policy is unrepresentable. Migration:
+  (`Ignore`/`Drop`/`Error`); an unsupported policy cannot be expressed with the named
+  constants, and a raw cast to an undefined value throws at the factory call. Migration:
   `dangling: "drop"` → `dangling: OpenLdapMemberOfDanglingPolicy.Drop`. Callers using the
   default are unaffected.
 - **Overlay declarations validate at model construction** (#61). Empty/whitespace overlay
@@ -22,11 +23,12 @@
   container bootstrap with a slapadd error against generated LDIF.
 - **Dashboard commands follow Aspire's container runtime and die on cancel** (#58). The
   `export-ldif` and `reset-data-volume` commands shell out to the runtime Aspire is
-  configured for (`ASPIRE_CONTAINER_RUNTIME`/`DcpPublisher:ContainerRuntime`, default
-  docker) instead of assuming `docker`, a missing CLI produces an actionable dashboard
-  message instead of an unhandled exception, and cancelling a command now kills the whole
-  child process tree — previously `docker volume rm` could keep deleting in the background
-  after the dashboard reported the command cancelled.
+  configured for (`DcpPublisher:ContainerRuntime`, then `ASPIRE_CONTAINER_RUNTIME`) instead
+  of assuming `docker`; with no configuration they probe for docker then podman, mirroring
+  Aspire's own auto-detection, so a podman-only machine works out of the box. A missing CLI
+  produces an actionable dashboard message instead of an unhandled exception, and cancelling
+  a command now kills the whole child process tree — previously `docker volume rm` could
+  keep deleting in the background after the dashboard reported the command cancelled.
 - **The bundled image's Debian base is pinned by digest** (#59). `debian:trixie-slim` is now
   referenced by its multi-arch index digest, so clean builds of the same package version
   start from the same base, and bumping the digest is a reviewable change that also

@@ -44,28 +44,91 @@ public class DashboardCommandTests
     // --- Runtime resolution -------------------------------------------------------------
 
     [Fact]
-    public void Container_Runtime_Defaults_To_Docker()
+    public async Task Unconfigured_Runtime_Probes_Docker_First()
     {
-        using var services = BuildServices(new FakeCliRunner());
-        Assert.Equal("docker", OpenLdapResourceBuilderExtensions.GetContainerRuntime(services));
+        var runner = new FakeCliRunner(); // default handler: every call exits 0
+        using var services = BuildServices(runner);
+
+        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
+            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+
+        Assert.Null(failure);
+        Assert.Equal("docker", runtime);
+        var call = Assert.Single(runner.Calls);
+        Assert.Equal("docker", call.FileName);
+        Assert.Equal(["--version"], call.Args);
     }
 
     [Fact]
-    public void Container_Runtime_Honors_The_Aspire_Selector_And_Dcp_Key_Precedence()
+    public async Task Unconfigured_Runtime_Falls_Back_To_Podman_When_Docker_Is_Absent()
     {
-        using var aspireVar = BuildServices(new FakeCliRunner(), new Dictionary<string, string?>
+        // DCP auto-detects the runtime when nothing is configured, so on a podman-only
+        // machine LDAP itself runs fine — the commands must find podman the same way.
+        var runner = new FakeCliRunner
+        {
+            Handler = (file, _) => file == "docker"
+                ? (ProcessContainerCliRunner.StartFailureExitCode, "", "not found")
+                : (0, "podman version 5", ""),
+        };
+        using var services = BuildServices(runner);
+
+        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
+            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+
+        Assert.Null(failure);
+        Assert.Equal("podman", runtime);
+    }
+
+    [Fact]
+    public async Task Unconfigured_Runtime_Fails_Actionably_When_Nothing_Is_Installed()
+    {
+        var runner = new FakeCliRunner
+        {
+            Handler = (_, _) => (ProcessContainerCliRunner.StartFailureExitCode, "", "not found"),
+        };
+        using var services = BuildServices(runner);
+
+        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
+            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+
+        Assert.Null(runtime);
+        Assert.NotNull(failure);
+        Assert.False(failure.Success);
+        Assert.Contains("ASPIRE_CONTAINER_RUNTIME", failure.Message);
+    }
+
+    [Fact]
+    public async Task Configured_Runtime_Is_Authoritative_And_Never_Probed()
+    {
+        // Explicit configuration must fail loudly on use, not silently fall back to a probe
+        // that picks a different runtime than the user named.
+        var runner = new FakeCliRunner();
+        using var services = BuildServices(runner, new Dictionary<string, string?>
         {
             ["ASPIRE_CONTAINER_RUNTIME"] = "podman",
         });
-        Assert.Equal("podman", OpenLdapResourceBuilderExtensions.GetContainerRuntime(aspireVar));
 
+        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
+            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+
+        Assert.Null(failure);
+        Assert.Equal("podman", runtime);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public void Configured_Runtime_Prefers_The_Dcp_Key_Over_The_Aspire_Selector()
+    {
         // The strongly-bound DCP key is what Aspire itself reads first; it must win.
         using var both = BuildServices(new FakeCliRunner(), new Dictionary<string, string?>
         {
             ["ASPIRE_CONTAINER_RUNTIME"] = "podman",
             ["DcpPublisher:ContainerRuntime"] = "docker",
         });
-        Assert.Equal("docker", OpenLdapResourceBuilderExtensions.GetContainerRuntime(both));
+        Assert.Equal("docker", OpenLdapResourceBuilderExtensions.GetConfiguredContainerRuntime(both));
+
+        using var none = BuildServices(new FakeCliRunner());
+        Assert.Null(OpenLdapResourceBuilderExtensions.GetConfiguredContainerRuntime(none));
     }
 
     // --- Reset removal core -------------------------------------------------------------
@@ -93,7 +156,10 @@ public class DashboardCommandTests
     public async Task Remove_Skips_Container_Removal_When_No_Container_Id_Is_Known()
     {
         var runner = new FakeCliRunner();
-        using var services = BuildServices(runner);
+        using var services = BuildServices(runner, new Dictionary<string, string?>
+        {
+            ["ASPIRE_CONTAINER_RUNTIME"] = "docker", // explicit: keep probing out of this witness
+        });
 
         var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
             services, containerId: null, "my-volume", CancellationToken.None);
@@ -112,7 +178,10 @@ public class DashboardCommandTests
                 ? (1, "", "Error: no container with ID cid found: no such container")
                 : (1, "", "Error: no such volume"),
         };
-        using var services = BuildServices(runner);
+        using var services = BuildServices(runner, new Dictionary<string, string?>
+        {
+            ["ASPIRE_CONTAINER_RUNTIME"] = "docker", // explicit: keep probing out of this witness
+        });
 
         var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
             services, "cid", "my-volume", CancellationToken.None);
@@ -150,7 +219,10 @@ public class DashboardCommandTests
             Handler = (_, _) => (ProcessContainerCliRunner.StartFailureExitCode, "",
                 "Container runtime 'podman' could not be started: not found."),
         };
-        using var services = BuildServices(runner);
+        using var services = BuildServices(runner, new Dictionary<string, string?>
+        {
+            ["ASPIRE_CONTAINER_RUNTIME"] = "podman", // explicitly configured and missing: fail loudly
+        });
 
         var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
             services, "cid", "my-volume", CancellationToken.None);
@@ -239,7 +311,7 @@ public class DashboardCommandTests
             Handler = (_, _) => (3, "", "slapcat: bad suffix"),
         };
 
-        var (result, _) = await ExecuteExportAsync(runner);
+        var (result, _) = await ExecuteExportAsync(runner, containerRuntime: "docker");
 
         Assert.False(result.Success);
         Assert.Contains("slapcat via docker failed (exit 3)", result.Message);
@@ -277,42 +349,85 @@ public class DashboardCommandTests
     }
 
     [Fact]
-    public async Task Process_Runner_Kills_The_Child_Process_On_Cancellation()
+    public async Task Process_Runner_Kills_The_Whole_Process_Tree_On_Cancellation()
     {
-        // Under the old implementation cancellation abandoned the child (WaitForExitAsync
-        // threw, the process kept running) — this test fails there because the PID stays alive.
+        // Two regressions must fail here: the old implementation abandoned the CLI process
+        // entirely (WaitForExitAsync threw, everything kept running), and a Kill() without
+        // entireProcessTree would reap the shell but leave its child alive — so the spawned
+        // command is a shell PARENT with a real CHILD, and both PIDs must die.
         var (fileName, args) = OperatingSystem.IsWindows()
-            ? ("ping", new[] { "-n", "60", "127.0.0.1" })
-            : ("sleep", new[] { "60" });
+            ? ("cmd", new[] { "/c", "ping -n 60 127.0.0.1" })
+            : ("sh", new[] { "-c", "sleep 60; true" }); // '; true' forces sh to fork, not exec
 
-        var childPid = 0;
-        var runner = new ProcessContainerCliRunner { OnProcessStarted = pid => childPid = pid };
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        var parentPid = 0;
+        var runner = new ProcessContainerCliRunner { OnProcessStarted = pid => parentPid = pid };
+        using var cts = new CancellationTokenSource();
+        var runTask = runner.RunAsync(fileName, args, cts.Token);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => runner.RunAsync(fileName, args, cts.Token));
+        // Wait for the shell to spawn its child before cancelling, so the tree exists.
+        var spawnDeadline = DateTime.UtcNow.AddSeconds(10);
+        int? grandchildPid = null;
+        while (grandchildPid is null && DateTime.UtcNow < spawnDeadline)
+        {
+            await Task.Delay(100);
+            if (parentPid != 0)
+            {
+                grandchildPid = await TryGetFirstChildPidAsync(parentPid);
+            }
+        }
+        Assert.NotEqual(0, parentPid);
+        Assert.NotNull(grandchildPid);
 
-        Assert.NotEqual(0, childPid);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+
+        await AssertProcessGoneAsync(parentPid, "shell parent");
+        await AssertProcessGoneAsync(grandchildPid.Value, "spawned child");
+    }
+
+    private static async Task<int?> TryGetFirstChildPidAsync(int parentPid)
+    {
+        var (fileName, args) = OperatingSystem.IsWindows()
+            ? ("powershell", $"-NoProfile -Command (Get-CimInstance Win32_Process -Filter \"ParentProcessId={parentPid}\").ProcessId")
+            : ("ps", $"-o pid= --ppid {parentPid}");
+        var psi = new System.Diagnostics.ProcessStartInfo(fileName, args)
+        {
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using var query = System.Diagnostics.Process.Start(psi)!;
+        var output = await query.StandardOutput.ReadToEndAsync();
+        await query.WaitForExitAsync();
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (int.TryParse(line, out var pid))
+            {
+                return pid;
+            }
+        }
+        return null;
+    }
+
+    private static async Task AssertProcessGoneAsync(int pid, string what)
+    {
         var deadline = DateTime.UtcNow.AddSeconds(10);
-        var gone = false;
         while (DateTime.UtcNow < deadline)
         {
             try
             {
-                using var child = System.Diagnostics.Process.GetProcessById(childPid);
-                if (child.HasExited)
+                using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                if (proc.HasExited)
                 {
-                    gone = true;
-                    break;
+                    return;
                 }
             }
             catch (ArgumentException)
             {
-                gone = true; // no such process — reaped
-                break;
+                return; // no such process — reaped
             }
             await Task.Delay(100);
         }
-        Assert.True(gone, $"child CLI process {childPid} still running after cancellation");
+        Assert.Fail($"{what} (pid {pid}) still running after cancellation");
     }
 }

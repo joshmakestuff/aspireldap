@@ -159,7 +159,12 @@ public static class OpenLdapResourceBuilderExtensions
                 }
 
                 var runner = ctx.ServiceProvider.GetRequiredService<IContainerCliRunner>();
-                var runtime = GetContainerRuntime(ctx.ServiceProvider);
+                var (runtime, resolveFailure) = await ResolveContainerRuntimeAsync(
+                    ctx.ServiceProvider, ctx.CancellationToken).ConfigureAwait(false);
+                if (runtime is null)
+                {
+                    return resolveFailure!;
+                }
                 var (exitCode, stdout, stderr) = await runner.RunAsync(
                     runtime,
                     ["exec", containerId, "slapcat", "-b", resource.BaseDn],
@@ -387,7 +392,11 @@ public static class OpenLdapResourceBuilderExtensions
         CancellationToken cancellationToken)
     {
         var runner = services.GetRequiredService<IContainerCliRunner>();
-        var runtime = GetContainerRuntime(services);
+        var (runtime, resolveFailure) = await ResolveContainerRuntimeAsync(services, cancellationToken).ConfigureAwait(false);
+        if (runtime is null)
+        {
+            return resolveFailure;
+        }
 
         if (containerId is not null)
         {
@@ -426,19 +435,52 @@ public static class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
-    /// Resolves the container runtime Aspire is orchestrating with, so dashboard commands
-    /// shell out to the same CLI (docker vs podman) instead of assuming docker (#58). Reads
-    /// the same configuration keys Aspire binds its (internal) DCP options from:
+    /// The explicitly configured container runtime, or <see langword="null"/> when none is
+    /// set. Reads the same configuration keys Aspire binds its (internal) DCP options from:
     /// <c>DcpPublisher:ContainerRuntime</c>, then <c>ASPIRE_CONTAINER_RUNTIME</c> (the
-    /// documented selector, which environment/host config surfaces as this key), then the
-    /// docker default.
+    /// documented selector, which environment/host config surfaces as this key).
     /// </summary>
-    internal static string GetContainerRuntime(IServiceProvider services)
+    internal static string? GetConfiguredContainerRuntime(IServiceProvider services)
     {
         var configuration = services.GetService<IConfiguration>();
         var fromConfiguration = configuration?["DcpPublisher:ContainerRuntime"]
             ?? configuration?["ASPIRE_CONTAINER_RUNTIME"];
-        return string.IsNullOrWhiteSpace(fromConfiguration) ? "docker" : fromConfiguration.Trim();
+        return string.IsNullOrWhiteSpace(fromConfiguration) ? null : fromConfiguration.Trim();
+    }
+
+    /// <summary>
+    /// Resolves the container runtime the dashboard commands shell out to (#58). An explicit
+    /// configuration is authoritative — used as-is so a misconfiguration fails loudly on use
+    /// rather than being silently papered over. With no configuration, mirror Aspire's own
+    /// behavior of probing known runtimes (DCP auto-detects when unconfigured, so LDAP can be
+    /// running under podman on a docker-less machine): try <c>docker --version</c>, then
+    /// <c>podman --version</c>. Returns the runtime, or a failure result naming what was tried.
+    /// </summary>
+    internal static async Task<(string? Runtime, ExecuteCommandResult? Failure)> ResolveContainerRuntimeAsync(
+        IServiceProvider services, CancellationToken cancellationToken)
+    {
+        var configured = GetConfiguredContainerRuntime(services);
+        if (configured is not null)
+        {
+            return (configured, null);
+        }
+
+        var runner = services.GetRequiredService<IContainerCliRunner>();
+        foreach (var candidate in (string[])["docker", "podman"])
+        {
+            var (exitCode, _, _) = await runner.RunAsync(candidate, ["--version"], cancellationToken).ConfigureAwait(false);
+            if (exitCode == 0)
+            {
+                return (candidate, null);
+            }
+        }
+
+        return (null, new ExecuteCommandResult
+        {
+            Success = false,
+            Message = "No container runtime found: tried 'docker --version' and 'podman --version'. " +
+                "Install one, or set ASPIRE_CONTAINER_RUNTIME to the runtime this AppHost uses.",
+        });
     }
 
     /// <summary>
