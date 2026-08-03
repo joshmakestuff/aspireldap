@@ -27,6 +27,12 @@
   message instead of an unhandled exception, and cancelling a command now kills the whole
   child process tree — previously `docker volume rm` could keep deleting in the background
   after the dashboard reported the command cancelled.
+- **The bundled image's Debian base is pinned by digest** (#59). `debian:trixie-slim` is now
+  referenced by its multi-arch index digest, so clean builds of the same package version
+  start from the same base, and bumping the digest is a reviewable change that also
+  invalidates Aspire's content-addressed local image cache. apt packages still resolve at
+  build time by documented policy (security fixes without a source change); the Dockerfile
+  documents the refresh procedure.
 
 ### Removed
 
