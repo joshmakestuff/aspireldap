@@ -44,6 +44,16 @@ public class OverlayAccessControlIntegrationTests
         Assert.NotNull(memberOf);
         Assert.Contains("cn=devs,ou=groups,dc=example,dc=org",
             memberOf.GetValues(typeof(string)).Cast<string>());
+
+        // (#58) export-ldif dashboard-command witness, folded in here so the suite doesn't
+        // pay another container start. Executing through ResourceCommandService proves the
+        // whole chain — container-runtime resolution, `exec` against the live container, and
+        // slapcat reading the seeded directory — not just the handler wiring.
+        var commands = app.Services.GetRequiredService<ResourceCommandService>();
+        var export = await commands.ExecuteCommandAsync("openldap", "export-ldif", cts.Token);
+        Assert.True(export.Success, export.Message);
+        var exported = Assert.IsType<CommandResultData>(export.Data);
+        Assert.Contains($"dn: {AliceDn}", exported.Value?.ToString());
     }
 
     [Fact]

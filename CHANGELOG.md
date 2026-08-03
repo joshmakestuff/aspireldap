@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING — relative paths now resolve against the AppHost project directory** (#57).
+  `WithSchema`, `WithSchemas`, `WithSeedData`, and `WithTls(cert, key, ca)` resolved relative
+  paths against the process working directory, so an identical AppHost found different files
+  depending on whether it was launched from an IDE, its own directory, or the repository
+  root. They now use the same base as Aspire's own bind mounts (`AppHostDirectory`). Rooted
+  paths are unaffected. If you relied on CWD-relative resolution, make the path rooted or
+  relative to the AppHost project.
+- **BREAKING — `OpenLdapOverlay.MemberOf(..., dangling)` takes a typed enum** (#61). The
+  parameter changed from a free string to `OpenLdapMemberOfDanglingPolicy`
+  (`Ignore`/`Drop`/`Error`); an unsupported policy cannot be expressed with the named
+  constants, and a raw cast to an undefined value throws at the factory call. Migration:
+  `dangling: "drop"` → `dangling: OpenLdapMemberOfDanglingPolicy.Drop`. Callers using the
+  default are unaffected.
+- **Overlay declarations validate at model construction** (#61). Empty/whitespace overlay
+  names, objectClasses, module names, and attribute names — and duplicate declarations of
+  the same overlay — now throw at the `WithOverlay`/factory call instead of failing during
+  container bootstrap with a slapadd error against generated LDIF.
+- **Dashboard commands follow Aspire's container runtime and die on cancel** (#58). The
+  `export-ldif` and `reset-data-volume` commands shell out to the runtime Aspire is
+  configured for (`DcpPublisher:ContainerRuntime`, then `ASPIRE_CONTAINER_RUNTIME`) instead
+  of assuming `docker`; with no configuration they probe for docker then podman, mirroring
+  Aspire's own auto-detection, so a podman-only machine works out of the box. A missing CLI
+  produces an actionable dashboard message instead of an unhandled exception, and cancelling
+  a command now kills the whole child process tree — previously `docker volume rm` could
+  keep deleting in the background after the dashboard reported the command cancelled.
+- **The bundled image's Debian base is pinned by digest** (#59). `debian:trixie-slim` is now
+  referenced by its multi-arch index digest, so clean builds of the same package version
+  start from the same base, and bumping the digest is a reviewable change that also
+  invalidates Aspire's content-addressed local image cache. apt packages still resolve at
+  build time by documented policy (security fixes without a source change); the Dockerfile
+  documents the refresh procedure.
+
 ### Removed
 
 - **The syncprov toggle is gone** (`LDAP_ENABLE_SYNCPROV`, `LDAP_SYNCPROV_CHECKPOINT` and its

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  First-party-only coverage settings (#64).
+
+  Denominator: ONLY the two published assemblies (Aspire.OpenLdap,
+  Aspire.Hosting.OpenLdap). The collector's default aggregate also counted the whole
+  Aspire/framework dependency graph, which produced a meaningless headline number.
+
+  Known limitations — read before quoting the percentage:
+  - The number describes the FAST suite's in-process execution only. Docker containers and
+    child AppHost processes do substantial verified work OUTSIDE the collector process, so
+    integration-witnessed behavior is structurally under-represented here.
+  - There is deliberately no enforced threshold: an arbitrary percentage rewards executing
+    lines over protecting contracts. Treat this as a diagnostic artifact for spotting
+    untested areas, not a quality gate.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>[Aspire.OpenLdap]*,[Aspire.Hosting.OpenLdap]*</Include>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
