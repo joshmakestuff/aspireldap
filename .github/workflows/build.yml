@@ -49,6 +49,15 @@ jobs:
           --collect "XPlat Code Coverage" --settings coverage.runsettings
           --results-directory ../artifacts/test-results
 
+      # The runsettings' first-party claim is asserted, not trusted: if the Include filter
+      # drifts and framework assemblies re-enter the denominator, this fails the build.
+      - name: Assert coverage counts only first-party assemblies
+        run: |
+          packages=$(grep -hoP 'package name="\K[^"]+' artifacts/test-results/*/coverage.cobertura.xml | sort -u)
+          echo "covered packages:"; echo "$packages"
+          [ "$packages" = "$(printf 'Aspire.Hosting.OpenLdap\nAspire.OpenLdap')" ] \
+            || { echo "::error::coverage denominator drifted from the two first-party assemblies"; exit 1; }
+
       - name: Upload fast-suite coverage (diagnostic)
         uses: actions/upload-artifact@v7
         with:

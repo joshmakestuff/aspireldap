@@ -34,13 +34,24 @@ public sealed class OpenLdapOverlay
     public required string Name { get; init; }
 
     /// <summary>Modules to load for this overlay (e.g. "memberof.so").</summary>
-    public IReadOnlyList<string> ModuleLoads { get; init; } = [];
+    /// <remarks>Snapshotted on init: a caller-retained list mutated after
+    /// <c>WithOverlay(...)</c> validated the declaration must not reach LDIF generation.</remarks>
+    public IReadOnlyList<string> ModuleLoads
+    {
+        get;
+        init => field = [.. value ?? throw new ArgumentNullException(nameof(value))];
+    } = [];
 
     /// <summary>The overlay's config objectClass (e.g. "olcMemberOf").</summary>
     public required string OverlayObjectClass { get; init; }
 
     /// <summary>Ordered <c>olc*</c> attributes for the overlay entry.</summary>
-    public IReadOnlyList<KeyValuePair<string, string>> Attributes { get; init; } = [];
+    /// <remarks>Snapshotted on init, for the same reason as <see cref="ModuleLoads"/>.</remarks>
+    public IReadOnlyList<KeyValuePair<string, string>> Attributes
+    {
+        get;
+        init => field = [.. value ?? throw new ArgumentNullException(nameof(value))];
+    } = [];
 
     /// <summary>
     /// The <c>memberof</c> overlay (slapo-memberof): maintains a reverse-membership
@@ -92,18 +103,24 @@ public sealed class OpenLdapOverlay
     /// model construction with an attributable error instead of during container bootstrap,
     /// where slapadd reports it against generated LDIF the user never wrote. Covers custom
     /// overlays built with an object initializer, which bypass the validated factories.
+    /// (The list properties are snapshotted on init, so what is validated here is exactly
+    /// what LDIF generation later reads.)
     /// </summary>
     internal void Validate()
     {
-        RequireCleanProperty(Name, "Name");
-        RequireCleanProperty(OverlayObjectClass, "OverlayObjectClass");
-        foreach (var module in ModuleLoads ?? throw InvalidDeclaration("ModuleLoads must not be null"))
+        RequireDescriptorProperty(Name, "Name");
+        RequireDescriptorProperty(OverlayObjectClass, "OverlayObjectClass");
+        foreach (var module in ModuleLoads)
         {
-            RequireCleanProperty(module, "ModuleLoads entry");
+            if (module is null || !IsModuleName(module))
+            {
+                throw InvalidDeclaration(
+                    $"ModuleLoads entry '{module}' must be a module file name (letters, digits, '.', '_', '-')");
+            }
         }
-        foreach (var attribute in Attributes ?? throw InvalidDeclaration("Attributes must not be null"))
+        foreach (var attribute in Attributes)
         {
-            RequireCleanProperty(attribute.Key, "attribute name");
+            RequireDescriptorProperty(attribute.Key, "attribute name");
             if (attribute.Value is null)
             {
                 throw InvalidDeclaration($"attribute '{attribute.Key}' must not have a null value");
@@ -111,11 +128,12 @@ public sealed class OpenLdapOverlay
         }
     }
 
-    private void RequireCleanProperty(string? value, string what)
+    private void RequireDescriptorProperty(string? value, string what)
     {
-        if (value is null || !IsCleanToken(value))
+        if (value is null || !IsLdapDescriptor(value))
         {
-            throw InvalidDeclaration($"{what} '{value}' must be a non-empty token without whitespace or control characters");
+            throw InvalidDeclaration(
+                $"{what} '{value}' must be an LDAP descriptor (leading letter then letters/digits/'-') or a numeric OID");
         }
     }
 
@@ -123,20 +141,37 @@ public sealed class OpenLdapOverlay
         new($"Invalid overlay declaration '{Name}': {reason}.");
 
     /// <summary>
-    /// Overlay names, module names, objectClasses, and attribute names are plain LDAP
-    /// descriptors; whitespace or control characters would corrupt the generated cn=config
-    /// LDIF (the overlay name is even spliced into a DN), so reject them up front.
+    /// Overlay names, objectClasses, and attribute names are consumed by slapd as RFC 4512
+    /// descriptors — <c>keystring = leadkeychar *keychar</c> (leading ALPHA, then
+    /// ALPHA/DIGIT/HYPHEN) — or numeric OIDs. Anything looser dies inside the container:
+    /// either slapadd rejects the generated cn=config LDIF with an error against text the
+    /// user never wrote, or (for the overlay name, which is spliced into a DN) a character
+    /// like ',' silently restructures the DN. Derive the rule from what the consumer
+    /// enforces instead of merely banning whitespace.
     /// </summary>
-    private static bool IsCleanToken(string value) =>
-        value.Length > 0 && !value.Any(c => char.IsControl(c) || char.IsWhiteSpace(c));
+    private static bool IsLdapDescriptor(string value) =>
+        (value.Length > 0 && char.IsAsciiLetter(value[0])
+            && value.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+        || IsNumericOid(value);
+
+    private static bool IsNumericOid(string value)
+    {
+        var parts = value.Split('.');
+        return parts.Length >= 2 && parts.All(p => p.Length > 0 && p.All(char.IsAsciiDigit));
+    }
+
+    /// <summary>Module loads are library file names (e.g. "memberof.so", "refint.la").</summary>
+    private static bool IsModuleName(string value) =>
+        value.Length > 0 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-');
 
     private static void RequireLdapToken(string value, string paramName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, paramName);
-        if (!IsCleanToken(value))
+        if (!IsLdapDescriptor(value))
         {
             throw new ArgumentException(
-                $"Value '{value}' must not contain whitespace or control characters.", paramName);
+                $"Value '{value}' must be an LDAP descriptor (leading letter then letters/digits/'-') or a numeric OID.",
+                paramName);
         }
     }
 
