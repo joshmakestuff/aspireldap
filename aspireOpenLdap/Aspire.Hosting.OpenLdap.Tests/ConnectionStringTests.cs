@@ -15,14 +15,14 @@ public class ConnectionStringTests
     }
 
     // One row per parser/quoting equivalence class: unquoted plain, quoted separator chars
-    // (';' plus '=' inside a value), doubled embedded quotes, edge whitespace, non-ASCII,
-    // a value that itself looks fully quoted, and empty.
+    // (';' plus '=' inside a value), doubled embedded quotes, edge whitespace, a value that
+    // itself looks fully quoted, and empty. (A non-ASCII row was prosecuted and removed:
+    // Quote/Parse have no charset-sensitive branch, so it duplicated the plain row.)
     [Theory]
     [InlineData("simplepassword")]
     [InlineData("with=equals;and;semis")]
     [InlineData("a\"b\"\"c")]
     [InlineData(" leading and trailing ")]
-    [InlineData("ünïcode-påsswörd")]
     [InlineData("\"fully quoted\"")]
     [InlineData("")]
     public void Password_Round_Trips(string password)
