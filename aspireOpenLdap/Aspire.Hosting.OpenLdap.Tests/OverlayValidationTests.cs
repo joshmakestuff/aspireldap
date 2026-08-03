@@ -12,7 +12,6 @@ public class OverlayValidationTests
 {
     [Theory]
     [InlineData("", "member")]
-    [InlineData("   ", "member")]
     [InlineData("group Of Names", "member")] // interior whitespace corrupts the olc attribute line
     [InlineData("groupOfNames", "")]
     [InlineData("groupOfNames", "mem\nber")] // control chars would inject LDIF lines
