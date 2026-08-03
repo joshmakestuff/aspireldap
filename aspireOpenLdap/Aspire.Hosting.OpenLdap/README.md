@@ -40,6 +40,8 @@ builder.Build().Run();
 - `WithLogLevel(...)` — set slapd's debug log level (default `Stats`: connection/operation/result lines).
 - `WithHealthCheckProbeLogging(...)` — keep the health-check probe's connections in the container log. By default the container filters out each wholly-successful probe block so the dashboard console isn't drowned in probe noise; probes that fail in any way always log in full.
 
+Relative file/directory paths passed to `WithSchema(s)`, `WithSeedData`, and `WithTls` resolve against the AppHost project directory — the same base Aspire uses for bind mounts — so they work identically whether the AppHost is launched from an IDE, its own directory, or the repository root.
+
 A health check that hits the LDAP root DSE is registered automatically.
 
 ## Connection string

@@ -444,6 +444,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <c>out/cn=config/cn=schema/cn={N}NAME.ldif</c>, rewrite its relative <c>dn:</c>/<c>cn:</c> to the
     /// full <c>cn=NAME,cn=schema,cn=config</c>, and drop the trailing operational attributes
     /// (everything from <c>structuralObjectClass</c> onward).
+    /// A relative <paramref name="ldifFile"/> resolves against the AppHost project directory
+    /// (like Aspire's own bind mounts), not the process working directory.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithSchema(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -452,7 +454,7 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldifFile);
 
-        var fullPath = Path.GetFullPath(ldifFile);
+        var fullPath = ResolveAppHostRelativePath(builder, ldifFile);
         if (!File.Exists(fullPath))
         {
             throw new FileNotFoundException($"Schema LDIF file not found: {fullPath}", fullPath);
@@ -472,6 +474,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <c>core</c> plus the <see cref="WithExtraSchemas"/> set (default <c>cosine,inetorgperson,nis</c>)
     /// before these — supplying your own copies of those here causes duplicate-OID errors, so disable
     /// the overlap with <see cref="WithExtraSchemas"/> or <see cref="WithDefaultSchemas"/>.
+    /// A relative <paramref name="directory"/> resolves against the AppHost project directory
+    /// (like Aspire's own bind mounts), not the process working directory.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithSchemas(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -480,7 +484,7 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
 
-        var fullPath = Path.GetFullPath(directory);
+        var fullPath = ResolveAppHostRelativePath(builder, directory);
         if (!Directory.Exists(fullPath))
         {
             throw new DirectoryNotFoundException($"Schema directory not found: {fullPath}");
@@ -547,6 +551,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// which skips past individual bad entries and logs them instead of failing the load. Use this
     /// for messy bulk data where a partial directory is acceptable.
     /// </para>
+    /// A relative <paramref name="ldifFileOrDirectory"/> resolves against the AppHost project
+    /// directory (like Aspire's own bind mounts), not the process working directory.
     /// </remarks>
     /// <param name="builder">The OpenLDAP resource builder.</param>
     /// <param name="ldifFileOrDirectory">Path to a single LDIF file or a directory of LDIF files.</param>
@@ -562,7 +568,7 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldifFileOrDirectory);
 
-        var fullPath = Path.GetFullPath(ldifFileOrDirectory);
+        var fullPath = ResolveAppHostRelativePath(builder, ldifFileOrDirectory);
 
         if (continueOnError)
         {
@@ -1142,6 +1148,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// with one, or pass <paramref name="disableHealthCheckHostnameValidation"/> —
     /// a local-development-only relaxation that is unavailable on Linux, where libldap
     /// performs hostname validation natively with no hostname-only opt-out.
+    /// Relative file paths resolve against the AppHost project directory (like Aspire's own
+    /// bind mounts), not the process working directory.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithTls(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -1164,9 +1172,9 @@ public static class OpenLdapResourceBuilderExtensions
 
         builder.Resource.TlsHostnameValidationDisabled = disableHealthCheckHostnameValidation;
 
-        var certPath = RequireTlsFile(serverCertFile, "server certificate");
-        var keyPath = RequireTlsFile(serverKeyFile, "server private key");
-        var caPath = RequireTlsFile(caCertFile, "CA certificate");
+        var certPath = RequireTlsFile(builder, serverCertFile, "server certificate");
+        var keyPath = RequireTlsFile(builder, serverKeyFile, "server private key");
+        var caPath = RequireTlsFile(builder, caCertFile, "CA certificate");
 
         builder
             .WithBindMount(certPath, ContainerServerCertPath, isReadOnly: true)
@@ -1176,9 +1184,10 @@ public static class OpenLdapResourceBuilderExtensions
         return ApplyTlsEnvironment(builder, caPath);
     }
 
-    private static string RequireTlsFile(string path, string description)
+    private static string RequireTlsFile(
+        IResourceBuilder<OpenLdapResource> builder, string path, string description)
     {
-        var fullPath = Path.GetFullPath(path);
+        var fullPath = ResolveAppHostRelativePath(builder, path);
         if (!File.Exists(fullPath))
         {
             throw new DistributedApplicationException(
@@ -1186,6 +1195,16 @@ public static class OpenLdapResourceBuilderExtensions
         }
         return fullPath;
     }
+
+    /// <summary>
+    /// Resolves a user-supplied path the way Aspire's own <c>WithBindMount</c> does: relative
+    /// paths are based at the AppHost project directory, not the process working directory, so
+    /// an AppHost finds the same files whether launched from an IDE, the project directory, or
+    /// the repository root. Rooted paths are only normalized.
+    /// </summary>
+    private static string ResolveAppHostRelativePath(
+        IResourceBuilder<OpenLdapResource> builder, string path) =>
+        Path.GetFullPath(path, builder.ApplicationBuilder.AppHostDirectory);
 
     /// <summary>
     /// Requires TLS for all LDAP connections. Switches the connection string scheme to <c>ldaps://</c>.
