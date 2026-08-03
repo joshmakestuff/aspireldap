@@ -2,4 +2,10 @@
   <Project Path="AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj" />
   <Project Path="AspireOpenLdap.Api/AspireOpenLdap.Api.csproj" />
   <Project Path="AspireOpenLdap.ServiceDefaults/AspireOpenLdap.ServiceDefaults.csproj" />
+  <!-- The integration projects are referenced via ProjectReference from the AppHost and API.
+       They must be listed here too: MSBuild unsets Configuration for project references that
+       are not part of the solution being built, so without these entries a Release build of
+       this solution silently compiled both packages under bin/Debug (#60). -->
+  <Project Path="../aspireOpenLdap/Aspire.Hosting.OpenLdap/Aspire.Hosting.OpenLdap.csproj" />
+  <Project Path="../aspireOpenLdap/Aspire.OpenLdap/Aspire.OpenLdap.csproj" />
 </Solution>
