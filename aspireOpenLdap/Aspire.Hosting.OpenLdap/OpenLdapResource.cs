@@ -147,8 +147,14 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// Connection string in the format:
     /// Endpoint=ldap://host:port;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=secret
     /// When TLS is required the scheme switches to <c>ldaps://</c> and <c>CaCertFile=</c> is appended.
-    /// Values containing semicolons, quotes, or leading/trailing whitespace are double-quoted
-    /// (embedded quotes doubled) so any password or DN round-trips through the client parser.
+    /// Values containing semicolons, quotes, or leading/trailing whitespace are double-quoted.
+    /// During local AppHost resolution embedded quotes are doubled as well, so any password or
+    /// DN round-trips through the client parser. In a published manifest the password is
+    /// substituted at deployment time, when no code of this integration runs — only the
+    /// surrounding quotes can be emitted, so semicolons and edge whitespace still round-trip
+    /// but a deployed password containing a double-quote character is NOT supported: it fails
+    /// at client parse time or, if its quotes happen to read as valid doubling, parses to a
+    /// different value. Choose deployed passwords without <c>"</c>.
     /// </summary>
     public ReferenceExpression ConnectionStringExpression
     {
@@ -180,8 +186,11 @@ internal sealed class QuotedParameterValue(ParameterResource parameter) : IValue
     /// ours runs — so the expression is wrapped in literal connection-string quotes up front.
     /// That keeps deployed values containing semicolons or leading/trailing whitespace intact.
     /// The one thing quoting-at-manifest-time cannot express is embedded double quotes (the
-    /// parser requires them doubled); such a password fails loudly at client parse time rather
-    /// than silently binding with the wrong secret.
+    /// parser requires them doubled): a deployed password containing '"' is unsupported.
+    /// Typically it fails loudly at client parse time; in the crafted case where its quotes
+    /// happen to form valid doubling it parses to a DIFFERENT value and the bind fails, so it
+    /// still never authenticates with a half-read secret. Both shapes are pinned by
+    /// ConnectionStringTests.
     /// </summary>
     public string ValueExpression => "\"" + parameter.ValueExpression + "\"";
 

@@ -2,7 +2,24 @@
 # Forked from Bitnami OpenLDAP, rewritten to use stock Debian packages.
 # SPDX-License-Identifier: Apache-2.0
 
-FROM debian:trixie-slim
+# Base image pinned by multi-arch index digest (#59): a floating tag meant two clean builds
+# of the same released package could start from different bases, while Aspire's local image
+# tag — content-addressed from this build context — kept serving a stale image because the
+# context never changed. Editing the digest below changes the context, so a base refresh
+# both is a reviewable source change AND invalidates every local cache.
+#
+# Update policy — deliberate, source-controlled:
+#   1. docker buildx imagetools inspect debian:trixie-slim    -> copy the top-level Digest
+#   2. update the digest below and open a PR; CI's container integration tests plus the
+#      slapd 2.6 assertion further down gate the bump.
+# Refresh whenever Debian publishes security updates relevant to the installed set (or
+# before a release at the latest) — a pin must not become permanent staleness.
+#
+# apt package versions are intentionally NOT locked: they resolve at build time, so a
+# rebuild can pick up Debian point-release security fixes without a source change. For a
+# dev-time image that drift is accepted; the digest fixes the base, the slapd assertion
+# pins the 2.6 contract, and the integration suite gates behavior.
+FROM debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd
 
 LABEL org.opencontainers.image.title="openldap" \
       org.opencontainers.image.description="OpenLDAP server based on stock Debian packages" \

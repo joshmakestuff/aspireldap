@@ -38,9 +38,32 @@ jobs:
         run: dotnet build AspireOpenLdap.slnx --configuration Release --no-restore
 
       # The fast suite must pass without Docker; nothing in it may start a container.
+      # Coverage (#64): first-party assemblies only (see coverage.runsettings for the
+      # denominator and limitations — container/child-process work is not in this number,
+      # and there is deliberately no threshold). Published as a diagnostic artifact.
       - name: Fast tests
         working-directory: aspireOpenLdap
-        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category!=Integration"
+        run: >
+          dotnet test AspireOpenLdap.slnx --configuration Release --no-build
+          --filter "Category!=Integration"
+          --collect "XPlat Code Coverage" --settings coverage.runsettings
+          --results-directory ../artifacts/test-results
+
+      # The runsettings' first-party claim is asserted, not trusted: if the Include filter
+      # drifts and framework assemblies re-enter the denominator, this fails the build.
+      - name: Assert coverage counts only first-party assemblies
+        run: |
+          packages=$(grep -hoP 'package name="\K[^"]+' artifacts/test-results/*/coverage.cobertura.xml | sort -u)
+          echo "covered packages:"; echo "$packages"
+          [ "$packages" = "$(printf 'Aspire.Hosting.OpenLdap\nAspire.OpenLdap')" ] \
+            || { echo "::error::coverage denominator drifted from the two first-party assemblies"; exit 1; }
+
+      - name: Upload fast-suite coverage (diagnostic)
+        uses: actions/upload-artifact@v7
+        with:
+          name: fast-suite-coverage
+          path: artifacts/test-results/**/coverage.cobertura.xml
+          if-no-files-found: error
 
       # Docker-backed integration tests. Direct-docker classes share one bundled-image build
       # (BundledImage); the AppHost tests build theirs through Aspire on first use.
@@ -51,6 +74,31 @@ jobs:
       # Build the examples so they can't rot against the library. Build-only (no Docker / no run).
       - name: Build examples
         run: dotnet build examples/AspireOpenLdap.Examples.slnx --configuration Release
+
+  # Windows fast-suite witness (#64): the client stack sits on a different native LDAP
+  # implementation per OS (wldap32 on Windows vs libldap on Linux), so Linux-only CI left
+  # the Windows paths unwitnessed. Fast suite only — GitHub-hosted Windows runners cannot
+  # run the Linux OpenLDAP container, so integration stays on ubuntu (see #64/#54).
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        working-directory: aspireOpenLdap
+        run: dotnet restore AspireOpenLdap.slnx
+
+      - name: Build
+        working-directory: aspireOpenLdap
+        run: dotnet build AspireOpenLdap.slnx --configuration Release --no-restore
+
+      - name: Fast tests
+        working-directory: aspireOpenLdap
+        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category!=Integration"
 
   pack:
     runs-on: ubuntu-latest
@@ -103,7 +151,7 @@ jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [test, pack]
+    needs: [test, test-windows, pack]
     permissions:
       contents: read
       id-token: write   # OIDC trusted publishing to nuget.org — scoped to this job only

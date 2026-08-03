@@ -1,10 +1,11 @@
-using System.Diagnostics;
 using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
 using Aspire.Hosting.OpenLdap;
 using LdifDotNet;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting;
@@ -40,6 +41,10 @@ public static class OpenLdapResourceBuilderExtensions
         // fails; register the soname fallback resolver so the health check's LdapConnection
         // works without a hand-made symlink.
         Aspire.Hosting.OpenLdap.OpenLdapNativeLibraryResolver.EnsureRegistered();
+
+        // Dashboard commands shell out to the container CLI through this abstraction; TryAdd
+        // so tests (or advanced users) can substitute a runner before AddOpenLdap.
+        builder.Services.TryAddSingleton<IContainerCliRunner, ProcessContainerCliRunner>();
 
         var passwordParameter = adminPassword?.Resource
             ?? ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder, $"{name}-password");
@@ -153,17 +158,28 @@ public static class OpenLdapResourceBuilderExtensions
                     };
                 }
 
-                var (exitCode, stdout, stderr) = await RunProcessAsync(
-                    "docker",
+                var runner = ctx.ServiceProvider.GetRequiredService<IContainerCliRunner>();
+                var (runtime, resolveFailure) = await ResolveContainerRuntimeAsync(
+                    ctx.ServiceProvider, ctx.CancellationToken).ConfigureAwait(false);
+                if (runtime is null)
+                {
+                    return resolveFailure!;
+                }
+                var (exitCode, stdout, stderr) = await runner.RunAsync(
+                    runtime,
                     ["exec", containerId, "slapcat", "-b", resource.BaseDn],
                     ctx.CancellationToken).ConfigureAwait(false);
 
+                if (exitCode == ProcessContainerCliRunner.StartFailureExitCode)
+                {
+                    return new ExecuteCommandResult { Success = false, Message = stderr.Trim() };
+                }
                 if (exitCode != 0)
                 {
                     return new ExecuteCommandResult
                     {
                         Success = false,
-                        Message = $"slapcat failed (exit {exitCode}): {stderr.Trim()}",
+                        Message = $"slapcat via {runtime} failed (exit {exitCode}): {stderr.Trim()}",
                     };
                 }
 
@@ -332,37 +348,11 @@ public static class OpenLdapResourceBuilderExtensions
                     return stopResult;
                 }
 
-                // Aspire's Stop only `docker stop`s the container; the volume stays bound
-                // until the container is removed. Force-remove by ID so `docker volume rm`
-                // can succeed. No-op if the container is already gone.
-                if (containerId is not null)
+                var removalFailure = await RemoveContainerAndVolumeAsync(
+                    ctx.ServiceProvider, containerId, volumeName, ctx.CancellationToken).ConfigureAwait(false);
+                if (removalFailure is not null)
                 {
-                    var (containerRmExit, _, containerRmErr) = await RunProcessAsync(
-                        "docker",
-                        ["rm", "-f", containerId],
-                        ctx.CancellationToken).ConfigureAwait(false);
-                    if (containerRmExit != 0 && !containerRmErr.Contains("no such container", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new ExecuteCommandResult
-                        {
-                            Success = false,
-                            Message = $"docker rm -f failed (exit {containerRmExit}): {containerRmErr.Trim()}",
-                        };
-                    }
-                }
-
-                var (rmExit, _, rmErr) = await RunProcessAsync(
-                    "docker",
-                    ["volume", "rm", volumeName],
-                    ctx.CancellationToken).ConfigureAwait(false);
-                // Treat "volume not found" as success — the user wanted it gone.
-                if (rmExit != 0 && !rmErr.Contains("no such volume", StringComparison.OrdinalIgnoreCase))
-                {
-                    return new ExecuteCommandResult
-                    {
-                        Success = false,
-                        Message = $"docker volume rm failed (exit {rmExit}): {rmErr.Trim()}",
-                    };
+                    return removalFailure;
                 }
 
                 return await commandService
@@ -388,33 +378,109 @@ public static class OpenLdapResourceBuilderExtensions
         return prop?.Value as string;
     }
 
-    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunProcessAsync(
-        string fileName,
-        IEnumerable<string> arguments,
+    /// <summary>
+    /// Force-removes the stopped container (Aspire's Stop only stops it; the volume stays
+    /// bound until the container is gone) and then removes the data volume. Returns a failure
+    /// <see cref="ExecuteCommandResult"/>, or <see langword="null"/> when both are gone —
+    /// "no such container"/"no such volume" count as gone (the user wanted them gone).
+    /// Internal so tests can drive it against a fake <see cref="IContainerCliRunner"/>.
+    /// </summary>
+    internal static async Task<ExecuteCommandResult?> RemoveContainerAndVolumeAsync(
+        IServiceProvider services,
+        string? containerId,
+        string volumeName,
         CancellationToken cancellationToken)
     {
-        var psi = new ProcessStartInfo
+        var runner = services.GetRequiredService<IContainerCliRunner>();
+        var (runtime, resolveFailure) = await ResolveContainerRuntimeAsync(services, cancellationToken).ConfigureAwait(false);
+        if (runtime is null)
         {
-            FileName = fileName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        foreach (var arg in arguments)
-        {
-            psi.ArgumentList.Add(arg);
+            return resolveFailure;
         }
 
-        using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start '{fileName}'.");
+        if (containerId is not null)
+        {
+            var (containerRmExit, _, containerRmErr) = await runner.RunAsync(
+                runtime, ["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+            if (containerRmExit == ProcessContainerCliRunner.StartFailureExitCode)
+            {
+                return new ExecuteCommandResult { Success = false, Message = containerRmErr.Trim() };
+            }
+            if (containerRmExit != 0 && !containerRmErr.Contains("no such container", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ExecuteCommandResult
+                {
+                    Success = false,
+                    Message = $"{runtime} rm -f failed (exit {containerRmExit}): {containerRmErr.Trim()}",
+                };
+            }
+        }
 
-        var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = proc.StandardError.ReadToEndAsync(cancellationToken);
-        await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        var stdout = await stdoutTask.ConfigureAwait(false);
-        var stderr = await stderrTask.ConfigureAwait(false);
-        return (proc.ExitCode, stdout, stderr);
+        var (rmExit, _, rmErr) = await runner.RunAsync(
+            runtime, ["volume", "rm", volumeName], cancellationToken).ConfigureAwait(false);
+        if (rmExit == ProcessContainerCliRunner.StartFailureExitCode)
+        {
+            return new ExecuteCommandResult { Success = false, Message = rmErr.Trim() };
+        }
+        if (rmExit != 0 && !rmErr.Contains("no such volume", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ExecuteCommandResult
+            {
+                Success = false,
+                Message = $"{runtime} volume rm failed (exit {rmExit}): {rmErr.Trim()}",
+            };
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The explicitly configured container runtime, or <see langword="null"/> when none is
+    /// set. Reads the same configuration keys Aspire binds its (internal) DCP options from:
+    /// <c>DcpPublisher:ContainerRuntime</c>, then <c>ASPIRE_CONTAINER_RUNTIME</c> (the
+    /// documented selector, which environment/host config surfaces as this key).
+    /// </summary>
+    internal static string? GetConfiguredContainerRuntime(IServiceProvider services)
+    {
+        var configuration = services.GetService<IConfiguration>();
+        var fromConfiguration = configuration?["DcpPublisher:ContainerRuntime"]
+            ?? configuration?["ASPIRE_CONTAINER_RUNTIME"];
+        return string.IsNullOrWhiteSpace(fromConfiguration) ? null : fromConfiguration.Trim();
+    }
+
+    /// <summary>
+    /// Resolves the container runtime the dashboard commands shell out to (#58). An explicit
+    /// configuration is authoritative — used as-is so a misconfiguration fails loudly on use
+    /// rather than being silently papered over. With no configuration, mirror Aspire's own
+    /// behavior of probing known runtimes (DCP auto-detects when unconfigured, so LDAP can be
+    /// running under podman on a docker-less machine): try <c>docker --version</c>, then
+    /// <c>podman --version</c>. Returns the runtime, or a failure result naming what was tried.
+    /// </summary>
+    internal static async Task<(string? Runtime, ExecuteCommandResult? Failure)> ResolveContainerRuntimeAsync(
+        IServiceProvider services, CancellationToken cancellationToken)
+    {
+        var configured = GetConfiguredContainerRuntime(services);
+        if (configured is not null)
+        {
+            return (configured, null);
+        }
+
+        var runner = services.GetRequiredService<IContainerCliRunner>();
+        foreach (var candidate in (string[])["docker", "podman"])
+        {
+            var (exitCode, _, _) = await runner.RunAsync(candidate, ["--version"], cancellationToken).ConfigureAwait(false);
+            if (exitCode == 0)
+            {
+                return (candidate, null);
+            }
+        }
+
+        return (null, new ExecuteCommandResult
+        {
+            Success = false,
+            Message = "No container runtime found: tried 'docker --version' and 'podman --version'. " +
+                "Install one, or set ASPIRE_CONTAINER_RUNTIME to the runtime this AppHost uses.",
+        });
     }
 
     /// <summary>
@@ -444,6 +510,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <c>out/cn=config/cn=schema/cn={N}NAME.ldif</c>, rewrite its relative <c>dn:</c>/<c>cn:</c> to the
     /// full <c>cn=NAME,cn=schema,cn=config</c>, and drop the trailing operational attributes
     /// (everything from <c>structuralObjectClass</c> onward).
+    /// A relative <paramref name="ldifFile"/> resolves against the AppHost project directory
+    /// (like Aspire's own bind mounts), not the process working directory.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithSchema(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -452,7 +520,7 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldifFile);
 
-        var fullPath = Path.GetFullPath(ldifFile);
+        var fullPath = ResolveAppHostRelativePath(builder, ldifFile);
         if (!File.Exists(fullPath))
         {
             throw new FileNotFoundException($"Schema LDIF file not found: {fullPath}", fullPath);
@@ -472,6 +540,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <c>core</c> plus the <see cref="WithExtraSchemas"/> set (default <c>cosine,inetorgperson,nis</c>)
     /// before these — supplying your own copies of those here causes duplicate-OID errors, so disable
     /// the overlap with <see cref="WithExtraSchemas"/> or <see cref="WithDefaultSchemas"/>.
+    /// A relative <paramref name="directory"/> resolves against the AppHost project directory
+    /// (like Aspire's own bind mounts), not the process working directory.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithSchemas(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -480,7 +550,7 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
 
-        var fullPath = Path.GetFullPath(directory);
+        var fullPath = ResolveAppHostRelativePath(builder, directory);
         if (!Directory.Exists(fullPath))
         {
             throw new DirectoryNotFoundException($"Schema directory not found: {fullPath}");
@@ -547,6 +617,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// which skips past individual bad entries and logs them instead of failing the load. Use this
     /// for messy bulk data where a partial directory is acceptable.
     /// </para>
+    /// A relative <paramref name="ldifFileOrDirectory"/> resolves against the AppHost project
+    /// directory (like Aspire's own bind mounts), not the process working directory.
     /// </remarks>
     /// <param name="builder">The OpenLDAP resource builder.</param>
     /// <param name="ldifFileOrDirectory">Path to a single LDIF file or a directory of LDIF files.</param>
@@ -562,7 +634,7 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldifFileOrDirectory);
 
-        var fullPath = Path.GetFullPath(ldifFileOrDirectory);
+        var fullPath = ResolveAppHostRelativePath(builder, ldifFileOrDirectory);
 
         if (continueOnError)
         {
@@ -747,6 +819,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// <remarks>
     /// Overlays are part of the seed-once bootstrap: enabling one on an already-seeded data
     /// volume requires resetting the volume so the bootstrap (and any seed-time population) re-runs.
+    /// The declaration is validated here — and declaring the same overlay name twice throws —
+    /// so mistakes fail at model construction rather than during container bootstrap.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithOverlay(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -754,8 +828,15 @@ public static class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(overlay);
+        overlay.Validate();
 
         var resource = builder.Resource;
+        if (resource.Overlays?.Any(o => string.Equals(o.Name, overlay.Name, StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            throw new DistributedApplicationException(
+                $"Overlay '{overlay.Name}' is already declared on resource '{resource.Name}'. " +
+                "Each overlay can be added once; combine its settings into a single declaration.");
+        }
         if (resource.Overlays is null)
         {
             resource.Overlays = [];
@@ -1142,6 +1223,8 @@ public static class OpenLdapResourceBuilderExtensions
     /// with one, or pass <paramref name="disableHealthCheckHostnameValidation"/> —
     /// a local-development-only relaxation that is unavailable on Linux, where libldap
     /// performs hostname validation natively with no hostname-only opt-out.
+    /// Relative file paths resolve against the AppHost project directory (like Aspire's own
+    /// bind mounts), not the process working directory.
     /// </remarks>
     public static IResourceBuilder<OpenLdapResource> WithTls(
         this IResourceBuilder<OpenLdapResource> builder,
@@ -1164,9 +1247,9 @@ public static class OpenLdapResourceBuilderExtensions
 
         builder.Resource.TlsHostnameValidationDisabled = disableHealthCheckHostnameValidation;
 
-        var certPath = RequireTlsFile(serverCertFile, "server certificate");
-        var keyPath = RequireTlsFile(serverKeyFile, "server private key");
-        var caPath = RequireTlsFile(caCertFile, "CA certificate");
+        var certPath = RequireTlsFile(builder, serverCertFile, "server certificate");
+        var keyPath = RequireTlsFile(builder, serverKeyFile, "server private key");
+        var caPath = RequireTlsFile(builder, caCertFile, "CA certificate");
 
         builder
             .WithBindMount(certPath, ContainerServerCertPath, isReadOnly: true)
@@ -1176,9 +1259,10 @@ public static class OpenLdapResourceBuilderExtensions
         return ApplyTlsEnvironment(builder, caPath);
     }
 
-    private static string RequireTlsFile(string path, string description)
+    private static string RequireTlsFile(
+        IResourceBuilder<OpenLdapResource> builder, string path, string description)
     {
-        var fullPath = Path.GetFullPath(path);
+        var fullPath = ResolveAppHostRelativePath(builder, path);
         if (!File.Exists(fullPath))
         {
             throw new DistributedApplicationException(
@@ -1186,6 +1270,16 @@ public static class OpenLdapResourceBuilderExtensions
         }
         return fullPath;
     }
+
+    /// <summary>
+    /// Resolves a user-supplied path the way Aspire's own <c>WithBindMount</c> does: relative
+    /// paths are based at the AppHost project directory, not the process working directory, so
+    /// an AppHost finds the same files whether launched from an IDE, the project directory, or
+    /// the repository root. Rooted paths are only normalized.
+    /// </summary>
+    private static string ResolveAppHostRelativePath(
+        IResourceBuilder<OpenLdapResource> builder, string path) =>
+        Path.GetFullPath(path, builder.ApplicationBuilder.AppHostDirectory);
 
     /// <summary>
     /// Requires TLS for all LDAP connections. Switches the connection string scheme to <c>ldaps://</c>.

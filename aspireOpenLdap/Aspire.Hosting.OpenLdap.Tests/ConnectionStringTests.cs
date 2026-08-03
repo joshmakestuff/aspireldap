@@ -67,6 +67,30 @@ public class ConnectionStringTests
         Assert.Equal(" se;cret ", parsed.BindPassword);
     }
 
+    /// <summary>
+    /// Pins the published-manifest contract for embedded double quotes (#62): deployment
+    /// substitutes the RAW secret between the literal quotes the manifest expression carries,
+    /// with no code of ours running, so a password containing '"' is unsupported. This test
+    /// documents BOTH failure shapes — fail-loud parse, and the crafted case that parses to a
+    /// DIFFERENT value (which is why the XML docs say "unsupported", not "fails loudly").
+    /// </summary>
+    [Fact]
+    public void Published_Substitution_Of_A_Password_With_Embedded_Quotes_Never_Round_Trips()
+    {
+        static string Substitute(string rawSecret) =>
+            $"Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"{rawSecret}\"";
+
+        // Semicolons and edge whitespace DO round-trip through the published shape.
+        Assert.Equal(" se;cret ", OpenLdapConnectionStringBuilder.Parse(Substitute(" se;cret ")).BindPassword);
+
+        // A lone embedded quote fails loudly (trailing junk after the closing quote).
+        Assert.Throws<FormatException>(() => OpenLdapConnectionStringBuilder.Parse(Substitute("pa\"ss")));
+
+        // Adjacent quotes read as valid doubling: the parse SUCCEEDS but yields a different
+        // value than the deployed secret — the bind then fails with wrong credentials.
+        Assert.Equal("x\"y", OpenLdapConnectionStringBuilder.Parse(Substitute("x\"\"y")).BindPassword);
+    }
+
     [Fact]
     public void Duplicate_Keys_Are_Rejected()
     {

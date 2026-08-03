@@ -1,0 +1,9 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Same policy as aspireOpenLdap/Directory.Build.props: the warning baseline is zero and
+         CI (which sets CI=true) fails on any new warning; local builds stay lenient. -->
+    <TreatWarningsAsErrors Condition="'$(CI)' == 'true'">true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>
