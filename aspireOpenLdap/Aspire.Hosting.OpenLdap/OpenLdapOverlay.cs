@@ -3,12 +3,30 @@ using LdifDotNet;
 namespace Aspire.Hosting.ApplicationModel;
 
 /// <summary>
+/// How the <c>memberof</c> overlay treats member values that do not resolve to an existing
+/// entry (<c>olcMemberOfDangling</c>).
+/// </summary>
+public enum OpenLdapMemberOfDanglingPolicy
+{
+    /// <summary>Leave the dangling reference in place (the OpenLDAP default).</summary>
+    Ignore,
+
+    /// <summary>Silently drop the dangling value from the group entry.</summary>
+    Drop,
+
+    /// <summary>Reject the operation that would create the dangling reference.</summary>
+    Error,
+}
+
+/// <summary>
 /// A typed OpenLDAP overlay declaration. Overlays are opt-in: declare them with
 /// <c>WithOverlay(...)</c> and the resource emits the corresponding <c>cn=config</c> entries
 /// (module load + overlay config) into the slapd bootstrap before the data load.
 ///
 /// Construct via the factory methods (e.g. <see cref="MemberOf"/>); add more factories as
 /// other overlays are needed (refint, unique, ppolicy, …) without changing the wiring.
+/// Custom overlays can still be built with an object initializer — the declaration is
+/// validated at the <c>WithOverlay(...)</c> call, before any container starts.
 /// </summary>
 public sealed class OpenLdapOverlay
 {
@@ -33,26 +51,94 @@ public sealed class OpenLdapOverlay
     /// <param name="memberAttribute">Membership attribute on the group (e.g. "member").</param>
     /// <param name="memberOfAttribute">Reverse attribute written on members. Default "memberOf".</param>
     /// <param name="referentialIntegrity">Keep memberOf consistent on member rename/delete. Default true.</param>
-    /// <param name="dangling">How to treat members that don't resolve: "ignore" | "drop" | "error". Default "ignore".</param>
+    /// <param name="dangling">How to treat members that don't resolve. Default <see cref="OpenLdapMemberOfDanglingPolicy.Ignore"/>.</param>
     public static OpenLdapOverlay MemberOf(
         string groupObjectClass,
         string memberAttribute,
         string memberOfAttribute = "memberOf",
         bool referentialIntegrity = true,
-        string dangling = "ignore") => new()
+        OpenLdapMemberOfDanglingPolicy dangling = OpenLdapMemberOfDanglingPolicy.Ignore)
+    {
+        RequireLdapToken(groupObjectClass, nameof(groupObjectClass));
+        RequireLdapToken(memberAttribute, nameof(memberAttribute));
+        RequireLdapToken(memberOfAttribute, nameof(memberOfAttribute));
+        var danglingValue = dangling switch
+        {
+            OpenLdapMemberOfDanglingPolicy.Ignore => "ignore",
+            OpenLdapMemberOfDanglingPolicy.Drop => "drop",
+            OpenLdapMemberOfDanglingPolicy.Error => "error",
+            // Unreachable via the named constants; guards casts like (OpenLdapMemberOfDanglingPolicy)7.
+            _ => throw new ArgumentOutOfRangeException(nameof(dangling), dangling, "Unknown dangling policy."),
+        };
+
+        return new()
         {
             Name = "memberof",
             ModuleLoads = ["memberof.so"],
             OverlayObjectClass = "olcMemberOf",
             Attributes =
-        [
-            new("olcMemberOfGroupOC", groupObjectClass),
-            new("olcMemberOfMemberAD", memberAttribute),
-            new("olcMemberOfMemberOfAD", memberOfAttribute),
-            new("olcMemberOfDangling", dangling),
-            new("olcMemberOfRefInt", referentialIntegrity ? "TRUE" : "FALSE"),
-        ],
+            [
+                new("olcMemberOfGroupOC", groupObjectClass),
+                new("olcMemberOfMemberAD", memberAttribute),
+                new("olcMemberOfMemberOfAD", memberOfAttribute),
+                new("olcMemberOfDangling", danglingValue),
+                new("olcMemberOfRefInt", referentialIntegrity ? "TRUE" : "FALSE"),
+            ],
         };
+    }
+
+    /// <summary>
+    /// Validates the whole declaration at the fluent call so a bad overlay fails at AppHost
+    /// model construction with an attributable error instead of during container bootstrap,
+    /// where slapadd reports it against generated LDIF the user never wrote. Covers custom
+    /// overlays built with an object initializer, which bypass the validated factories.
+    /// </summary>
+    internal void Validate()
+    {
+        RequireCleanProperty(Name, "Name");
+        RequireCleanProperty(OverlayObjectClass, "OverlayObjectClass");
+        foreach (var module in ModuleLoads ?? throw InvalidDeclaration("ModuleLoads must not be null"))
+        {
+            RequireCleanProperty(module, "ModuleLoads entry");
+        }
+        foreach (var attribute in Attributes ?? throw InvalidDeclaration("Attributes must not be null"))
+        {
+            RequireCleanProperty(attribute.Key, "attribute name");
+            if (attribute.Value is null)
+            {
+                throw InvalidDeclaration($"attribute '{attribute.Key}' must not have a null value");
+            }
+        }
+    }
+
+    private void RequireCleanProperty(string? value, string what)
+    {
+        if (value is null || !IsCleanToken(value))
+        {
+            throw InvalidDeclaration($"{what} '{value}' must be a non-empty token without whitespace or control characters");
+        }
+    }
+
+    private DistributedApplicationException InvalidDeclaration(string reason) =>
+        new($"Invalid overlay declaration '{Name}': {reason}.");
+
+    /// <summary>
+    /// Overlay names, module names, objectClasses, and attribute names are plain LDAP
+    /// descriptors; whitespace or control characters would corrupt the generated cn=config
+    /// LDIF (the overlay name is even spliced into a DN), so reject them up front.
+    /// </summary>
+    private static bool IsCleanToken(string value) =>
+        value.Length > 0 && !value.Any(c => char.IsControl(c) || char.IsWhiteSpace(c));
+
+    private static void RequireLdapToken(string value, string paramName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, paramName);
+        if (!IsCleanToken(value))
+        {
+            throw new ArgumentException(
+                $"Value '{value}' must not contain whitespace or control characters.", paramName);
+        }
+    }
 
     /// <summary>Builds this overlay's <c>cn=config</c> entry against the given database DN.</summary>
     internal LdifContentRecord ToOverlayEntry(string databaseDn)

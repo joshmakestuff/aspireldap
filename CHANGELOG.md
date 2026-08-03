@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING — relative paths now resolve against the AppHost project directory** (#57).
+  `WithSchema`, `WithSchemas`, `WithSeedData`, and `WithTls(cert, key, ca)` resolved relative
+  paths against the process working directory, so an identical AppHost found different files
+  depending on whether it was launched from an IDE, its own directory, or the repository
+  root. They now use the same base as Aspire's own bind mounts (`AppHostDirectory`). Rooted
+  paths are unaffected. If you relied on CWD-relative resolution, make the path rooted or
+  relative to the AppHost project.
+- **BREAKING — `OpenLdapOverlay.MemberOf(..., dangling)` takes a typed enum** (#61). The
+  parameter changed from a free string to `OpenLdapMemberOfDanglingPolicy`
+  (`Ignore`/`Drop`/`Error`), so an unsupported policy is unrepresentable. Migration:
+  `dangling: "drop"` → `dangling: OpenLdapMemberOfDanglingPolicy.Drop`. Callers using the
+  default are unaffected.
+- **Overlay declarations validate at model construction** (#61). Empty/whitespace overlay
+  names, objectClasses, module names, and attribute names — and duplicate declarations of
+  the same overlay — now throw at the `WithOverlay`/factory call instead of failing during
+  container bootstrap with a slapadd error against generated LDIF.
+
 ### Removed
 
 - **The syncprov toggle is gone** (`LDAP_ENABLE_SYNCPROV`, `LDAP_SYNCPROV_CHECKPOINT` and its
