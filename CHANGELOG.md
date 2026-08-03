@@ -20,6 +20,13 @@
   names, objectClasses, module names, and attribute names — and duplicate declarations of
   the same overlay — now throw at the `WithOverlay`/factory call instead of failing during
   container bootstrap with a slapadd error against generated LDIF.
+- **Dashboard commands follow Aspire's container runtime and die on cancel** (#58). The
+  `export-ldif` and `reset-data-volume` commands shell out to the runtime Aspire is
+  configured for (`ASPIRE_CONTAINER_RUNTIME`/`DcpPublisher:ContainerRuntime`, default
+  docker) instead of assuming `docker`, a missing CLI produces an actionable dashboard
+  message instead of an unhandled exception, and cancelling a command now kills the whole
+  child process tree — previously `docker volume rm` could keep deleting in the background
+  after the dashboard reported the command cancelled.
 
 ### Removed
 

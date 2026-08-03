@@ -1,10 +1,11 @@
-using System.Diagnostics;
 using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
 using Aspire.Hosting.OpenLdap;
 using LdifDotNet;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting;
@@ -40,6 +41,10 @@ public static class OpenLdapResourceBuilderExtensions
         // fails; register the soname fallback resolver so the health check's LdapConnection
         // works without a hand-made symlink.
         Aspire.Hosting.OpenLdap.OpenLdapNativeLibraryResolver.EnsureRegistered();
+
+        // Dashboard commands shell out to the container CLI through this abstraction; TryAdd
+        // so tests (or advanced users) can substitute a runner before AddOpenLdap.
+        builder.Services.TryAddSingleton<IContainerCliRunner, ProcessContainerCliRunner>();
 
         var passwordParameter = adminPassword?.Resource
             ?? ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder, $"{name}-password");
@@ -153,17 +158,23 @@ public static class OpenLdapResourceBuilderExtensions
                     };
                 }
 
-                var (exitCode, stdout, stderr) = await RunProcessAsync(
-                    "docker",
+                var runner = ctx.ServiceProvider.GetRequiredService<IContainerCliRunner>();
+                var runtime = GetContainerRuntime(ctx.ServiceProvider);
+                var (exitCode, stdout, stderr) = await runner.RunAsync(
+                    runtime,
                     ["exec", containerId, "slapcat", "-b", resource.BaseDn],
                     ctx.CancellationToken).ConfigureAwait(false);
 
+                if (exitCode == ProcessContainerCliRunner.StartFailureExitCode)
+                {
+                    return new ExecuteCommandResult { Success = false, Message = stderr.Trim() };
+                }
                 if (exitCode != 0)
                 {
                     return new ExecuteCommandResult
                     {
                         Success = false,
-                        Message = $"slapcat failed (exit {exitCode}): {stderr.Trim()}",
+                        Message = $"slapcat via {runtime} failed (exit {exitCode}): {stderr.Trim()}",
                     };
                 }
 
@@ -332,37 +343,11 @@ public static class OpenLdapResourceBuilderExtensions
                     return stopResult;
                 }
 
-                // Aspire's Stop only `docker stop`s the container; the volume stays bound
-                // until the container is removed. Force-remove by ID so `docker volume rm`
-                // can succeed. No-op if the container is already gone.
-                if (containerId is not null)
+                var removalFailure = await RemoveContainerAndVolumeAsync(
+                    ctx.ServiceProvider, containerId, volumeName, ctx.CancellationToken).ConfigureAwait(false);
+                if (removalFailure is not null)
                 {
-                    var (containerRmExit, _, containerRmErr) = await RunProcessAsync(
-                        "docker",
-                        ["rm", "-f", containerId],
-                        ctx.CancellationToken).ConfigureAwait(false);
-                    if (containerRmExit != 0 && !containerRmErr.Contains("no such container", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new ExecuteCommandResult
-                        {
-                            Success = false,
-                            Message = $"docker rm -f failed (exit {containerRmExit}): {containerRmErr.Trim()}",
-                        };
-                    }
-                }
-
-                var (rmExit, _, rmErr) = await RunProcessAsync(
-                    "docker",
-                    ["volume", "rm", volumeName],
-                    ctx.CancellationToken).ConfigureAwait(false);
-                // Treat "volume not found" as success — the user wanted it gone.
-                if (rmExit != 0 && !rmErr.Contains("no such volume", StringComparison.OrdinalIgnoreCase))
-                {
-                    return new ExecuteCommandResult
-                    {
-                        Success = false,
-                        Message = $"docker volume rm failed (exit {rmExit}): {rmErr.Trim()}",
-                    };
+                    return removalFailure;
                 }
 
                 return await commandService
@@ -388,33 +373,72 @@ public static class OpenLdapResourceBuilderExtensions
         return prop?.Value as string;
     }
 
-    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunProcessAsync(
-        string fileName,
-        IEnumerable<string> arguments,
+    /// <summary>
+    /// Force-removes the stopped container (Aspire's Stop only stops it; the volume stays
+    /// bound until the container is gone) and then removes the data volume. Returns a failure
+    /// <see cref="ExecuteCommandResult"/>, or <see langword="null"/> when both are gone —
+    /// "no such container"/"no such volume" count as gone (the user wanted them gone).
+    /// Internal so tests can drive it against a fake <see cref="IContainerCliRunner"/>.
+    /// </summary>
+    internal static async Task<ExecuteCommandResult?> RemoveContainerAndVolumeAsync(
+        IServiceProvider services,
+        string? containerId,
+        string volumeName,
         CancellationToken cancellationToken)
     {
-        var psi = new ProcessStartInfo
+        var runner = services.GetRequiredService<IContainerCliRunner>();
+        var runtime = GetContainerRuntime(services);
+
+        if (containerId is not null)
         {
-            FileName = fileName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        foreach (var arg in arguments)
-        {
-            psi.ArgumentList.Add(arg);
+            var (containerRmExit, _, containerRmErr) = await runner.RunAsync(
+                runtime, ["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+            if (containerRmExit == ProcessContainerCliRunner.StartFailureExitCode)
+            {
+                return new ExecuteCommandResult { Success = false, Message = containerRmErr.Trim() };
+            }
+            if (containerRmExit != 0 && !containerRmErr.Contains("no such container", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ExecuteCommandResult
+                {
+                    Success = false,
+                    Message = $"{runtime} rm -f failed (exit {containerRmExit}): {containerRmErr.Trim()}",
+                };
+            }
         }
 
-        using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start '{fileName}'.");
+        var (rmExit, _, rmErr) = await runner.RunAsync(
+            runtime, ["volume", "rm", volumeName], cancellationToken).ConfigureAwait(false);
+        if (rmExit == ProcessContainerCliRunner.StartFailureExitCode)
+        {
+            return new ExecuteCommandResult { Success = false, Message = rmErr.Trim() };
+        }
+        if (rmExit != 0 && !rmErr.Contains("no such volume", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ExecuteCommandResult
+            {
+                Success = false,
+                Message = $"{runtime} volume rm failed (exit {rmExit}): {rmErr.Trim()}",
+            };
+        }
 
-        var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = proc.StandardError.ReadToEndAsync(cancellationToken);
-        await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        var stdout = await stdoutTask.ConfigureAwait(false);
-        var stderr = await stderrTask.ConfigureAwait(false);
-        return (proc.ExitCode, stdout, stderr);
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves the container runtime Aspire is orchestrating with, so dashboard commands
+    /// shell out to the same CLI (docker vs podman) instead of assuming docker (#58). Reads
+    /// the same configuration keys Aspire binds its (internal) DCP options from:
+    /// <c>DcpPublisher:ContainerRuntime</c>, then <c>ASPIRE_CONTAINER_RUNTIME</c> (the
+    /// documented selector, which environment/host config surfaces as this key), then the
+    /// docker default.
+    /// </summary>
+    internal static string GetContainerRuntime(IServiceProvider services)
+    {
+        var configuration = services.GetService<IConfiguration>();
+        var fromConfiguration = configuration?["DcpPublisher:ContainerRuntime"]
+            ?? configuration?["ASPIRE_CONTAINER_RUNTIME"];
+        return string.IsNullOrWhiteSpace(fromConfiguration) ? "docker" : fromConfiguration.Trim();
     }
 
     /// <summary>
