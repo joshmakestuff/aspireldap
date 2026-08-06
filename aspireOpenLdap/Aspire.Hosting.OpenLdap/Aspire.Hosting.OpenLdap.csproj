@@ -21,6 +21,10 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="\" Visible="false" />
+    <!-- Agent-facing API reference: nupkg root for humans/agents grepping the package cache,
+         and skills/SKILL.md per the emerging nuget-skills convention. -->
+    <None Include="..\AGENTS.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\AGENTS.md" Pack="true" PackagePath="skills\SKILL.md" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

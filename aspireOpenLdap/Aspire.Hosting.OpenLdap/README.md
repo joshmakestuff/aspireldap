@@ -48,7 +48,7 @@ A health check that hits the LDAP root DSE is registered automatically.
 
 The resource publishes a connection string in this shape:
 
-```
+```text
 Endpoint=ldap://host:port;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=<secret>
 ```
 
@@ -70,6 +70,24 @@ sudo dnf install -y openldap          # Fedora
 ```
 
 Without the library installed you'll see `Unable to load shared library 'libldap-2.5.so.0'` and the resource never reports healthy.
+
+## AI coding agents
+
+This package ships an agent-facing API reference covering both the hosting and client integrations. After restore it is at:
+
+```text
+~/.nuget/packages/joshmakestuff.aspire.hosting.openldap/<version>/AGENTS.md   (also skills/SKILL.md)
+```
+
+To make it discoverable in a consuming repo, add a pointer to your `AGENTS.md` / `CLAUDE.md`:
+
+```markdown
+## LDAP (Aspire OpenLDAP integration)
+Before working with AddOpenLdap/AddOpenLdapClient, read the packaged reference:
+~/.nuget/packages/joshmakestuff.aspire.hosting.openldap/*/AGENTS.md
+```
+
+Or copy it into the repo as a skill (e.g. `.claude/skills/aspire-openldap/SKILL.md`).
 
 ## Notes
 
