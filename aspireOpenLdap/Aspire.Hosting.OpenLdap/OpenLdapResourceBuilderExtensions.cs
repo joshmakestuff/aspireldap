@@ -13,7 +13,7 @@ namespace Aspire.Hosting;
 /// <summary>
 /// Extension methods for adding and configuring an OpenLDAP container resource in an Aspire AppHost.
 /// </summary>
-public static class OpenLdapResourceBuilderExtensions
+public static partial class OpenLdapResourceBuilderExtensions
 {
     /// <summary>
     /// Adds an OpenLDAP container resource built from the integration's bundled Dockerfile.
@@ -770,43 +770,16 @@ public static class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(records);
 
+        EnsureSeedRecordsPipeline(builder);
+
         var resource = builder.Resource;
-        if (resource.SeedRecords is null)
-        {
-            resource.SeedRecords = [];
-
-            // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
-            var seedDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-seed");
-            Directory.CreateDirectory(seedDir);
-            var recordsPath = Path.Combine(seedDir, $"{resource.Name}-seed-records.ldif");
-            resource.SeedRecordsFilePath = recordsPath;
-
-            // Bind-mount needs an existing file at start time; real content is written by the handler below.
-            if (!File.Exists(recordsPath))
-            {
-                File.WriteAllText(recordsPath, string.Empty);
-            }
-
-            builder.WithBindMount(recordsPath, GeneratedSeedRecordsContainerPath, isReadOnly: true);
-
-            builder.OnBeforeResourceStarted((res, _, ct) =>
-            {
-                if (res.SeedRecords is not { Count: > 0 } seedRecords || res.SeedRecordsFilePath is null)
-                {
-                    return Task.CompletedTask;
-                }
-                var ldif = LdifWriter.WriteToString(seedRecords, LdapSeedLdifGenerator.WriterOptions);
-                return File.WriteAllTextAsync(res.SeedRecordsFilePath, ldif, ct);
-            });
-        }
-
         foreach (var record in records)
         {
             if (record is null)
             {
                 throw new ArgumentException("Seed records must not contain null.", nameof(records));
             }
-            resource.SeedRecords.Add(record);
+            resource.SeedRecords!.Add(record);
         }
         return builder;
     }
@@ -984,6 +957,48 @@ public static class OpenLdapResourceBuilderExtensions
         records.AddRange(overlays.Select(o => o.ToOverlayEntry(OpenLdapResource.MdbDatabaseDn)));
 
         return LdifWriter.WriteToString(records, LdapSeedLdifGenerator.WriterOptions);
+    }
+
+    /// <summary>
+    /// Sets up the record-seed pipeline once per resource: the generated LDIF file under the
+    /// AppHost's obj directory, its read-only bind mount, and the single
+    /// <c>OnBeforeResourceStarted</c> hook that first materializes any pending fake-data specs
+    /// and then serializes the accumulated records. Materialization and serialization share one
+    /// hook on purpose — correctness must not depend on handler registration order.
+    /// </summary>
+    private static void EnsureSeedRecordsPipeline(IResourceBuilder<OpenLdapResource> builder)
+    {
+        var resource = builder.Resource;
+        if (resource.SeedRecords is not null)
+        {
+            return;
+        }
+        resource.SeedRecords = [];
+
+        // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
+        var seedDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-seed");
+        Directory.CreateDirectory(seedDir);
+        var recordsPath = Path.Combine(seedDir, $"{resource.Name}-seed-records.ldif");
+        resource.SeedRecordsFilePath = recordsPath;
+
+        // Bind-mount needs an existing file at start time; real content is written by the handler below.
+        if (!File.Exists(recordsPath))
+        {
+            File.WriteAllText(recordsPath, string.Empty);
+        }
+
+        builder.WithBindMount(recordsPath, GeneratedSeedRecordsContainerPath, isReadOnly: true);
+
+        builder.OnBeforeResourceStarted((res, _, ct) =>
+        {
+            MaterializeFakeDataSpecs(res);
+            if (res.SeedRecords is not { Count: > 0 } seedRecords || res.SeedRecordsFilePath is null)
+            {
+                return Task.CompletedTask;
+            }
+            var ldif = LdifWriter.WriteToString(seedRecords, LdapSeedLdifGenerator.WriterOptions);
+            return File.WriteAllTextAsync(res.SeedRecordsFilePath, ldif, ct);
+        });
     }
 
     private static LdapSeedModel GetOrInitializeSeedModel(IResourceBuilder<OpenLdapResource> builder)
