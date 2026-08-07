@@ -17,7 +17,7 @@
 
   <!-- LDIF (RFC 2849) reading/writing -->
   <ItemGroup>
-    <PackageVersion Include="LdifDotNet" Version="0.5.0" />
+    <PackageVersion Include="LdifDotNet" Version="0.6.0" />
   </ItemGroup>
 
   <!-- Microsoft.Extensions / runtime — keep on the current net10 servicing release -->
@@ -33,7 +33,7 @@
   <!-- Build / packaging -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
-    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.125" />
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.139" />
   </ItemGroup>
 
   <!-- Test -->
