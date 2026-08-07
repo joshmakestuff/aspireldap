@@ -97,6 +97,10 @@ app.MapGet("/users", (OpenLdapClient ldap) =>
 
 For a runnable end-to-end demo (AppHost + Web API + dashboard), see the [`examples/`](../../examples/) folder.
 
+## AI coding agents
+
+This package ships an agent-facing API reference covering both the client and hosting integrations. After restore it is at `~/.nuget/packages/joshmakestuff.aspire.openldap/<version>/AGENTS.md` (also `skills/SKILL.md`). Add a pointer to it from your repo's `AGENTS.md` / `CLAUDE.md`, or copy it in as a skill, so coding agents find it.
+
 ## Requirements on Linux
 
 `LdapConnection` comes from `System.DirectoryServices.Protocols`, which on Linux P/Invokes the native OpenLDAP client library. (On Windows it uses the built-in `wldap32.dll` and needs nothing extra.) The runtime hardcodes a load of **`libldap-2.5.so.0`** — still true on .NET 10 ([dotnet/runtime#123676](https://github.com/dotnet/runtime/issues/123676)) — but modern distros (Ubuntu 24.04+, Fedora, Alpine 3.20+) ship the upstream soname `libldap.so.2` instead.

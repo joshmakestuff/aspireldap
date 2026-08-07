@@ -2,7 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- **Agent-facing API reference shipped in both packages.** `AGENTS.md` is packed into the
+  nupkg root (landing in the NuGet cache at
+  `~/.nuget/packages/<id>/<version>/AGENTS.md`) and duplicated as `skills/SKILL.md`
+  following the emerging nuget-skills convention. It condenses the full hosting + client
+  API surface, seeding routes, and the platform gotchas into a single file coding agents
+  can load; the package READMEs document how to point a consuming repo's
+  `AGENTS.md`/`CLAUDE.md` at it.
+- **The example AppHost seeds realistic fake data** via the new `LdifDotNet.Generator`
+  package (Bogus-backed, deterministic with a fixed seed): 25 generated `inetOrgPerson`
+  entries and 4 `groupOfNames` groups flow through `WithSeedRecords(...)` alongside the
+  hand-declared users.
+
 ### Changed
+
+- **LdifDotNet bumped 0.5.0 → 0.6.0** (adds the `AttributeDescription` type; no breaking
+  changes in the record model the seeding pipeline uses).
 
 - **BREAKING — relative paths now resolve against the AppHost project directory** (#57).
   `WithSchema`, `WithSchemas`, `WithSeedData`, and `WithTls(cert, key, ca)` resolved relative
