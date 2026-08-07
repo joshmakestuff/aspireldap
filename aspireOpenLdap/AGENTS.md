@@ -51,22 +51,26 @@ Identity/endpoints: `WithBaseDn(string)` (default `dc=example,dc=org`), `WithAdm
 
 Storage: `WithDataVolume(string? name = null, bool isReadOnly = false)`, `WithDataBindMount(string source, ...)`. A persisted volume keeps the config it was **first initialized** with — TLS, seeds, schemas, ACLs applied later require the resource's "Reset data volume" dashboard command.
 
-Seeding (three routes, combinable except as noted):
+Seeding (four routes, combinable except as noted):
 1. **Typed tree** — `WithOrganizationalUnit(string name)`, `WithUser(string uid, string password, string? ou = null, string? cn = null, string? sn = null, string? mail = null)`, `WithGroup(string cn, IEnumerable<string> members, string? ou = null)`. Validated before start (duplicates, undeclared OU/member refs, name charset `[A-Za-z0-9._-]+`). Passwords stored `{SSHA}`-hashed; a value already carrying `{SCHEME}` passes through verbatim. Group members are uids of declared users, or literal DNs if they contain `=`.
-2. **LdifDotNet records** — `WithSeedRecords(params IEnumerable<LdifDotNet.LdifRecord> records)`. Accumulates across calls; loads after the typed tree. Use for custom objectClasses/attributes, or bulk fake data (below).
-3. **Your own LDIF files** — `WithSeedData(string ldifFileOrDirectory, bool continueOnError = false)`; paths resolve against the AppHost project dir. **Do not pass a directory while also using routes 1–2** — the directory mounts over `/ldifs` and collides with the generated seed files.
-
-Fake data (package `LdifDotNet.Generator`, install in the AppHost project):
+2. **Fake data** — `WithFakePeople(int count, string ou = "people", int? seed = null)`, `WithFakeGroups(int count, string ou = "groups", int? seed = null)`, `WithFakeDirectory(int people = 25, int groups = 4, int? seed = null)` (the one-liner = people + groups). Realistic `inetOrgPerson`/`groupOfNames` entries via the bundled `LdifDotNet.Generator` — no extra package install. Every person carries `uid, cn, sn, givenName, displayName, mail, telephoneNumber, title, employeeNumber, l` (verified against 0.6.0); groups carry `cn`, `description`, and ≥1 `member` DNs drawn from the generated people. OUs are auto-declared (do not also call `WithOrganizationalUnit` for them). Same seed + same `LdifDotNet.Generator` version = identical data, per call; null seed = fresh data each run. `WithFakeGroups` requires a preceding `WithFakePeople` (member pool). Parent DNs derive from `WithBaseDn` automatically.
+3. **LdifDotNet records** — `WithSeedRecords(params IEnumerable<LdifDotNet.LdifRecord> records)`. Accumulates across calls; loads after the typed tree. Use for custom objectClasses/attributes. Also the escape hatch for raw `LdifGenerator` output when you need custom parent DNs:
 
 ```csharp
 var gen = new LdifGenerator(new LdifGeneratorOptions { Seed = 42 });      // Seed => deterministic
-var people = gen.People(25, "ou=people,dc=example,dc=org");               // inetOrgPerson: uid, cn, sn, givenName, mail, telephoneNumber, title, ...
-var groups = gen.Groups(4, "ou=groups,dc=example,dc=org", people);        // groupOfNames over the person pool
-ldap.WithOrganizationalUnit("people").WithOrganizationalUnit("groups")
-    .WithSeedRecords(people).WithSeedRecords(groups);
+var people = gen.People(25, "ou=staff,o=acme");                           // any parent DN you own
+ldap.WithSeedRecords(people);                                             // parent entries must exist
 ```
 
-Generated people have no `userPassword` — they are searchable data, not bindable accounts; use `WithUser` for accounts tests bind as.
+4. **Your own LDIF files** — `WithSeedData(string ldifFileOrDirectory, bool continueOnError = false)`; paths resolve against the AppHost project dir. **Do not pass a directory while also using routes 1–3** — the directory mounts over `/ldifs` and collides with the generated seed files.
+
+Generated fake people have no `userPassword` — they are searchable data, not bindable accounts; use `WithUser` for accounts tests bind as.
+
+```csharp
+builder.AddOpenLdap("ldap")
+    .WithFakeDirectory(seed: 42)                       // 25 people in ou=people, 4 groups in ou=groups
+    .WithUser("alice", "alice-pw", ou: "people");      // a bindable account alongside the fake data
+```
 
 Schema/config: `WithSchema(string ldifFile)`, `WithSchemas(string directory)`, `WithDefaultSchemas(bool)`, `WithExtraSchemas(params string[])`, `WithOverlay(OpenLdapOverlay)` (e.g. `OpenLdapOverlay.MemberOf("groupOfNames", "member")`), `WithAccessControl(params string[] rules)` (full `olcAccess` bodies without the `{N}` prefix; slapd appends an implicit `to * by * none`).
 

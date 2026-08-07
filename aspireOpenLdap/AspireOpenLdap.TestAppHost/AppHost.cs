@@ -56,4 +56,13 @@ if (string.Equals(builder.Configuration["OpenLdap:ConfigWitness"], "true", Strin
             """to * by users read by * none""");
 }
 
+// Fake-data scenario (--OpenLdap:FakeData=true): generated people/groups plus one bindable
+// typed user, so integration tests can witness the deferred fake-data materialization
+// (OnBeforeResourceStarted hook) against a live slapd.
+if (string.Equals(builder.Configuration["OpenLdap:FakeData"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    ldap.WithFakeDirectory(people: 5, groups: 2, seed: 1)
+        .WithUser("svc", "svc-password", ou: "people");
+}
+
 builder.Build().Run();

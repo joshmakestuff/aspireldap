@@ -11,10 +11,19 @@
   API surface, seeding routes, and the platform gotchas into a single file coding agents
   can load; the package READMEs document how to point a consuming repo's
   `AGENTS.md`/`CLAUDE.md` at it.
-- **The example AppHost seeds realistic fake data** via the new `LdifDotNet.Generator`
-  package (Bogus-backed, deterministic with a fixed seed): 25 generated `inetOrgPerson`
-  entries and 4 `groupOfNames` groups flow through `WithSeedRecords(...)` alongside the
-  hand-declared users.
+- **Built-in fake data seeding** — `WithFakePeople(count, ou, seed)`,
+  `WithFakeGroups(count, ou, seed)`, and the one-liner `WithFakeDirectory(people, groups, seed)`
+  seed realistic generated `inetOrgPerson`/`groupOfNames` entries directly from the resource
+  builder. The `LdifDotNet.Generator` package (Bogus-backed) now ships with
+  `Aspire.Hosting.OpenLdap`, so no separate install is needed. Parent DNs derive from
+  `WithBaseDn`, the target OUs are auto-declared, and a pinned seed makes the data
+  deterministic per call (same seed + same generator package version). Generated people
+  carry no `userPassword` — use `WithUser` for bindable accounts.
+- **The example AppHost seeds realistic fake data** via `WithFakeDirectory(seed: ...)`:
+  25 generated `inetOrgPerson` entries and 4 `groupOfNames` groups alongside the
+  hand-declared users. (The generated group names/membership differ from the earlier
+  hand-rolled `WithSeedRecords` recipe — each fake-data call now uses its own seeded
+  generator — but the people entries and all documented counts are unchanged.)
 
 ### Changed
 

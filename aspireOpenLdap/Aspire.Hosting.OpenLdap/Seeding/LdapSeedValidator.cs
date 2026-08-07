@@ -84,7 +84,7 @@ internal static partial class LdapSeedValidator
         }
     }
 
-    private static void RequireSafeName(string name, string label)
+    internal static void RequireSafeName(string name, string label)
     {
         if (!SafeNameRegex().IsMatch(name))
         {

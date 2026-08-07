@@ -119,6 +119,13 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// <summary>Host filesystem path of the generated record-seed LDIF. Set alongside <see cref="SeedRecords"/>.</summary>
     internal string? SeedRecordsFilePath { get; set; }
 
+    /// <summary>
+    /// Pending fake-data requests declared via <c>WithFakePeople</c>/<c>WithFakeGroups</c>.
+    /// Materialized into <see cref="SeedRecords"/> by the seed-records pipeline hook, then
+    /// cleared so an in-run container restart does not duplicate them. Null until the first call.
+    /// </summary>
+    internal List<FakeDataSpec>? FakeDataSpecs { get; set; }
+
     /// <summary>Opt-in overlays declared via <c>WithOverlay(...)</c>, emitted as cn=config at start. Null until the first call.</summary>
     internal List<OpenLdapOverlay>? Overlays { get; set; }
 

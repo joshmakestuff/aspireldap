@@ -51,6 +51,7 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" />
     <PackageReference Include="LdifDotNet" />
+    <PackageReference Include="LdifDotNet.Generator" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
     <PackageReference Include="System.DirectoryServices.Protocols" />
   </ItemGroup>
