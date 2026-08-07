@@ -81,7 +81,7 @@ app.MapGet("/whoami", (LdapConnection conn) =>
 app.Run();
 ```
 
-See each package's README for the full API: [hosting](aspireOpenLdap/Aspire.Hosting.OpenLdap/README.md) · [client](aspireOpenLdap/Aspire.OpenLdap/README.md).
+See each package's README for the full API: [hosting](aspireOpenLdap/Aspire.Hosting.OpenLdap/README.md) · [client](aspireOpenLdap/Aspire.OpenLdap/README.md). For custom fake data — per-attribute format templates, example value pools, extra object classes — see [docs/fake-data.md](docs/fake-data.md).
 
 ## AI coding agents
 

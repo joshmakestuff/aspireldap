@@ -91,6 +91,8 @@ The rules:
 - Generated people carry **no `userPassword`** — they are searchable data, not bindable accounts. Declare accounts your tests bind as with `WithUser`.
 - The records load through the same generated LDIF as `WithSeedRecords` data, after the typed tree (`WithUser`/`WithGroup`) — mixing all three routes is fine.
 
+Need entries whose attributes match a pre-defined format (employee-number patterns, corporate mail addresses, controlled vocabularies) or extra object classes such as `eduPerson`? The bundled generator's schema-driven mode covers that through `WithSeedRecords` — see the [advanced fake-data guide](https://github.com/joshmakestuff/aspireldap/blob/master/docs/fake-data.md).
+
 A health check that hits the LDAP root DSE is registered automatically.
 
 ## Connection string
