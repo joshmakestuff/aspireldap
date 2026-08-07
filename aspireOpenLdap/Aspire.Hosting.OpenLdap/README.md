@@ -61,12 +61,35 @@ var ldap = builder.AddOpenLdap("ldap")
     .WithFakeGroups(10, ou: "teams", seed: 1);
 ```
 
+**What the entries look like.** Every generated person is a full `inetOrgPerson` (objectClass chain `top` / `person` / `organizationalPerson` / `inetOrgPerson`) carrying `uid`, `cn`, `sn`, `givenName`, `displayName`, `mail`, `telephoneNumber`, `title`, `employeeNumber`, and `l` — enough surface for realistic filters, attribute projections, and UI lists. A real entry (seed 42, generator 0.6.0):
+
+```ldif
+dn: uid=marcel52,ou=people,dc=example,dc=org
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+uid: marcel52
+cn: Marcel Connelly
+sn: Connelly
+givenName: Marcel
+displayName: Marcel Connelly
+mail: marcel52@example.com
+telephoneNumber: 451.772.2533
+title: Future Operations Supervisor
+employeeNumber: 853107
+l: Lindgrentown
+```
+
+Groups are `groupOfNames` entries with a `cn`, a generated `description`, and a varying number of `member` DNs (at least one), each drawn from the generated people — so `member`-based filters and membership traversal work against them immediately.
+
 The rules:
 
 - The target OUs are declared for you — don't also call `WithOrganizationalUnit` for them.
-- Same seed + same `LdifDotNet.Generator` package version ⇒ identical entries, per call. Omit the seed for fresh random data on each AppHost run.
+- Same seed + same `LdifDotNet.Generator` package version ⇒ identical entries, per call (the sample above is reproducible). Omit the seed for fresh random data on each AppHost run.
 - Parent DNs follow `WithBaseDn` automatically, wherever it appears in the chain.
 - Generated people carry **no `userPassword`** — they are searchable data, not bindable accounts. Declare accounts your tests bind as with `WithUser`.
+- The records load through the same generated LDIF as `WithSeedRecords` data, after the typed tree (`WithUser`/`WithGroup`) — mixing all three routes is fine.
 
 A health check that hits the LDAP root DSE is registered automatically.
 
