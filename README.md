@@ -28,10 +28,12 @@ dotnet add package JoshMakeStuff.Aspire.OpenLdap
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-var ldap = builder.AddOpenLdap("ldap")
-    // 25 realistic fake people + 4 groups, identical every run thanks to the pinned seed —
-    // a browsable directory out of the box (omit WithFakeDirectory for an empty one).
-    .WithFakeDirectory(seed: 42);
+var ldap = builder.AddOpenLdap("openldap")
+    .WithFakeDirectory(seed: 20260806)
+    .WithUser("alice", password: "alice-pw", ou: "people", cn: "Alice Anderson", sn: "Anderson", mail: "alice@example.org")
+    .WithUser("bob", password: "bob-pw", ou: "people", cn: "Bob Brown", sn: "Brown", mail: "bob@example.org")
+    .WithGroup("developers", members: ["alice", "bob"], ou: "groups")
+    .WithPhpLdapAdmin();
 
 builder.AddProject<Projects.MyApi>("api")
        .WithReference(ldap);
