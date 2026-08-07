@@ -28,7 +28,10 @@ dotnet add package JoshMakeStuff.Aspire.OpenLdap
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-var ldap = builder.AddOpenLdap("ldap");
+var ldap = builder.AddOpenLdap("ldap")
+    // 25 realistic fake people + 4 groups, identical every run thanks to the pinned seed —
+    // a browsable directory out of the box (omit WithFakeDirectory for an empty one).
+    .WithFakeDirectory(seed: 42);
 
 builder.AddProject<Projects.MyApi>("api")
        .WithReference(ldap);
