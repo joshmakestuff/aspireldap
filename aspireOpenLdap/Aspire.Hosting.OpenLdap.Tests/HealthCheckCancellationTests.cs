@@ -37,7 +37,23 @@ public class HealthCheckCancellationTests
         var stopwatch = Stopwatch.StartNew();
         cts.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => checkTask);
+        // Expected: the caller's cancellation surfaces, not a health verdict. On rare CI-only
+        // runs the check has completed with a result instead — locally unreproducible (on both
+        // libldap 2.5 and 2.6 a silent-but-open server blocks SendRequest indefinitely, so only
+        // cancellation can unblock it). When that happens, fail with the result's own
+        // description, which names the exception type and LDAP error code that ended the probe
+        // early — the evidence a bare ThrowsAny discards.
+        try
+        {
+            var result = await checkTask;
+            Assert.Fail(
+                $"Health check completed instead of throwing: {result.Status} — '{result.Description}' " +
+                $"(exception: {result.Exception?.GetType().Name ?? "none"}). Completion means SendRequest " +
+                "returned or threw before the requested cancellation landed.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
         Assert.True(
             stopwatch.Elapsed < TimeSpan.FromSeconds(10),
             $"canceled health check took {stopwatch.Elapsed} after cancellation — it must not wait out the LDAP timeout");
