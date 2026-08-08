@@ -45,7 +45,8 @@ public class OpenLdapBuilderModelTests
     [InlineData("dc=exa\nmple,dc=org", "control characters")]            // LDIF line injection
     [InlineData("c=USA", "two-letter ISO 3166")]                         // country > 2 chars
     [InlineData("c=U1", "two-letter ISO 3166")]                          // country non-letter
-    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; (ldifdotnet#43); same pre-parser guard rejects it anywhere in the DN
+    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; — rejected by Dn.Parse itself since LdifDotNet 0.5.0 (ldifdotnet#43)
+    [InlineData("dc=example;dc=org", "unescaped ';'")]                   // ';' as an RFC 2253 RDN separator is rejected too, not silently split
     public void WithBaseDn_Rejects_Invalid_Or_Unsupported_Dns(string baseDn, string expectedFragment)
     {
         var builder = DistributedApplication.CreateBuilder();

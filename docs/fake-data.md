@@ -7,7 +7,7 @@ The hosting package bundles [LdifDotNet.Generator](https://www.nuget.org/package
 | `LdifGenerator` | Fixed `inetOrgPerson` / `groupOfNames` | Seed, locale, base DN, dangling-member ratio | `WithFakePeople` / `WithFakeGroups` / `WithFakeDirectory` |
 | `SchemaEntryGenerator` | Any object class in a parsed LDAP schema | Per-attribute format templates, example value pools, auxiliary classes, RDN choice, optional-attribute fill | `WithSeedRecords` (bring your own generator call) |
 
-Use the builder extensions when the standard entry shape is enough — see the [package README](../aspireOpenLdap/Aspire.Hosting.OpenLdap/README.md#seeding-with-fake-data). Use `SchemaEntryGenerator` when you need entries whose attributes match a pre-defined format (employee-number patterns, corporate mail addresses, controlled vocabularies) or extra object classes such as `eduPerson` or `posixAccount`. This guide covers that advanced path. All examples were run against `LdifDotNet.Generator` 0.6.0; the LDIF shown is real output.
+Use the builder extensions when the standard entry shape is enough — see the [package README](../aspireOpenLdap/Aspire.Hosting.OpenLdap/README.md#seeding-with-fake-data). Use `SchemaEntryGenerator` when you need entries whose attributes match a pre-defined format (employee-number patterns, corporate mail addresses, controlled vocabularies) or extra object classes such as `eduPerson` or `posixAccount`. This guide covers that advanced path. All examples were run against `LdifDotNet.Generator` 0.7.0; the LDIF shown is real output.
 
 ## Prerequisite: schema files
 
@@ -50,7 +50,7 @@ var ldap = builder.AddOpenLdap("ldap")
     .WithSeedRecords(people);
 ```
 
-The start of the first generated entry (seed 42):
+The start of the first generated entry (seed 42) — every line as emitted, truncated after `secretary`; the optional-fill dice add roughly 20 more attributes below, including the `eduPerson` ones:
 
 ```ldif
 dn: uid=u611512,ou=people,dc=example,dc=org
@@ -62,11 +62,18 @@ objectClass: eduPerson
 uid: u611512
 sn: Reilly
 cn: Jonas Daniel
+businessCategory: quaerat quas
+carLicense: vel quaerat
+displayName: Rashad Mayert
 employeeNumber: EMP-10785
 mail: Kaia.Schneider@corp.example
-ou: Engineering
+mobile: 1-276-212-7261
+o: Larson - Bechtelar
+secretary: ou=people,dc=example,dc=org
 ...
 ```
+
+The formatted attributes carry your templates (`uid`, `employeeNumber`, `mail`); the pooled ones carry your example values (`ou: Engineering` appears further down); the rest come from the built-in heuristics or the declared syntax.
 
 ## How a value is chosen
 
@@ -91,6 +98,7 @@ For each attribute the generator uses the first source that applies:
 ## Things to know
 
 - **`userPassword` can appear.** `inetOrgPerson` allows it, so the optional-fill dice can add a random plaintext password, which makes that entry bindable. Set `options.Formatters["userPassword"]` to control it, or treat generated people as searchable data only, as the built-in extensions do.
+- **DN-valued attributes are loadable, not meaningful.** `member`, `owner`, `seeAlso`, `manager`, and `secretary` are generated as real DNs that `slapadd` accepts. This needed `LdifDotNet.Generator` 0.7.0: on 0.6.0 an attribute whose syntax is only known to slapd's built-in system schema got lorem free text instead — verified on a `groupOfNames` entry, where 0.6.0 emitted `member: consequuntur cupiditate` and 0.7.0 emits a DN. The values are valid but shallow: each resolves to the entry's parent DN. Use them to exercise DN-syntax handling, not to model real relationships; for real membership use `LdifGenerator.Groups(...)` with a member pool. Tracked upstream as [ldifdotnet#68](https://github.com/joshmakestuff/ldifdotnet/issues/68).
 - **Bake the right base DN.** `WithSeedRecords` takes finished records; their DNs must end with the resource's base DN (`dc=example,dc=org` by default, or whatever `WithBaseDn` sets). Unlike `WithFakePeople`, the records do not re-parent when `WithBaseDn` appears later in the chain — read the base DN into a variable and use it in both places.
 - **Parents must exist.** Declaring the OU with `WithOrganizationalUnit` also emits the base-DN root entry, so the tree above your records is complete. Without any typed helper you must include the root and OU entries in the records yourself.
 - **Groups against a custom pool.** `LdifGenerator.Groups(count, parentDn, memberPool)` accepts any list of person records, including `SchemaEntryGenerator` output, and picks members from it. `LdifGeneratorOptions.DanglingMemberRatio` (0..1) makes a fraction of the member DNs point at entries that do not exist — useful to test consumers that must tolerate broken referential integrity.

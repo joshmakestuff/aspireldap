@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **LdifDotNet and LdifDotNet.Generator bumped 0.6.0 → 0.7.0.** No API change in `LdifDotNet`;
+  `LdifDotNet.Generator` adds `LdifGeneratorOptions.DanglingMemberRatio` (additive) and fixes
+  DN-valued attribute generation in the schema-driven `SchemaEntryGenerator`
+  ([ldifdotnet#65](https://github.com/joshmakestuff/ldifdotnet/issues/65)): attributes whose
+  syntax is only known to slapd's built-in system schema — `member`, `owner`, `seeAlso`,
+  `manager`, `secretary` — were filled with free text that `slapadd` rejects, and now carry
+  real DNs. This closes the gap in the advanced fake-data guide, which already documented
+  `DanglingMemberRatio` before a released package exposed it.
+  - `WithFakePeople`/`WithFakeDirectory` output is byte-identical to 0.6.0 for the same seed.
+  - **`WithFakeGroups` data changes for a given seed**: generated group `description` values and
+    member picks differ from 0.6.0. Counts, entry shape, and determinism per version are
+    unchanged. Tests that pin specific generated group values need re-baselining.
+- **The base-DN validator no longer carries its own unescaped-`;` guard**
+  ([ldifdotnet#43](https://github.com/joshmakestuff/ldifdotnet/issues/43)). `Dn.Parse` rejects
+  an unescaped `;` in a DN value itself, so the string-level pre-parser patch is gone. Behaviour
+  is unchanged — `WithBaseDn("o=Acme; Inc.,c=US")` still throws at model construction — but the
+  message now comes from the parser (`... is not a valid RFC 4514 DN: DN component 'o=Acme;
+  Inc.' has an unescaped ';' ...`). `;` used as an RFC 2253 RDN separator (`dc=example;dc=org`)
+  is rejected as well, not silently split.
+
+### Documentation
+
+- The advanced fake-data guide's sample entry is now a faithful, unelided prefix of the real
+  0.7.0 output, and records that schema-generated DN-valued attributes always resolve to the
+  entry's parent DN ([ldifdotnet#68](https://github.com/joshmakestuff/ldifdotnet/issues/68)) —
+  valid and loadable, but not real membership.
+
 ## 0.6.0-preview.1 — 2026-08-07
 
 ### Added
