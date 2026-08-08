@@ -185,6 +185,26 @@ public class FakeDataSeedTests
     }
 
     [Fact]
+    public void DanglingMemberRatio_Emits_Members_Outside_The_Pool()
+    {
+        // Witnesses the docs/fake-data.md claim about LdifGeneratorOptions.DanglingMemberRatio,
+        // which only exists from LdifDotNet.Generator 0.7.0 — the guide documented it while the
+        // pinned package was 0.6.0. Fails to compile if the bump is ever reverted.
+        var people = new LdifDotNet.Generator.LdifGenerator(
+            new LdifDotNet.Generator.LdifGeneratorOptions { Seed = 3 })
+            .People(10, "ou=people,dc=example,dc=org");
+        var pool = people.Select(p => p.Dn).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var groups = new LdifDotNet.Generator.LdifGenerator(
+            new LdifDotNet.Generator.LdifGeneratorOptions { Seed = 3, DanglingMemberRatio = 1.0 })
+            .Groups(5, "ou=groups,dc=example,dc=org", people);
+
+        var members = groups.SelectMany(g => g["member"]!.Values.Select(v => v.AsString())).ToList();
+        Assert.NotEmpty(members);
+        Assert.All(members, m => Assert.DoesNotContain(m, pool));
+    }
+
+    [Fact]
     public void Materializer_Without_Specs_Is_A_No_Op()
     {
         // Pins the WithSeedRecords pipeline refactor: pure record seeding never sees
