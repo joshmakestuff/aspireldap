@@ -22,6 +22,22 @@
 
 ### Changed
 
+- **LdifDotNet and LdifDotNet.Generator bumped 0.7.0 → 0.8.0.** No API change in `LdifDotNet`;
+  `LdifDotNet.Generator` makes schema-driven DN-valued attributes point at real entries
+  ([ldifdotnet#68](https://github.com/joshmakestuff/ldifdotnet/issues/68)). 0.7.0 fixed their
+  *validity*; 0.8.0 fixes their *meaning* — every one used to resolve to the entry's own parent
+  DN, a valid DN describing no relationship, so schema-generated output could not exercise group
+  traversal or `memberOf` behaviour. They now draw from `SchemaGeneratorOptions.DnPool`, then
+  from DNs the generator has already minted, then the parent DN, and are multi-valued where the
+  schema allows (`MaxDnValues`, default 4). `SchemaGeneratorOptions.DanglingMemberRatio` mirrors
+  the `LdifGeneratorOptions` knob.
+  - **`WithFakePeople`/`WithFakeGroups`/`WithFakeDirectory` are unaffected** — they use
+    `LdifGenerator`, whose output is byte-identical to 0.7.0 for the same seed (verified against
+    the real package, not assumed).
+  - **Schema-driven output via `WithSeedRecords` changes for a given seed**: DN attributes carry
+    peer DNs instead of the parent DN and may carry several. `docs/fake-data.md` is re-baselined
+    against real 0.8.0 output.
+
 - **LdifDotNet and LdifDotNet.Generator bumped 0.6.0 → 0.7.0.** No API change in `LdifDotNet`;
   `LdifDotNet.Generator` adds `LdifGeneratorOptions.DanglingMemberRatio` (additive) and fixes
   DN-valued attribute generation in the schema-driven `SchemaEntryGenerator`

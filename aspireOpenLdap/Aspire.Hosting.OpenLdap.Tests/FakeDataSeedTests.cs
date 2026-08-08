@@ -205,6 +205,34 @@ public class FakeDataSeedTests
     }
 
     [Fact]
+    public void Schema_Generated_Dn_Attributes_Resolve_To_Generated_Entries()
+    {
+        // Witnesses the docs/fake-data.md claim that schema-driven DN attributes point at real
+        // entries, which needs LdifDotNet.Generator 0.8.0 (ldifdotnet#68). On 0.7.0 every value
+        // was the entry's own parent DN. Uses SchemaGeneratorOptions.DnPool, so this also fails
+        // to compile if the bump is reverted.
+        var schema = LdifDotNet.Schema.LdapSchema.Parse(
+            "attributetype ( 1.2.3.9.1 NAME 'cn' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )\n" +
+            "attributetype ( 1.2.3.9.2 NAME 'member' SYNTAX 1.3.6.1.4.1.1466.115.121.1.12 )\n" +
+            "objectclass ( 1.2.3.9.9 NAME 'team' STRUCTURAL MUST ( cn $ member ) )\n");
+
+        const string peopleDn = "ou=people,dc=example,dc=org";
+        var pool = Enumerable.Range(1, 20).Select(i => $"uid=person{i},{peopleDn}").ToList();
+
+        var options = new LdifDotNet.Generator.SchemaGeneratorOptions { Seed = 5, OptionalAttributeFill = 0 };
+        options.DnPool["member"] = pool;
+        var groups = new LdifDotNet.Generator.SchemaEntryGenerator(schema, options)
+            .Entries("team", 10, "ou=groups,dc=example,dc=org");
+
+        var members = groups.SelectMany(g => g["member"]!.Values.Select(v => v.AsString())).ToList();
+        Assert.NotEmpty(members);
+        // Real membership, not the container: the 0.7.0 behaviour would fail both of these.
+        Assert.All(members, m => Assert.Contains(m, pool, StringComparer.OrdinalIgnoreCase));
+        Assert.DoesNotContain("ou=groups,dc=example,dc=org", members, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(groups, g => g["member"]!.Values.Count > 1);
+    }
+
+    [Fact]
     public void Materializer_Without_Specs_Is_A_No_Op()
     {
         // Pins the WithSeedRecords pipeline refactor: pure record seeding never sees
