@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- **`OpenLdapConnectionStringBuilder.Build()`** — a public write path for the connection-string
+  format ([#72](https://github.com/joshmakestuff/aspireldap/issues/72)). Until now only `Parse`
+  was public, so anything synthesizing a connection string from its own inputs had to
+  re-implement the quoting rules; AspireLdapAdmin's `LdapSettingsResolver` carries a hand-copied
+  mirror of them, and a drift between emitter and parser would bind with the wrong password,
+  quietly. Consumers can now set the properties and call `Build()`, which quotes values
+  containing `;` or `"`, with edge whitespace, or empty, and omits `CaCertFile` when unset.
+  - Deliberately **not** a `ToString()` override: the type holds `BindPassword`, and an override
+    would leak it into any log line or interpolation naming the instance.
+  - `Build()` rejects the same endpoints `Parse` rejects (path, query, user info, fragment,
+    non-`ldap(s)` scheme) via shared validation, so writing cannot produce a string reading
+    would refuse.
+  - The hosting resource still emits through `ReferenceExpression` — its password is a deferred
+    `ParameterResource` — so `Build()` is a second emitter of the same format. The integration
+    tests pin the two against real emitted output, on both the plain and `CaCertFile` arms.
+
 ### Changed
 
 - **LdifDotNet and LdifDotNet.Generator bumped 0.6.0 → 0.7.0.** No API change in `LdifDotNet`;
