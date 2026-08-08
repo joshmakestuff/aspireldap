@@ -17,8 +17,8 @@
 
   <!-- LDIF (RFC 2849) reading/writing + fake directory data generation -->
   <ItemGroup>
-    <PackageVersion Include="LdifDotNet" Version="0.7.0" />
-    <PackageVersion Include="LdifDotNet.Generator" Version="0.7.0" />
+    <PackageVersion Include="LdifDotNet" Version="0.8.0" />
+    <PackageVersion Include="LdifDotNet.Generator" Version="0.8.0" />
   </ItemGroup>
 
   <!-- Microsoft.Extensions / runtime — keep on the current net10 servicing release -->

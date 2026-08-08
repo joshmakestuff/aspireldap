@@ -61,7 +61,7 @@ var ldap = builder.AddOpenLdap("ldap")
     .WithFakeGroups(10, ou: "teams", seed: 1);
 ```
 
-**What the entries look like.** Every generated person is a full `inetOrgPerson` (objectClass chain `top` / `person` / `organizationalPerson` / `inetOrgPerson`) carrying `uid`, `cn`, `sn`, `givenName`, `displayName`, `mail`, `telephoneNumber`, `title`, `employeeNumber`, and `l` — enough surface for realistic filters, attribute projections, and UI lists. A real entry (seed 42, generator 0.7.0):
+**What the entries look like.** Every generated person is a full `inetOrgPerson` (objectClass chain `top` / `person` / `organizationalPerson` / `inetOrgPerson`) carrying `uid`, `cn`, `sn`, `givenName`, `displayName`, `mail`, `telephoneNumber`, `title`, `employeeNumber`, and `l` — enough surface for realistic filters, attribute projections, and UI lists. A real entry (seed 42, generator 0.8.0):
 
 ```ldif
 dn: uid=marcel52,ou=people,dc=example,dc=org
