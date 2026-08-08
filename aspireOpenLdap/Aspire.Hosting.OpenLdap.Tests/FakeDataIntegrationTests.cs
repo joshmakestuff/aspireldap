@@ -38,6 +38,12 @@ public class FakeDataIntegrationTests
         Assert.NotNull(connectionString);
 
         var settings = OpenLdapConnectionStringBuilder.Parse(connectionString!);
+
+        // #72: emitter equivalence on the plain no-CaCertFile arm — Build() must reproduce real
+        // hosting output byte for byte, or a consumer that writes its own connection string
+        // (AspireLdapAdmin) drifts from the one the integration emits.
+        Assert.Equal(connectionString, settings.Build());
+
         var factory = new OpenLdapClientFactory(
             settings,
             new OpenLdapClientSettings { Timeout = TimeSpan.FromSeconds(30) });

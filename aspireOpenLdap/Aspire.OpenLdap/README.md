@@ -66,6 +66,35 @@ builder.AddOpenLdapClient("ldap", settings =>
 
 The connection string is normally provided automatically by Aspire via `ConnectionStrings:{connectionName}`.
 
+### Reading and writing connection strings
+
+`OpenLdapConnectionStringBuilder` handles both directions, so the format and its quoting rules
+live in one place instead of being re-implemented by every consumer:
+
+```csharp
+// Read
+var settings = OpenLdapConnectionStringBuilder.Parse(connectionString);
+var baseDn = settings.BaseDn;
+
+// Write — for a host that synthesizes its own connection string from env vars or config
+var connectionString = new OpenLdapConnectionStringBuilder
+{
+    Endpoint = new Uri($"ldap://{host}:{port}"),
+    BaseDn = baseDn,
+    BindDn = bindDn,
+    BindPassword = password,
+    CaCertFile = caPath,      // optional; omitted from the output when null or empty
+}.Build();
+```
+
+`Build()` quotes any value containing `;` or `"`, carrying leading/trailing whitespace, or empty
+— so arbitrary passwords and DNs survive the round trip — and rejects the same endpoints `Parse`
+rejects, meaning it cannot emit a string the parser would refuse.
+
+It is a named method rather than a `ToString()` override on purpose: the object holds
+`BindPassword`, and an override would turn any log line or string interpolation mentioning the
+instance into a credential leak.
+
 ### LDAPS trust
 
 When the connection string carries `CaCertFile=...` (the hosting integration appends it under `WithRequiredTls()`), connections trust that CA. The mechanism is platform-specific:

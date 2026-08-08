@@ -45,6 +45,12 @@ public class TlsIntegrationTests
         Assert.True(settings.UsesLdaps);
         Assert.NotNull(settings.CaCertFile);
 
+        // #72: Build() is a second emitter of this format, in the client package, and the
+        // hosting emitter cannot use it (the password is a deferred ParameterResource). This
+        // pins the two against REAL emitted output — including the CaCertFile arm — so key
+        // names, order, and quoting cannot drift apart across the package boundary.
+        Assert.Equal(connectionString, settings.Build());
+
         if (OperatingSystem.IsMacOS())
         {
             // The client factory refuses custom CA trust on macOS (Apple LDAP.framework
@@ -117,6 +123,9 @@ public class TlsIntegrationTests
         // clients can opt into the LDAPS endpoint.
         Assert.False(settings.UsesLdaps);
         Assert.NotNull(settings.CaCertFile);
+
+        // Emitter equivalence on the ldap:// arm — see the note in the TLS-required test.
+        Assert.Equal(connectionString, settings.Build());
 
         // Plain path serves.
         var plainFactory = new OpenLdapClientFactory(settings, new OpenLdapClientSettings());

@@ -92,6 +92,20 @@ Endpoint=ldap://host:port;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc
 
 Read the base DN from `OpenLdapConnectionStringBuilder.Parse(connectionString).BaseDn` instead of hardcoding it.
 
+Writing a connection string from your own inputs (env vars, config, a sidecar contract): build the object and call `Build()` — never assemble the string by hand, and never re-implement the quoting.
+
+```csharp
+var connectionString = new OpenLdapConnectionStringBuilder
+{
+    Endpoint = new Uri($"ldap://{host}:{port}"),
+    BaseDn = baseDn,
+    BindDn = bindDn,
+    BindPassword = password,   // quoted correctly whatever it contains
+}.Build();
+```
+
+`Build()` is a named method, not a `ToString()` override, because the object holds a password — an override would leak it into any log line or interpolation that mentions the instance. It rejects the same endpoints `Parse` rejects (path, query, user info, fragment, non-`ldap(s)` scheme), so it can never emit a string the parser refuses.
+
 ## Gotchas agents hit
 
 - **Linux native dependency**: `System.DirectoryServices.Protocols` P/Invokes `libldap-2.5.so.0`; both packages auto-probe modern sonames, but the OS package must be installed (`apt-get install libldap2` / `dnf install openldap` / `apk add libldap`). Symptom: `Unable to load shared library 'libldap-2.5.so.0'`.

@@ -138,4 +138,130 @@ public class ConnectionStringTests
         var withCa = OpenLdapConnectionStringBuilder.Parse(Build("p") + ";CaCertFile=C:\\certs\\ca.crt");
         Assert.Equal("C:\\certs\\ca.crt", withCa.CaCertFile);
     }
+
+    // ---- Build(): the public write path (#72) ----
+
+    private static OpenLdapConnectionStringBuilder Sample(
+        string password = "pw", string baseDn = "dc=example,dc=org", string? caCertFile = null) =>
+        new()
+        {
+            Endpoint = new Uri("ldap://localhost:1389"),
+            BaseDn = baseDn,
+            BindDn = $"cn=admin,{baseDn}",
+            BindPassword = password,
+            CaCertFile = caCertFile,
+        };
+
+    /// <summary>
+    /// The reason #72 exists: a consumer synthesizing a connection string from its own inputs
+    /// must be able to call the quoting rules instead of copying them. Same equivalence classes
+    /// as <see cref="Password_Round_Trips"/>, driven through the write path.
+    /// </summary>
+    [Theory]
+    [InlineData("simplepassword")]
+    [InlineData("with=equals;and;semis")]
+    [InlineData("a\"b\"\"c")]
+    [InlineData(" leading and trailing ")]
+    [InlineData("\"fully quoted\"")]
+    [InlineData("")]
+    public void Build_Round_Trips_Through_Parse(string password)
+    {
+        var original = Sample(password, baseDn: "dc=ex;ample,dc=org");
+
+        var parsed = OpenLdapConnectionStringBuilder.Parse(original.Build());
+
+        Assert.Equal(password, parsed.BindPassword);
+        Assert.Equal("dc=ex;ample,dc=org", parsed.BaseDn);
+        Assert.Equal("cn=admin,dc=ex;ample,dc=org", parsed.BindDn);
+        Assert.Equal(original.Endpoint.Host, parsed.Endpoint.Host);
+        Assert.Equal(original.Endpoint.Port, parsed.Endpoint.Port);
+        Assert.Null(parsed.CaCertFile);
+    }
+
+    [Fact]
+    public void Build_Emits_The_Documented_Shape()
+    {
+        // Pins key names, order, and that values needing no quoting stay bare — this is the
+        // format OpenLdapResource.ConnectionStringExpression emits and Parse consumes.
+        Assert.Equal(
+            "Endpoint=ldap://localhost:1389;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=pw",
+            Sample().Build());
+    }
+
+    [Fact]
+    public void Build_Emits_CaCertFile_Only_When_Set()
+    {
+        Assert.DoesNotContain("CaCertFile", Sample(caCertFile: null).Build(), StringComparison.Ordinal);
+        Assert.DoesNotContain("CaCertFile", Sample(caCertFile: "").Build(), StringComparison.Ordinal);
+
+        var withCa = Sample(caCertFile: "/etc/ssl/ca.crt");
+        Assert.EndsWith(";CaCertFile=/etc/ssl/ca.crt", withCa.Build(), StringComparison.Ordinal);
+        Assert.Equal("/etc/ssl/ca.crt", OpenLdapConnectionStringBuilder.Parse(withCa.Build()).CaCertFile);
+    }
+
+    [Theory]
+    [InlineData("ldap://h", 389)]              // portless ldap: System.Uri supplies the default
+    [InlineData("ldaps://h", 636)]             // portless ldaps: unregistered, the parser fills it in
+    [InlineData("ldap://[::1]:1389", 1389)]    // IPv6 literal keeps its brackets through Authority
+    [InlineData("ldaps://h:1636", 1636)]
+    public void Build_Round_Trips_Endpoints(string endpoint, int expectedPort)
+    {
+        var original = new OpenLdapConnectionStringBuilder
+        {
+            Endpoint = new Uri(endpoint),
+            BaseDn = "a",
+            BindDn = "b",
+            BindPassword = "c",
+        };
+
+        var parsed = OpenLdapConnectionStringBuilder.Parse(original.Build());
+
+        Assert.Equal(expectedPort, parsed.Endpoint.Port);
+        Assert.Equal(new Uri(endpoint).Host, parsed.Endpoint.Host);
+        Assert.Equal(new Uri(endpoint).Scheme, parsed.Endpoint.Scheme);
+    }
+
+    /// <summary>
+    /// Write and read enforce one endpoint contract. Without this, Build could emit a string
+    /// Parse rejects — the caller would get a failure at the far end of the wire, or worse, a
+    /// silently dropped path/user-info component.
+    /// </summary>
+    [Theory]
+    [InlineData("http://h:1389")]          // wrong scheme
+    [InlineData("ldap://h:1389/path")]     // path
+    [InlineData("ldap://h:1389?q=1")]      // query
+    [InlineData("ldap://user:pw@h:1389")]  // user info
+    [InlineData("ldap://h:1389#frag")]     // fragment
+    public void Build_Rejects_Endpoints_That_Parse_Would_Reject(string endpoint)
+    {
+        var builder = new OpenLdapConnectionStringBuilder
+        {
+            Endpoint = new Uri(endpoint),
+            BaseDn = "a",
+            BindDn = "b",
+            BindPassword = "c",
+        };
+
+        Assert.Throws<FormatException>(() => builder.Build());
+        Assert.Throws<FormatException>(() => OpenLdapConnectionStringBuilder.Parse(
+            $"Endpoint={endpoint};BaseDN=a;BindDN=b;BindPassword=c"));
+    }
+
+    /// <summary>
+    /// ToString must NOT be overridden to emit the connection string: this type carries a
+    /// password, and an override would turn any interpolation or log call that mentions the
+    /// instance into a credential leak. Build() is opt-in for exactly that reason.
+    /// </summary>
+    [Fact]
+    public void ToString_Does_Not_Leak_The_Password()
+    {
+        var builder = Sample(password: "super-secret");
+
+        // MA0150 fires because this resolves to object.ToString — which is precisely the
+        // property under test. Suppressed, not fixed: the analyzer flagging it is the guard
+        // working, and an override added later would both silence MA0150 and fail this test.
+#pragma warning disable MA0150
+        Assert.DoesNotContain("super-secret", builder.ToString(), StringComparison.Ordinal);
+#pragma warning restore MA0150
+    }
 }

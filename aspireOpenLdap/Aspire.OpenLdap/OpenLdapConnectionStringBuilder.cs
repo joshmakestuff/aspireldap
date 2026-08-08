@@ -3,7 +3,8 @@ using System.Text;
 namespace Aspire.OpenLdap;
 
 /// <summary>
-/// Parses an OpenLDAP connection string emitted by <c>Aspire.Hosting.OpenLdap</c>.
+/// Parses — and, via <see cref="Build"/>, writes — an OpenLDAP connection string in the format
+/// emitted by <c>Aspire.Hosting.OpenLdap</c>.
 /// Expected format:
 /// <code>
 /// Endpoint=ldap://host:port;BaseDN=dc=example,dc=org;BindDN=cn=admin,dc=example,dc=org;BindPassword=secret;CaCertFile=/path/to/ca.crt
@@ -84,12 +85,53 @@ public sealed class OpenLdapConnectionStringBuilder
         };
     }
 
+    /// <summary>
+    /// Writes this instance as a connection string that <see cref="Parse"/> reads back
+    /// losslessly: values containing <c>;</c> or <c>"</c>, with leading/trailing whitespace, or
+    /// empty are double-quoted with embedded quotes doubled. <see cref="CaCertFile"/> is
+    /// emitted only when set.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a named method rather than a <see cref="object.ToString"/> override: this
+    /// type carries <see cref="BindPassword"/>, and an override would turn any interpolation or
+    /// log call that mentions the instance into a credential leak.
+    /// </remarks>
+    /// <exception cref="FormatException">
+    /// <see cref="Endpoint"/> is not a valid <c>ldap</c>/<c>ldaps</c> host URI — the same
+    /// constraints <see cref="Parse"/> enforces, so writing can never produce a string that
+    /// parsing would reject.
+    /// </exception>
+    public string Build()
+    {
+        var endpoint = NormalizeEndpoint(Endpoint, Endpoint.ToString());
+
+        var sb = new StringBuilder();
+        sb.Append(EndpointKey).Append('=').Append(endpoint.Scheme).Append("://").Append(endpoint.Authority);
+        sb.Append(';').Append(BaseDnKey).Append('=').Append(ConnectionStringQuoting.Quote(BaseDn));
+        sb.Append(';').Append(BindDnKey).Append('=').Append(ConnectionStringQuoting.Quote(BindDn));
+        sb.Append(';').Append(BindPasswordKey).Append('=').Append(ConnectionStringQuoting.Quote(BindPassword));
+        if (CaCertFile is { Length: > 0 })
+        {
+            sb.Append(';').Append(CaCertFileKey).Append('=').Append(ConnectionStringQuoting.Quote(CaCertFile));
+        }
+        return sb.ToString();
+    }
+
     private static Uri ParseEndpoint(string endpointRaw)
     {
         if (!Uri.TryCreate(endpointRaw, UriKind.Absolute, out var endpoint))
         {
             throw new FormatException($"'{EndpointKey}' is not a valid absolute URI: '{endpointRaw}'.");
         }
+        return NormalizeEndpoint(endpoint, endpointRaw);
+    }
+
+    /// <summary>
+    /// The endpoint contract shared by <see cref="Parse"/> and <see cref="Build"/>, so the two
+    /// directions cannot drift into accepting different URIs.
+    /// </summary>
+    private static Uri NormalizeEndpoint(Uri endpoint, string endpointRaw)
+    {
         if (endpoint.Scheme is not ("ldap" or "ldaps"))
         {
             throw new FormatException($"'{EndpointKey}' scheme must be 'ldap' or 'ldaps', got '{endpoint.Scheme}'.");
