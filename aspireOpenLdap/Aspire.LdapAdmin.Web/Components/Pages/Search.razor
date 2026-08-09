@@ -1,0 +1,204 @@
+@*
+    LDAP filter search over LdapDirectoryService, in-process.
+
+    The service owns filter validation and truncation reporting; an invalid filter comes back
+    as a typed result and is shown as-is. Truncation is surfaced, never hidden — a silently
+    short result set reads as "no such entry", the one wrong answer a directory browser must
+    not give.
+
+    Rows: the whole row is clickable (OnRowClick), not only the DN cell. The shared DN
+    suffix every row repeats is stated once above the grid; each row shows the relative
+    form, with the full DN in the tooltip and behind the copy button. Sorting/pagination is
+    #95, deliberately absent here.
+*@
+@page "/search"
+@using System.DirectoryServices.Protocols
+@using LdifDotNet
+@inject LdapDirectoryService Directory
+@inject NavigationManager Navigation
+@inject IJSRuntime Js
+@inject IToastService Toasts
+
+<PageTitle>Search — Aspire LdapAdmin</PageTitle>
+
+<FluentLabel Typo="@Typography.H3">Search</FluentLabel>
+
+<FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+    @* Wrap: without it this row overflows the viewport and the Search button lands
+       off-screen at 1280px; the widths are minimums so the row reflows instead. *@
+    <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Wrap="true"
+                 VerticalAlignment="@VerticalAlignment.Bottom">
+        <FluentTextField @bind-Value="_filter" @onkeydown="OnFilterKeyDown" Label="Filter"
+                         Style="min-width: 20rem;" Placeholder="(objectClass=inetOrgPerson)"
+                         Spellcheck="false" />
+        <FluentTextField @bind-Value="_baseDn" @onkeydown="OnFilterKeyDown" Label="Base DN (optional)"
+                         Style="min-width: 16rem;" Placeholder="@Directory.BaseDn" Spellcheck="false" />
+        <FluentSelect TOption="SearchScope" Label="Scope" Items="@AllScopes"
+                      OptionText="@(s => s.ToString())" @bind-SelectedOption="_scope" />
+        <FluentNumberField @bind-Value="_limit" Label="Limit" Min="1" Max="1000" Style="width: 7rem;" />
+        <FluentButton Appearance="@Appearance.Accent" OnClick="RunAsync" Loading="_running"
+                      IconStart="@(new Icons.Regular.Size16.Search())">Search</FluentButton>
+    </FluentStack>
+
+    @if (_error is not null)
+    {
+        <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
+    }
+
+    @if (_result is not null)
+    {
+        @if (_result.Truncated)
+        {
+            <FluentMessageBar Intent="@MessageIntent.Warning" AllowDismiss="false">
+                Showing the first @_result.Entries.Count entries — the directory has more. Raise the
+                limit or narrow the filter.
+            </FluentMessageBar>
+        }
+
+        <FluentLabel Typo="@Typography.Body">
+            @(_result.Entries.Count == 1 ? "1 entry" : $"{_result.Entries.Count} entries")
+            @* The stripped suffix is stated, not implied: relative DNs with no stated base
+               are ambiguous, which is the one failure mode stripping must not introduce. *@
+            @if (_commonSuffix.Length > 0)
+            {
+                <text> — all under </text><code>@_commonSuffix</code>
+            }
+        </FluentLabel>
+
+        @if (_result.Entries.Count > 0)
+        {
+            @* MultiLine: rows must size to their content — the copy button and a wrapped DN
+               are taller than the grid's fixed row track, which clips them otherwise
+               (measured 44px content in a 31px cell; docs/findings.md). *@
+            <FluentDataGrid Items="@_result.Entries.AsQueryable()" TGridItem="LdapEntry"
+                            GridTemplateColumns="2fr 1.2fr 1.2fr 3rem" ResizableColumns="true"
+                            MultiLine="true" ShowHover="true" OnRowClick="@OnRowClick">
+                <TemplateColumn Title="DN" Sortable="false">
+                    <span title="@context.Dn"><code>@DnDisplay.Relative(context.Dn, _commonSuffix)</code></span>
+                </TemplateColumn>
+                <TemplateColumn Title="Name" Sortable="false">
+                    @First(context, "cn", "displayName", "ou", "o")
+                </TemplateColumn>
+                <TemplateColumn Title="Mail" Sortable="false">
+                    @First(context, "mail")
+                </TemplateColumn>
+                <TemplateColumn Title="" Sortable="false">
+                    @* stopPropagation: the copy button sits on a clickable row, and copying
+                       a DN must not also navigate to it. *@
+                    <div @onclick:stopPropagation="true">
+                        <FluentButton Appearance="@Appearance.Stealth" Title="Copy full DN to clipboard"
+                                      IconStart="@(new Icons.Regular.Size16.Copy())"
+                                      OnClick="@(() => CopyDnAsync(context.Dn))" />
+                    </div>
+                </TemplateColumn>
+            </FluentDataGrid>
+        }
+    }
+</FluentStack>
+
+@code {
+    private static readonly SearchScope[] AllScopes = [SearchScope.Base, SearchScope.OneLevel, SearchScope.Subtree];
+
+    private string _filter = "(objectClass=*)";
+    private string _baseDn = string.Empty;
+    private SearchScope _scope = SearchScope.Subtree;
+    private int? _limit = 100;
+
+    private LdapSearchResult? _result;
+    private string _commonSuffix = string.Empty;
+    private string? _error;
+    private bool _running;
+
+    /// <summary>
+    /// Stale-response guard: a run that finishes after a newer run started is discarded, so
+    /// an old result set can never replace the one the user asked for last.
+    /// </summary>
+    private int _runSeq;
+
+    private async Task OnFilterKeyDown(KeyboardEventArgs args)
+    {
+        // Enter runs the search: typing a filter and reaching for the mouse is the wrong
+        // rhythm for the one control on this page you use every time.
+        if (string.Equals(args.Key, "Enter", StringComparison.Ordinal))
+        {
+            await RunAsync();
+        }
+    }
+
+    private async Task RunAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_filter))
+        {
+            _error = "Enter a filter.";
+            return;
+        }
+
+        var token = ++_runSeq;
+        _running = true;
+        _error = null;
+        LdapSearchResult? result = null;
+        string? error = null;
+        try
+        {
+            result = await Directory.SearchAsync(new LdapSearchOptions
+            {
+                Filter = _filter,
+                BaseDn = string.IsNullOrWhiteSpace(_baseDn) ? null : _baseDn,
+                Scope = _scope,
+                Limit = _limit ?? 100,
+            });
+        }
+        catch (DirectoryException ex)
+        {
+            error = $"The search failed ({ex.GetType().Name}): {ex.Message}";
+        }
+        catch (ArgumentException ex)
+        {
+            error = ex.Message;
+        }
+
+        if (token != _runSeq)
+        {
+            return;
+        }
+
+        _running = false;
+        _error = error;
+        _result = result;
+        _commonSuffix = result is null ? string.Empty : DnDisplay.CommonSuffix([.. result.Entries.Select(static e => e.Dn)]);
+    }
+
+    /// <summary>The whole row navigates to the entry on the browse page, which reveals it.</summary>
+    private void OnRowClick(FluentDataGridRow<LdapEntry> row)
+    {
+        if (row.Item is { } entry)
+        {
+            Navigation.NavigateTo($"/?dn={Uri.EscapeDataString(entry.Dn)}");
+        }
+    }
+
+    private async Task CopyDnAsync(string dn)
+    {
+        await Js.InvokeVoidAsync("navigator.clipboard.writeText", dn);
+        Toasts.ShowSuccess("DN copied");
+    }
+
+    /// <summary>
+    /// First non-empty value among <paramref name="names"/>, in preference order, so the
+    /// column stays populated across the object classes one filter can return. Binary
+    /// values are skipped: their transport form is base64, which is not a label.
+    /// </summary>
+    private static string First(LdapEntry entry, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var attribute = entry.Attributes.FirstOrDefault(
+                a => a.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !a.IsBinary);
+            if (attribute?.Values.FirstOrDefault(static v => v.Length > 0) is { } value)
+            {
+                return value;
+            }
+        }
+        return string.Empty;
+    }
+}

@@ -1,0 +1,770 @@
+@*
+    Directory browser: the tree on the left, the selected entry on the right, calling
+    LdapDirectoryService in-process — no HTTP, no DTOs.
+
+    Children are fetched on first expand, never up front: a directory holds far more entries
+    than a page should pull, and ITreeViewItem.OnExpandedAsync keeps the lazy load. Two
+    levels open during initialisation — a single collapsed root line shows nothing.
+
+    Stale responses never clobber the current selection: every selection takes a sequence
+    token, and a response whose token is no longer current is discarded (see SelectAsync).
+*@
+@page "/"
+@using System.DirectoryServices.Protocols
+@using Aspire.LdapAdmin.Web.Components.Directory
+@using LdifDotNet
+@inject LdapDirectoryService Directory
+@inject NavigationManager Navigation
+@inject IToastService Toasts
+
+<PageTitle>Browse — Aspire LdapAdmin</PageTitle>
+
+<FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="16">
+    <FluentStack Orientation="@Orientation.Vertical" Width="340px" Style="overflow: auto;">
+        <FluentLabel Typo="@Typography.H3">Browse</FluentLabel>
+        @if (_roots is null)
+        {
+            <FluentProgressRing />
+        }
+        else
+        {
+            @* No ItemTemplate, deliberately: the FAST tree-view's click handler only selects
+               when the click's event.target IS the fluent-tree-item, so any template element
+               (a span for a tooltip, say) swallows selection clicks — measured on 4.14.4.
+               The default rendering keeps the item text as a text node, which clicks
+               attribute to the tree item itself. *@
+            <FluentTreeView Items="@_roots" LazyLoadItems="true" @bind-SelectedItem="_selectedItem"
+                            @bind-SelectedItem:after="OnSelectionChangedAsync" />
+        }
+    </FluentStack>
+
+    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+        @if (_error is not null)
+        {
+            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
+        }
+
+        @if (_loadingEntry)
+        {
+            <FluentProgressRing />
+        }
+        else if (_entry is not null)
+        {
+            <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Wrap="true">
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())"
+                              OnClick="OpenAddAttributeDialog">Add attribute</FluentButton>
+                <FluentButton IconStart="@(new Icons.Regular.Size16.FolderAdd())"
+                              OnClick="OpenChildDialog">New child entry</FluentButton>
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Rename())"
+                              OnClick="OpenRenameDialog">Rename</FluentButton>
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Delete())"
+                              OnClick="OpenDeleteDialog">Delete</FluentButton>
+            </FluentStack>
+
+            <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
+        }
+        else if (_error is null)
+        {
+            <FluentLabel Typo="@Typography.Body">Select an entry.</FluentLabel>
+        }
+    </FluentStack>
+</FluentStack>
+
+@if (_attrDialog is not null)
+{
+    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _attrDialog = null; } })"
+                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="Edit attribute">
+        <FluentDialogHeader ShowDismiss="true">
+            <FluentLabel Typo="@Typography.PaneHeader">
+                @(_attrDialog.IsNew ? "Add attribute" : $"Edit {_attrDialog.Name}")
+            </FluentLabel>
+        </FluentDialogHeader>
+        <FluentDialogBody>
+            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+                @if (_attrDialog.IsNew)
+                {
+                    <FluentTextField @bind-Value="_attrDialog.Name" Label="Attribute name"
+                                     Spellcheck="false" Style="width: 100%;" />
+                }
+                <FluentTextArea @bind-Value="_attrDialog.ValuesText" Rows="6" Style="width: 100%;"
+                                Label="@(_attrDialog.IsBinary ? "Values (base64, one per line)" : "Values (one per line)")"
+                                Spellcheck="false" />
+                @if (!_attrDialog.IsNew)
+                {
+                    <FluentLabel Typo="@Typography.Body">
+                        Saving replaces every value of this attribute; saving with no values removes it.
+                    </FluentLabel>
+                }
+                @if (_attrDialog.Error is not null)
+                {
+                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_attrDialog.Error</FluentMessageBar>
+                }
+            </FluentStack>
+        </FluentDialogBody>
+        <FluentDialogFooter>
+            <FluentButton Appearance="@Appearance.Accent" Loading="_attrDialog.Busy"
+                          OnClick="SaveAttributeAsync">Save</FluentButton>
+            <FluentButton OnClick="@(() => _attrDialog = null)">Cancel</FluentButton>
+        </FluentDialogFooter>
+    </FluentDialog>
+}
+
+@if (_childDialog is not null)
+{
+    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _childDialog = null; } })"
+                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="New child entry">
+        <FluentDialogHeader ShowDismiss="true">
+            <FluentLabel Typo="@Typography.PaneHeader">New entry under @_childDialog.ParentDn</FluentLabel>
+        </FluentDialogHeader>
+        <FluentDialogBody>
+            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+                <FluentTextField @bind-Value="_childDialog.Rdn" Label="RDN" Placeholder="cn=new-entry"
+                                 Spellcheck="false" Style="width: 100%;" />
+                <FluentTextField @bind-Value="_childDialog.ObjectClasses" Label="Object classes (comma-separated)"
+                                 Placeholder="inetOrgPerson" Spellcheck="false" Style="width: 100%;" />
+                <FluentTextArea @bind-Value="_childDialog.AttributesText" Rows="6" Style="width: 100%;"
+                                Label="Attributes (name: value, one per line)" Spellcheck="false" />
+                @if (_childDialog.Error is not null)
+                {
+                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_childDialog.Error</FluentMessageBar>
+                }
+            </FluentStack>
+        </FluentDialogBody>
+        <FluentDialogFooter>
+            <FluentButton Appearance="@Appearance.Accent" Loading="_childDialog.Busy"
+                          OnClick="SaveChildAsync">Create</FluentButton>
+            <FluentButton OnClick="@(() => _childDialog = null)">Cancel</FluentButton>
+        </FluentDialogFooter>
+    </FluentDialog>
+}
+
+@if (_renameDialog is not null)
+{
+    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _renameDialog = null; } })"
+                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="Rename entry">
+        <FluentDialogHeader ShowDismiss="true">
+            <FluentLabel Typo="@Typography.PaneHeader">Rename @_renameDialog.Dn</FluentLabel>
+        </FluentDialogHeader>
+        <FluentDialogBody>
+            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+                <FluentTextField @bind-Value="_renameDialog.NewRdn" Label="New RDN" Placeholder="cn=new-name"
+                                 Spellcheck="false" Style="width: 100%;" />
+                <FluentTextField @bind-Value="_renameDialog.NewParentDn" Label="New parent DN (blank = keep current)"
+                                 Spellcheck="false" Style="width: 100%;" />
+                <FluentCheckbox @bind-Value="_renameDialog.DeleteOldRdn" Label="Remove the old RDN value" />
+                @if (_renameDialog.Error is not null)
+                {
+                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_renameDialog.Error</FluentMessageBar>
+                }
+            </FluentStack>
+        </FluentDialogBody>
+        <FluentDialogFooter>
+            <FluentButton Appearance="@Appearance.Accent" Loading="_renameDialog.Busy"
+                          OnClick="SaveRenameAsync">Rename</FluentButton>
+            <FluentButton OnClick="@(() => _renameDialog = null)">Cancel</FluentButton>
+        </FluentDialogFooter>
+    </FluentDialog>
+}
+
+@if (_deleteDialog is not null)
+{
+    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _deleteDialog = null; } })"
+                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="Delete entry">
+        <FluentDialogHeader ShowDismiss="true">
+            <FluentLabel Typo="@Typography.PaneHeader">Delete entry</FluentLabel>
+        </FluentDialogHeader>
+        <FluentDialogBody>
+            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="@Typography.Body">
+                    Delete <strong>@_deleteDialog.Dn</strong>? An entry with children cannot be deleted.
+                </FluentLabel>
+                @if (_deleteDialog.Error is not null)
+                {
+                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_deleteDialog.Error</FluentMessageBar>
+                }
+            </FluentStack>
+        </FluentDialogBody>
+        <FluentDialogFooter>
+            <FluentButton Appearance="@Appearance.Accent" Loading="_deleteDialog.Busy"
+                          OnClick="ConfirmDeleteAsync">Delete</FluentButton>
+            <FluentButton OnClick="@(() => _deleteDialog = null)">Cancel</FluentButton>
+        </FluentDialogFooter>
+    </FluentDialog>
+}
+
+@code {
+    private const int AutoExpandDepth = 2;
+
+    /// <summary>Marks the placeholder row that stands in for children past the limit.</summary>
+    private const string TruncatedIdPrefix = "truncated:";
+
+    private List<ITreeViewItem>? _roots;
+    private ITreeViewItem? _selectedItem;
+    private string? _selectedDn;
+    private LdapEntry? _entry;
+    private string? _error;
+    private bool _loadingEntry;
+
+    /// <summary>
+    /// The stale-response guard: each selection takes the next token, and every await in
+    /// SelectAsync/RevealAsync re-checks it afterwards. A response that arrives after the
+    /// user has moved on is discarded instead of clobbering the newer selection.
+    /// </summary>
+    private int _selectSeq;
+
+    private AttributeDialogModel? _attrDialog;
+    private ChildDialogModel? _childDialog;
+    private RenameDialogModel? _renameDialog;
+    private DeleteDialogModel? _deleteDialog;
+
+    /// <summary>
+    /// Deep link target ("/?dn=..."), used by search results and by the address bar itself.
+    /// Arriving here selects the entry and reveals its tree row — navigating and showing
+    /// the root instead would silently discard the entry the user clicked.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "dn")]
+    public string? DeepLinkDn { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var root = Node(Directory.BaseDn, Directory.BaseDn, hasChildren: true);
+            await ExpandAsync(root, AutoExpandDepth);
+            _roots = [root];
+        }
+        catch (DirectoryException ex)
+        {
+            _error = Describe(ex);
+        }
+    }
+
+    /// <summary>
+    /// Runs on first render and on every later query-string change, so clicking a second
+    /// search result while already on this page still moves the selection.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (DeepLinkDn is { Length: > 0 } dn && !string.Equals(dn, _selectedDn, StringComparison.Ordinal))
+        {
+            await SelectAsync(dn, reveal: true);
+        }
+    }
+
+    private TreeViewItem Node(string dn, string rdn, bool hasChildren) => new()
+    {
+        Id = dn,
+        Text = rdn,
+        // A non-null child collection marks a node expandable before anything is loaded;
+        // leaves get null, so they render without an expander.
+        Items = hasChildren ? [] : null,
+        OnExpandedAsync = hasChildren ? LoadOnExpandAsync : null,
+    };
+
+    /// <summary>
+    /// Loads one node's children and, while <paramref name="depth"/> allows, theirs too.
+    /// Truncation gets a visible, disabled marker row — a tree that just stops looks
+    /// complete, which is the one wrong impression a directory browser must not give.
+    /// </summary>
+    private async Task ExpandAsync(TreeViewItem node, int depth)
+    {
+        if (depth <= 0 || node.Items is null || node.Id is null)
+        {
+            return;
+        }
+
+        var children = await Directory.GetChildrenAsync(node.Id);
+        var items = new List<ITreeViewItem>(children.Children.Count);
+        foreach (var child in children.Children)
+        {
+            var item = Node(child.Dn, child.Rdn, child.HasChildren);
+            await ExpandAsync(item, depth - 1);
+            items.Add(item);
+        }
+
+        if (children.Truncated)
+        {
+            items.Add(new TreeViewItem
+            {
+                Id = TruncatedIdPrefix + node.Id,
+                Text = "More children exist than were returned",
+                Disabled = true,
+            });
+        }
+
+        node.Items = items;
+        node.Expanded = true;
+    }
+
+    /// <summary>Fetches children the first time a node is opened.</summary>
+    private async Task LoadOnExpandAsync(TreeViewItemExpandedEventArgs args)
+    {
+        // Fires on collapse too; only a first open should query.
+        if (!args.Expanded || args.CurrentItem is not TreeViewItem node || node.Items?.Any() == true)
+        {
+            return;
+        }
+
+        try
+        {
+            await ExpandAsync(node, depth: 1);
+        }
+        catch (DirectoryException ex)
+        {
+            _error = Describe(ex);
+        }
+    }
+
+    private async Task OnSelectionChangedAsync()
+    {
+        // The truncation notice is a marker, not an entry; selecting it must not query.
+        if (_selectedItem?.Id is { Length: > 0 } id && !id.StartsWith(TruncatedIdPrefix, StringComparison.Ordinal))
+        {
+            await SelectAsync(id, reveal: false);
+        }
+    }
+
+    private async Task SelectAsync(string dn, bool reveal)
+    {
+        // Keep the address bar naming the entry on screen; replace, not push — selecting is
+        // view state, and pushing would make Back step through every entry visited.
+        if (!string.Equals(DeepLinkDn, dn, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo($"/?dn={Uri.EscapeDataString(dn)}", forceLoad: false, replace: true);
+        }
+
+        var token = ++_selectSeq;
+        _selectedDn = dn;
+        _entry = null;
+        _error = null;
+        _loadingEntry = true;
+        LdapEntry? entry = null;
+        string? error = null;
+        try
+        {
+            entry = await Directory.GetEntryAsync(dn);
+        }
+        catch (DirectoryException ex)
+        {
+            error = Describe(ex);
+        }
+        catch (ArgumentException ex)
+        {
+            error = ex.Message;
+        }
+
+        if (token != _selectSeq)
+        {
+            // A newer selection owns the pane now; this response is stale and is dropped.
+            return;
+        }
+
+        _loadingEntry = false;
+        _entry = entry;
+        _error = error ?? (entry is null ? $"No entry exists at '{dn}' (or this bind cannot see it)." : null);
+
+        if (reveal && entry is not null)
+        {
+            await RevealAsync(dn, token);
+        }
+    }
+
+    /// <summary>
+    /// Expands the tree along the ancestor chain of <paramref name="dn"/> and selects its
+    /// row, so a deep link lands on a visible, selected node rather than a collapsed root.
+    /// </summary>
+    private async Task RevealAsync(string dn, int token)
+    {
+        if (_roots is not [TreeViewItem root, ..])
+        {
+            return;
+        }
+
+        IReadOnlyList<RelativeDistinguishedName> target;
+        IReadOnlyList<RelativeDistinguishedName> baseRdns;
+        try
+        {
+            target = Dn.Parse(dn);
+            baseRdns = Dn.Parse(Directory.BaseDn);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        if (target.Count < baseRdns.Count
+            || !string.Equals(Norm(target.Skip(target.Count - baseRdns.Count)), Norm(baseRdns), StringComparison.OrdinalIgnoreCase))
+        {
+            return; // Outside the tree this page shows.
+        }
+
+        var current = root;
+        for (var take = baseRdns.Count + 1; take <= target.Count; take++)
+        {
+            var ancestor = Norm(target.Skip(target.Count - take));
+            if (current.Items?.Any() != true && current.OnExpandedAsync is not null)
+            {
+                try
+                {
+                    await ExpandAsync(current, depth: 1);
+                }
+                catch (DirectoryException)
+                {
+                    return; // The entry pane already shows the entry; reveal is best-effort.
+                }
+                if (token != _selectSeq)
+                {
+                    return;
+                }
+            }
+
+            var next = current.Items?
+                .OfType<TreeViewItem>()
+                .FirstOrDefault(item => item.Id is { } id
+                    && !id.StartsWith(TruncatedIdPrefix, StringComparison.Ordinal)
+                    && string.Equals(NormOrNull(id), ancestor, StringComparison.OrdinalIgnoreCase));
+            if (next is null)
+            {
+                return; // Truncated out of the child list; the entry pane still shows it.
+            }
+
+            current.Expanded = true;
+            current = next;
+        }
+
+        _selectedItem = current;
+    }
+
+    private static string Norm(IEnumerable<RelativeDistinguishedName> rdns) =>
+        string.Join(',', rdns.Select(static rdn => rdn.ToString()));
+
+    private static string? NormOrNull(string dn)
+    {
+        try
+        {
+            return Norm(Dn.Parse(dn));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    // ---- Entry editing ------------------------------------------------------------------
+
+    private void OpenEditAttributeDialog(LdapAttributeValues attribute) => _attrDialog = new AttributeDialogModel
+    {
+        IsNew = false,
+        Name = attribute.Name,
+        IsBinary = attribute.IsBinary,
+        ValuesText = string.Join('\n', attribute.Values),
+    };
+
+    private void OpenAddAttributeDialog() => _attrDialog = new AttributeDialogModel { IsNew = true };
+
+    private void OpenChildDialog()
+    {
+        if (_selectedDn is { } dn)
+        {
+            _childDialog = new ChildDialogModel { ParentDn = dn };
+        }
+    }
+
+    private void OpenRenameDialog()
+    {
+        if (_selectedDn is { } dn)
+        {
+            _renameDialog = new RenameDialogModel { Dn = dn };
+        }
+    }
+
+    private void OpenDeleteDialog()
+    {
+        if (_selectedDn is { } dn)
+        {
+            _deleteDialog = new DeleteDialogModel { Dn = dn };
+        }
+    }
+
+    private async Task SaveAttributeAsync()
+    {
+        if (_attrDialog is not { } dialog || _selectedDn is not { } dn)
+        {
+            return;
+        }
+
+        var values = Lines(dialog.ValuesText);
+        if (dialog.IsNew && values.Count == 0)
+        {
+            dialog.Error = "Enter at least one value.";
+            return;
+        }
+
+        dialog.Busy = true;
+        dialog.Error = null;
+        var change = new LdapAttributeChange(
+            dialog.IsNew ? DirectoryAttributeOperation.Add : DirectoryAttributeOperation.Replace,
+            dialog.Name,
+            values,
+            IsBase64: dialog.IsBinary);
+        var result = await GuardedAsync(() => Directory.ModifyEntryAsync(dn, [change]));
+        dialog.Busy = false;
+
+        if (!result.Succeeded)
+        {
+            dialog.Error = Describe(result);
+            return;
+        }
+
+        _attrDialog = null;
+        Toasts.ShowSuccess($"{dialog.Name} saved");
+        await SelectAsync(dn, reveal: false);
+    }
+
+    private async Task SaveChildAsync()
+    {
+        if (_childDialog is not { } dialog)
+        {
+            return;
+        }
+
+        var objectClasses = dialog.ObjectClasses
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (dialog.Rdn.Length == 0 || objectClasses.Length == 0)
+        {
+            dialog.Error = "An RDN and at least one object class are required.";
+            return;
+        }
+
+        string childDn;
+        try
+        {
+            childDn = Dn.Combine(dialog.Rdn, dialog.ParentDn);
+        }
+        catch (ArgumentException ex)
+        {
+            dialog.Error = ex.Message;
+            return;
+        }
+
+        List<LdapNewAttribute> attributes = [new("objectClass", objectClasses)];
+        foreach (var line in Lines(dialog.AttributesText))
+        {
+            var colon = line.IndexOf(':', StringComparison.Ordinal);
+            if (colon <= 0)
+            {
+                dialog.Error = $"'{line}' is not in 'name: value' form.";
+                return;
+            }
+            attributes.Add(new LdapNewAttribute(line[..colon].Trim(), [line[(colon + 1)..].Trim()]));
+        }
+
+        dialog.Busy = true;
+        dialog.Error = null;
+        var result = await GuardedAsync(() => Directory.AddEntryAsync(new LdapNewEntry(childDn, attributes)));
+        dialog.Busy = false;
+
+        if (!result.Succeeded)
+        {
+            dialog.Error = Describe(result);
+            return;
+        }
+
+        _childDialog = null;
+        Toasts.ShowSuccess($"{childDn} created");
+        await ReloadChildrenAsync(dialog.ParentDn);
+        await SelectAsync(childDn, reveal: true);
+    }
+
+    private async Task SaveRenameAsync()
+    {
+        if (_renameDialog is not { } dialog)
+        {
+            return;
+        }
+
+        dialog.Busy = true;
+        dialog.Error = null;
+        var newParent = dialog.NewParentDn.Length > 0 ? dialog.NewParentDn : null;
+        LdapRenameResult rename;
+        try
+        {
+            rename = await Directory.RenameEntryAsync(dialog.Dn, dialog.NewRdn, newParent, dialog.DeleteOldRdn);
+        }
+        catch (DirectoryException ex)
+        {
+            rename = new LdapRenameResult(new LdapOperationResult(LdapOperationStatus.Failed, null, Describe(ex)), null);
+        }
+        dialog.Busy = false;
+
+        if (!rename.Outcome.Succeeded || rename.NewDn is null)
+        {
+            dialog.Error = Describe(rename.Outcome);
+            return;
+        }
+
+        _renameDialog = null;
+        Toasts.ShowSuccess($"Renamed to {rename.NewDn}");
+        await ReloadChildrenAsync(ParentOf(dialog.Dn) ?? Directory.BaseDn);
+        if (newParent is not null)
+        {
+            await ReloadChildrenAsync(newParent);
+        }
+        await SelectAsync(rename.NewDn, reveal: true);
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteDialog is not { } dialog)
+        {
+            return;
+        }
+
+        dialog.Busy = true;
+        dialog.Error = null;
+        var result = await GuardedAsync(() => Directory.DeleteEntryAsync(dialog.Dn));
+        dialog.Busy = false;
+
+        if (!result.Succeeded)
+        {
+            dialog.Error = Describe(result);
+            return;
+        }
+
+        _deleteDialog = null;
+        Toasts.ShowSuccess($"{dialog.Dn} deleted");
+        var parent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
+        await ReloadChildrenAsync(parent);
+        await SelectAsync(parent, reveal: true);
+    }
+
+    /// <summary>Transport failures surface as an operation outcome, not a crash.</summary>
+    private static async Task<LdapOperationResult> GuardedAsync(Func<Task<LdapOperationResult>> operation)
+    {
+        try
+        {
+            return await operation();
+        }
+        catch (DirectoryException ex)
+        {
+            return new LdapOperationResult(LdapOperationStatus.Failed, null, Describe(ex));
+        }
+    }
+
+    /// <summary>Re-fetches one node's children after a write changed them.</summary>
+    private async Task ReloadChildrenAsync(string parentDn)
+    {
+        if (NormOrNull(parentDn) is not { } norm || FindNode(norm) is not { } node)
+        {
+            return;
+        }
+
+        if (node.Items is not null)
+        {
+            node.Items = [];
+            try
+            {
+                await ExpandAsync(node, depth: 1);
+            }
+            catch (DirectoryException ex)
+            {
+                _error = Describe(ex);
+            }
+        }
+    }
+
+    private TreeViewItem? FindNode(string normDn)
+    {
+        var pending = new Stack<TreeViewItem>((_roots ?? []).OfType<TreeViewItem>());
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            if (node.Id is { } id
+                && !id.StartsWith(TruncatedIdPrefix, StringComparison.Ordinal)
+                && string.Equals(NormOrNull(id), normDn, StringComparison.OrdinalIgnoreCase))
+            {
+                return node;
+            }
+            foreach (var child in (node.Items ?? []).OfType<TreeViewItem>())
+            {
+                pending.Push(child);
+            }
+        }
+        return null;
+    }
+
+    private static string? ParentOf(string dn)
+    {
+        try
+        {
+            var rdns = Dn.Parse(dn);
+            return rdns.Count <= 1 ? null : Norm(rdns.Skip(1));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<string> Lines(string text) =>
+        [.. text.Split('\n').Select(static line => line.TrimEnd('\r')).Where(static line => line.Length > 0)];
+
+    /// <summary>The outcome classes a UI renders differently, in words.</summary>
+    internal static string Describe(LdapOperationResult result)
+    {
+        var label = result.Status switch
+        {
+            LdapOperationStatus.NotFound => "The entry (or a parent it needs) does not exist",
+            LdapOperationStatus.AlreadyExists => "An entry with that DN already exists",
+            LdapOperationStatus.AccessDenied => "Access denied — the server's ACL refused this bind",
+            LdapOperationStatus.NotAllowedOnNonLeaf => "The entry has children, so it cannot be deleted or moved",
+            LdapOperationStatus.SchemaViolation => "The change contradicts the server's schema",
+            LdapOperationStatus.ConstraintViolation => "The change violates a server constraint",
+            LdapOperationStatus.InvalidRequest => "The request is not valid",
+            LdapOperationStatus.Refused => "The server refused the request",
+            LdapOperationStatus.Failed => $"The server reported {result.ResultCode?.ToString() ?? "an unmodelled error"}",
+            _ => result.Status.ToString(),
+        };
+        return result.Message is { Length: > 0 } message ? $"{label}: {message}" : $"{label}.";
+    }
+
+    private static string Describe(DirectoryException ex) =>
+        $"The directory could not be reached ({ex.GetType().Name}): {ex.Message}";
+
+    private sealed class AttributeDialogModel
+    {
+        public bool IsNew { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string ValuesText { get; set; } = string.Empty;
+        public bool IsBinary { get; set; }
+        public string? Error { get; set; }
+        public bool Busy { get; set; }
+    }
+
+    private sealed class ChildDialogModel
+    {
+        public required string ParentDn { get; init; }
+        public string Rdn { get; set; } = string.Empty;
+        public string ObjectClasses { get; set; } = string.Empty;
+        public string AttributesText { get; set; } = string.Empty;
+        public string? Error { get; set; }
+        public bool Busy { get; set; }
+    }
+
+    private sealed class RenameDialogModel
+    {
+        public required string Dn { get; init; }
+        public string NewRdn { get; set; } = string.Empty;
+        public string NewParentDn { get; set; } = string.Empty;
+        public bool DeleteOldRdn { get; set; } = true;
+        public string? Error { get; set; }
+        public bool Busy { get; set; }
+    }
+
+    private sealed class DeleteDialogModel
+    {
+        public required string Dn { get; init; }
+        public string? Error { get; set; }
+        public bool Busy { get; set; }
+    }
+}
