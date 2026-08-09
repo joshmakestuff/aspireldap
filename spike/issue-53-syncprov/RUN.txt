@@ -1,0 +1,103 @@
+SPIKE #53 — RFC 4533 refreshAndPersist probe. Reproduction steps.
+
+This directory is SPIKE CODE. It is not in AspireOpenLdap.slnx, is not built by CI,
+and is not shipped. It exists as the runtime witness for issue #53.
+The findings themselves live in the #53 spike report, not in this file.
+
+--------------------------------------------------------------------------------
+1. Build the repo's bundled image
+--------------------------------------------------------------------------------
+    docker build -t aspire-openldap-spike53 openldap/2.6/debian-13
+
+--------------------------------------------------------------------------------
+2. Start a server with the syncprov overlay
+--------------------------------------------------------------------------------
+The overlay is applied through the SHIPPING WithOverlay(...) path: the bootstrap
+mounts /overlays.ldif and applies it online. No production code was changed for
+this spike; the three .ldif files here are exactly what WithOverlay(...) emits
+(see step 5).
+
+    # full dev config (checkpoint + session log)
+    docker run -d --name spike53 -p 13389:1389 \
+      -e LDAP_ROOT=dc=spike,dc=test \
+      -e LDAP_ADMIN_USERNAME=admin -e LDAP_ADMIN_PASSWORD=adminpass \
+      -v "<abs>/overlays.ldif:/overlays.ldif:ro" aspire-openldap-spike53
+
+    # bare overlay, to show which settings are actually required
+    docker run -d --name spike53min -p 13390:1389 ... \
+      -v "<abs>/overlays-minimal.ldif:/overlays.ldif:ro" aspire-openldap-spike53
+
+    # dev checkpoint tuning ("<ops> <minutes>"; minutes MUST be > 0 or slapd
+    # rejects the add with error 80 and the bootstrap fails loudly)
+    -v "<abs>/overlays-devcheckpoint.ldif:/overlays.ldif:ro"
+
+Confirm the overlay landed:
+
+    docker exec spike53 ldapsearch -Q -Y EXTERNAL -H ldapi:/// \
+      -b olcDatabase={2}mdb,cn=config -s sub "(olcOverlay=*)" '*'
+
+--------------------------------------------------------------------------------
+3. CLI baseline (server-side sanity, independent of any .NET client)
+--------------------------------------------------------------------------------
+    docker exec -d spike53 sh -c 'ldapsearch -x -H ldap://localhost:1389 \
+      -D "cn=admin,dc=spike,dc=test" -w adminpass -b "dc=spike,dc=test" \
+      -E "sync=rp" "(objectClass=*)" > /tmp/rp.out 2>&1'
+    # ...modify an entry with ldapmodify, then:
+    docker exec spike53 tail -30 /tmp/rp.out
+
+--------------------------------------------------------------------------------
+4. The two .NET client probes
+--------------------------------------------------------------------------------
+Each: binds, sends the hand-encoded RFC 4533 sync request control
+(30 03 0A 01 03 = SEQUENCE { ENUMERATED 3 } = refreshAndPersist), waits out the
+refresh stage, then MODIFYs / ADDs / DELETEs on a second connection and reports
+whether the persist-stage notification arrived and what it carried.
+Exit code 0 = persist-stage notification observed, 1 = not observed.
+
+    cd SyncProbe   && dotnet run -- localhost 13389 "cn=admin,dc=spike,dc=test" adminpass "dc=spike,dc=test"
+    cd NovellProbe && dotnet run -- localhost 13389 "cn=admin,dc=spike,dc=test" adminpass "dc=spike,dc=test"
+
+SyncProbe   = System.DirectoryServices.Protocols (wldap32 on Windows, libldap on Linux)
+NovellProbe = Novell.Directory.Ldap.NETStandard  (pure managed, same on both)
+
+The platform split is the whole point, so run BOTH probes on BOTH platforms.
+Linux side, against a container already running:
+
+    docker run --rm --network container:spike53 \
+      -v "<abs of this dir>:/probe:ro" mcr.microsoft.com/dotnet/sdk:10.0 bash -c '
+        cp -r /probe /work
+        (cd /work/SyncProbe   && dotnet run -- localhost 1389 "cn=admin,dc=spike,dc=test" adminpass "dc=spike,dc=test")
+        (cd /work/NovellProbe && dotnet run -- localhost 1389 "cn=admin,dc=spike,dc=test" adminpass "dc=spike,dc=test")'
+
+--------------------------------------------------------------------------------
+5. Hosting-API shape check
+--------------------------------------------------------------------------------
+LdifShape/ references the real Aspire.Hosting.OpenLdap project, declares the
+syncprov overlay through the PUBLIC OpenLdapOverlay surface, and prints the LDIF
+the integration would mount. Compare it to overlays-devcheckpoint.ldif.
+
+    cd LdifShape && dotnet run
+
+--------------------------------------------------------------------------------
+6. Session log / checkpoint measurements
+--------------------------------------------------------------------------------
+Session log (delete replay on a cookie-resumed refresh) — run against spike53
+(sessionlog 100) and spike53min (bare) and compare the SyncDone refreshDeletes
+flag and the returned UUID set:
+
+    # add an entry, take a cookie, delete the entry, resume with that cookie
+    CK=$(ldapsearch -x ... -E "sync=ro" "(objectClass=*)" | sed -n 's/^# cookie: //p' | tail -1)
+    ldapdelete -x ... "cn=sltmp2,ou=users,dc=spike,dc=test"
+    ldapsearch  -x ... -E "sync=ro/$CK" "(objectClass=*)" cn
+
+Checkpoint (contextCSN durability across an UNCLEAN stop — SIGTERM writes it
+anyway, so SIGKILL is required to see the difference):
+
+    # read contextCSN, then:
+    docker kill -s KILL <container> && docker start <container>
+    # read contextCSN again and compare
+
+--------------------------------------------------------------------------------
+Cleanup
+--------------------------------------------------------------------------------
+    docker rm -f spike53 spike53min spike53ck
