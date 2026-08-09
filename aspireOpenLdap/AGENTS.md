@@ -76,7 +76,7 @@ Schema/config: `WithSchema(string ldifFile)`, `WithSchemas(string directory)`, `
 
 TLS: `WithTls()` (self-signed, cached under `obj/`), `WithTls(serverCertFile, serverKeyFile, caCertFile, ...)`, `WithRequiredTls()` (LDAPS-only; connection string switches to `ldaps://` + `CaCertFile=`). macOS: server TLS requirement is relaxed and the health check uses plain LDAP (Apple's LDAP.framework can't trust a custom CA from managed code).
 
-Misc: `WithAnonymousBinding(bool)`, `WithLogLevel(OpenLdapLogLevel)`, `WithHealthCheckProbeLogging(bool)`, `WithPhpLdapAdmin(...)` (admin UI sidecar). Admin password: auto-generated parameter `{name}-password`; override via `AddOpenLdap(name, adminPassword: someParameter)`.
+Misc: `WithAnonymousBinding(bool)`, `WithLogLevel(OpenLdapLogLevel)`, `WithHealthCheckProbeLogging(bool)`, `WithPhpLdapAdmin(...)` (phpLDAPadmin sidecar), `WithLdapAdmin(...)` (the bundled LdapAdmin web UI — built locally from a build context shipped inside this package, no registry pull, no login: it opens straight onto the directory with the AppHost admin credentials; requires the AppHost to consume the package as a `PackageReference`, and fails with an actionable error under a project reference). Admin password: auto-generated parameter `{name}-password`; override via `AddOpenLdap(name, adminPassword: someParameter)`.
 
 ## Client API surface
 

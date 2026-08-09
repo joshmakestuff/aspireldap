@@ -551,6 +551,44 @@ public static partial class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
+    /// Adds the bundled LdapAdmin web UI container targeting this OpenLDAP resource. The
+    /// container is built locally from a build context shipped inside this NuGet package (the
+    /// pack-time-published admin app plus a Dockerfile) — no registry image is ever pulled.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// There is no login: the admin opens straight onto the directory, binding every operation
+    /// with the AppHost-provided admin credentials from the parent resource's connection string.
+    /// The admin connects to the parent over the Aspire-managed container network; when
+    /// <c>WithRequiredTls()</c> is set it connects via LDAPS with encryption but without server
+    /// certificate verification (like the phpLDAPadmin sidecar) — the server certificate cannot
+    /// name the container's dynamically-assigned network address, and libldap has no
+    /// trust-this-CA-but-skip-hostname mode.
+    /// </para>
+    /// <para>
+    /// The build context ships as NuGet contentFiles and lands in the AppHost's build output on
+    /// restore, so this call requires the AppHost to consume the package as a
+    /// <c>PackageReference</c>; it fails with an actionable error under a project reference.
+    /// The resource reports healthy once its <c>/health</c> endpoint responds — which runs a
+    /// real LDAP bind + root-DSE search, not just an HTTP liveness probe.
+    /// </para>
+    /// </remarks>
+    /// <param name="builder">The parent OpenLDAP builder.</param>
+    /// <param name="configureContainer">Optional callback to further configure the admin container.</param>
+    /// <param name="containerName">Override the admin resource name. Defaults to <c>{parent}-ldapadmin</c>.</param>
+    /// <returns>The parent OpenLDAP builder (admin runs alongside as a sibling resource).</returns>
+    public static IResourceBuilder<OpenLdapResource> WithLdapAdmin(
+        this IResourceBuilder<OpenLdapResource> builder,
+        Action<IResourceBuilder<LdapAdminResource>>? configureContainer = null,
+        string? containerName = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        LdapAdminBuilder.Add(builder, configureContainer, containerName);
+        return builder;
+    }
+
+    /// <summary>
     /// Enables TLS using an auto-generated self-signed CA and server certificate.
     /// Certificates are cached under <c>{AppHostDir}/obj/aspire-openldap-certs/{name}/</c> and
     /// regenerated only when missing or near expiry.
