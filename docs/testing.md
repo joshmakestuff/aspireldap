@@ -10,9 +10,10 @@ Read this before quoting a coverage percentage or adding a test "to raise a numb
 
 | Tier | How it runs | What it can prove | What it cannot prove |
 |---|---|---|---|
-| **Fast** (`Category!=Integration`) | In-process, no Docker. The whole tier is a few seconds. | Pure/deterministic contracts: connection-string parse+quote round-trips, DN and seed-model validation, certificate hostname matching, LDIF generation, AppHost *model* shape (env vars, mounts, annotations, endpoints). | Anything that depends on slapd, on a real TLS handshake, or on the native LDAP library actually being loadable. A model assertion proves we *asked* for a mount, never that the container honored it. |
+| **Fast** (`Category!=Integration&Category!=CleanConsumer`) | In-process, no Docker. The whole tier is a few seconds. | Pure/deterministic contracts: connection-string parse+quote round-trips, DN and seed-model validation, certificate hostname matching, LDIF generation, AppHost *model* shape (env vars, mounts, annotations, endpoints). | Anything that depends on slapd, on a real TLS handshake, or on the native LDAP library actually being loadable. A model assertion proves we *asked* for a mount, never that the container honored it. |
 | **Direct Docker** (`Category=Integration`, driven through `DockerCli`) | Runs the bundled image directly, asserting on container exit codes, logs, and same-volume restarts. | Bootstrap/init semantics the Aspire harness cannot reach: failed-seed exit behavior, the partial-init completion-marker gate, password hashing byte-exactness, probe-log filtering, `LDAP_ROOT` validation. | Anything about how the Aspire resource model wires up — this tier bypasses it. |
 | **Full AppHost** (`Category=Integration`, via `AppHostFixture`) | Starts the TestAppHost through `Aspire.Hosting.Testing`, waits for health, then talks LDAP to the running server. | The consumer-facing path end to end: published connection string, health gating (including large-seed gating), LDAPS through the real client factory, telemetry through DI registration, fake-data materialization, overlay/ACL applies actually changing server behavior. | Container-internal failure modes (that is the direct-Docker tier), and anything the hosted CI runner's OS cannot start. |
+| **Clean consumer** (`Category=CleanConsumer`, `CleanConsumerPackTests`) | Packs the hosting package, restores it into a scaffolded consumer AppHost in an isolated temp workspace (local feed + nuget.org only), and runs `AddOpenLdap(...).WithLdapAdmin()` end to end. | The *packed artifact* boundary (#82): every path resolves from package-delivered assets — missing packaged files, checkout-relative paths, and hosting-API/payload drift all fail here and nowhere else. | Nothing about behavioral depth — the AppHost tier owns that. It boots one strict scenario (required TLS) and verifies startup, `/health`, and the admin→LDAP round trip. |
 
 `AppHostCollection` serializes the AppHost tier: more than one AppHost alive in a process
 contends on orchestration ports and hangs.
@@ -43,7 +44,7 @@ test projects, and published as a CI artifact plus a job summary.
 Reproduce locally from `aspireOpenLdap/`:
 
 ```bash
-dotnet test AspireOpenLdap.slnx -c Release --filter "Category!=Integration" \
+dotnet test AspireOpenLdap.slnx -c Release --filter "Category!=Integration&Category!=CleanConsumer" \
   --collect "XPlat Code Coverage" --settings coverage.runsettings \
   --results-directory ../artifacts/test-results
 dotnet tool restore
@@ -74,8 +75,9 @@ wrong. It runs against a deliberately small set of boundaries — configured in
 
 - **Deterministic pure code only.** Every mutant must be killable by an assertion about a
   contract, not by a container refusing to start.
-- **`Category!=Integration` is enforced in the config.** A mutation run never starts Docker.
-  Both legs finish in about two minutes.
+- **`Category!=Integration&Category!=CleanConsumer` is enforced in the config.** A mutation
+  run never starts Docker (nor packs and boots a consumer AppHost). Both legs finish in about
+  two minutes.
 - **Nothing container-touching, nothing model-wiring, nothing crossing the native LDAP
   boundary** is mutated. Those are witnessed by the integration tiers, where "the mutant died"
   would mean "a container failed", which is not a contract statement.
