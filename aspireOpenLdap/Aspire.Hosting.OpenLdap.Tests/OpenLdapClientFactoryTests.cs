@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Aspire.OpenLdap;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
@@ -10,7 +11,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// explicit trust choice, so a missing or unloadable file must fail closed with an actionable
 /// error instead of silently falling back to the platform trust store.
 /// </summary>
-public class OpenLdapClientFactoryTests
+public class OpenLdapClientFactoryTests(ITestOutputHelper output)
 {
     private static OpenLdapClientFactory CreateFactory(string caCertFile, OpenLdapClientSettings? settings = null)
     {
@@ -102,6 +103,9 @@ public class OpenLdapClientFactoryTests
                 // the documented actionable message.
                 var ex = Assert.Throws<PlatformNotSupportedException>(() => factory.CreateConnection());
                 Assert.Contains(nameof(OpenLdapClientSettings.TrustConnectionStringCaCertificate), ex.Message);
+                output.WriteLine(
+                    "LIMITATION (macOS): custom CA trust is refused, so the positive connection " +
+                    "path is not exercised here. See docs/testing.md.");
                 return;
             }
 

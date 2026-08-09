@@ -11,6 +11,8 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Testing" />
     <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
@@ -19,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Aspire.LdapAdmin.AppHost\Aspire.LdapAdmin.AppHost.csproj" />
     <ProjectReference Include="..\Aspire.LdapAdmin.Core\Aspire.LdapAdmin.Core.csproj" />
+    <ProjectReference Include="..\Aspire.OpenLdap\Aspire.OpenLdap.csproj" />
     <ProjectReference Include="..\Aspire.LdapAdmin.Web\Aspire.LdapAdmin.Web.csproj" />
   </ItemGroup>
 

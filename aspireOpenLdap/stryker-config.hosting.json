@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/schemas/stryker-config.json",
+  "_readme": [
+    "Targeted mutation testing (#64) — hosting-package pure boundaries only.",
+    "mutate: deterministic, security/correctness-heavy pure code (DN/input validation, LDIF",
+    "generation). Nothing that touches Docker, the AppHost model, or the native LDAP boundary is",
+    "mutated: a mutant there would be killed by a container start, not by a contract assertion.",
+    "test-case-filter: Category!=Integration — a mutation run must never start a container.",
+    "thresholds.break: derived from the MEASURED baseline (91.07% at the time of writing),",
+    "less a 2-point margin for run-to-run timeout jitter. It is a ratchet: raise it when the",
+    "score rises; never lower it to make a run pass. Survivor policy: docs/testing.md."
+  ],
+  "stryker-config": {
+    "solution": "AspireOpenLdap.slnx",
+    "configuration": "Release",
+    "project": "Aspire.Hosting.OpenLdap.csproj",
+    "test-projects": [
+      "Aspire.Hosting.OpenLdap.Tests/Aspire.Hosting.OpenLdap.Tests.csproj"
+    ],
+    "test-case-filter": "Category!=Integration",
+    "mutate": [
+      "**/OpenLdapDnValidation.cs",
+      "**/Seeding/LdapSeedValidator.cs",
+      "**/Seeding/LdapSeedLdifGenerator.cs"
+    ],
+    "reporters": ["progress", "json", "cleartext"],
+    "thresholds": {
+      "high": 95,
+      "low": 89,
+      "break": 89
+    }
+  }
+}

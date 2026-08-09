@@ -5,6 +5,7 @@ using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
 using AspireOpenLdap.TestAppHost;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
@@ -17,8 +18,14 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]
-public class TlsIntegrationTests(AppHostFixture appHost)
+public class TlsIntegrationTests(AppHostFixture appHost, ITestOutputHelper output)
 {
+    private const string MacOsLimitation =
+        "LIMITATION (macOS): client-side custom CA trust is unsupported (Apple LDAP.framework " +
+        "rejects both the managed verification callback and OpenSSL-style trust options). The " +
+        "client half of this LDAPS witness did not run; the AppHost health gate is the macOS " +
+        "coverage. See docs/testing.md.";
+
     [Fact]
     public async Task RequiredTls_Resource_Is_Healthy_And_Client_Searches_Over_Ldaps()
     {
@@ -40,8 +47,24 @@ public class TlsIntegrationTests(AppHostFixture appHost)
 
         if (OperatingSystem.IsMacOS())
         {
-            // The client factory refuses custom CA trust on macOS (Apple LDAP.framework
-            // limitation); the hosting-side health gate above is the macOS coverage.
+            // macOS reaches here with LESS coverage than Linux/Windows, and that reduction is
+            // asserted rather than silently returned (#64): Apple's LDAP.framework supports
+            // neither the managed verification callback nor OpenSSL-style trust options, so the
+            // client factory refuses custom CA trust up front with an actionable message. If
+            // that refusal ever stops happening, this test must fail rather than quietly skip
+            // the whole client half of the witness.
+            var unsupported = Assert.Throws<PlatformNotSupportedException>(
+                () => new OpenLdapClientFactory(settings, new OpenLdapClientSettings()).CreateConnection());
+            Assert.Contains(
+                nameof(OpenLdapClientSettings.TrustConnectionStringCaCertificate),
+                unsupported.Message,
+                StringComparison.Ordinal);
+
+            // Everything below needs client-side custom CA trust, which macOS cannot provide.
+            // The hosting-side health gate asserted above is the macOS LDAPS coverage. Reported
+            // to the test log so a green macOS run states what it did NOT cover (xunit 2.9 has
+            // no dynamic skip, so the reduction is recorded rather than marked "skipped").
+            output.WriteLine(MacOsLimitation);
             return;
         }
 
@@ -118,11 +141,6 @@ public class TlsIntegrationTests(AppHostFixture appHost)
             Assert.Equal(settings.BaseDn, entry.DistinguishedName, ignoreCase: true);
         }
 
-        if (OperatingSystem.IsMacOS())
-        {
-            return; // Custom CA trust is refused up front on macOS.
-        }
-
         // LDAPS is served side by side on the ldaps endpoint, trusted via the generated CA.
         var ldapsEndpoint = started.App.GetEndpoint("openldap", "ldaps");
         var ldapsSettings = new OpenLdapConnectionStringBuilder
@@ -134,6 +152,21 @@ public class TlsIntegrationTests(AppHostFixture appHost)
             CaCertFile = settings.CaCertFile,
         };
         var ldapsFactory = new OpenLdapClientFactory(ldapsSettings, new OpenLdapClientSettings());
+
+        if (OperatingSystem.IsMacOS())
+        {
+            // Same reduction as the required-TLS test, asserted rather than silently returned
+            // (#64): the refusal is the macOS behavior, so it is what gets pinned here.
+            var unsupported = Assert.Throws<PlatformNotSupportedException>(
+                () => ldapsFactory.CreateConnection());
+            Assert.Contains(
+                nameof(OpenLdapClientSettings.TrustConnectionStringCaCertificate),
+                unsupported.Message,
+                StringComparison.Ordinal);
+            output.WriteLine(MacOsLimitation);
+            return;
+        }
+
         using var ldapsConnection = ldapsFactory.CreateConnection();
         var ldapsResponse = (SearchResponse)ldapsConnection.SendRequest(
             new SearchRequest(settings.BaseDn, "(objectClass=*)", SearchScope.Base, "dn"));

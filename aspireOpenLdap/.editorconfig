@@ -9,7 +9,7 @@ root = true
 # health check).
 dotnet_diagnostic.MA0048.severity = none
 
-[Aspire.Hosting.OpenLdap.Tests/**.cs]
+[{Aspire.Hosting.OpenLdap.Tests,Aspire.LdapAdmin.Tests}/**.cs]
 # MA0051 (method too long): Docker-backed integration tests are arrange-act-assert scripts that
 # read top-to-bottom; splitting them hides the scenario. Product code keeps this rule on (#63).
 dotnet_diagnostic.MA0051.severity = none
