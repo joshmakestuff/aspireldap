@@ -34,7 +34,10 @@ The `connectionName` (`"ldap"` above) must match the resource name passed to `Ad
 
 ## What gets registered
 
-- `OpenLdapClientFactory` (singleton) — parses the connection string, applies settings, and creates `LdapConnection` instances.
+- `OpenLdapClientFactory` (singleton) — parses the connection string, applies settings, and creates `LdapConnection`
+  instances (`CreateConnection()`) or instrumented `OpenLdapClient` instances (`CreateClient()`). A service that
+  outlives a single LDAP operation takes the factory and creates a client per operation, rather than capturing the
+  transient `OpenLdapClient` — neither it nor the connection it wraps is thread-safe.
 - `LdapConnection` (transient) — resolved from the factory.
 - `OpenLdapClient` (transient) — an instrumented wrapper over `LdapConnection`; use it to get OpenTelemetry traces/metrics (see [Telemetry](#telemetry)).
 - A health check named `openldap_{connectionName}` that performs a root-DSE search (disable with `settings.DisableHealthChecks = true`).

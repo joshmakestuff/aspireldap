@@ -89,8 +89,7 @@ public static class OpenLdapClientExtensions
         {
             builder.Services.TryAddSingleton(factory);
             builder.Services.TryAddTransient(sp => sp.GetRequiredService<OpenLdapClientFactory>().CreateConnection());
-            builder.Services.TryAddTransient(sp =>
-                new OpenLdapClient(sp.GetRequiredService<OpenLdapClientFactory>().CreateConnection(), settings, parsed));
+            builder.Services.TryAddTransient(sp => sp.GetRequiredService<OpenLdapClientFactory>().CreateClient());
         }
         else
         {
@@ -100,8 +99,7 @@ public static class OpenLdapClientExtensions
                 (sp, key) => sp.GetRequiredKeyedService<OpenLdapClientFactory>(key).CreateConnection());
             builder.Services.TryAddKeyedTransient<OpenLdapClient>(
                 serviceKey,
-                (sp, key) => new OpenLdapClient(
-                    sp.GetRequiredKeyedService<OpenLdapClientFactory>(key).CreateConnection(), settings, parsed));
+                (sp, key) => sp.GetRequiredKeyedService<OpenLdapClientFactory>(key).CreateClient());
         }
 
         // Register the Aspire.OpenLdap activity source / meter with the app's OpenTelemetry
