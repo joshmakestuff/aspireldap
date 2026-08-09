@@ -1,0 +1,202 @@
+@*
+    The server's subschema, straight from LdapSchemaService — LdifDotNet.Schema types render
+    directly, no view-model mapping layer (docs/decisions.md § Architecture).
+
+    The unavailable state is shown, not inferred: an unreadable subschema and a directory
+    that defines nothing look identical as data, so the service flags it and this page says
+    it out loud, with the reason. UnparsedDefinitions likewise: what the parser could not
+    handle is listed rather than dropped.
+
+    MultiLine, and no Virtualize/ItemSize: a MUST+MAY cell needs two lines, and
+    FluentDataGrid writes fixed row tracks otherwise (docs/findings.md).
+*@
+@page "/schema"
+@using LdifDotNet.Schema
+@inject LdapSchemaService SchemaService
+
+<PageTitle>Schema — Aspire LdapAdmin</PageTitle>
+
+<FluentLabel Typo="@Typography.H3">Schema</FluentLabel>
+
+@if (_schema is null)
+{
+    <FluentProgressRing />
+    <FluentLabel Typo="@Typography.Body">Loading schema…</FluentLabel>
+}
+else if (!_schema.Available)
+{
+    <FluentMessageBar Intent="@MessageIntent.Warning" AllowDismiss="false" Title="Schema unavailable">
+        The server's schema could not be read: @_schema.UnavailableReason
+        Attribute values are classified by UTF-8 validity alone until it becomes readable.
+    </FluentMessageBar>
+    <FluentButton IconStart="@(new Icons.Regular.Size16.ArrowClockwise())" OnClick="LoadAsync">Retry</FluentButton>
+}
+else
+{
+    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+        @* Immediate: the filter is client-side over an already-loaded schema, so it narrows
+           as you type; bound on 'change' it only applies on blur, which reads as broken. *@
+        <FluentSearch @bind-Value="_query" @bind-Value:after="StateHasChanged"
+                      Immediate="true" ImmediateDelay="200"
+                      Placeholder="Filter by name, OID, or description" Style="max-width: 30rem;"
+                      Spellcheck="false" />
+
+        <FluentTabs @bind-ActiveTabId="_activeTab">
+            <FluentTab Id="objectclasses" Label="@($"Object classes ({FilteredClasses.Count})")">
+                <FluentDataGrid Items="@FilteredClasses.AsQueryable()" TGridItem="LdapObjectClass"
+                                GridTemplateColumns="2fr 1fr 3fr 2fr" ResizableColumns="true"
+                                MultiLine="true">
+                    <TemplateColumn Title="Name" Sortable="false">
+                        <strong>@PrimaryName(context.Names, context.Oid)</strong>
+                        @if (context.Obsolete)
+                        {
+                            <FluentBadge Appearance="@Appearance.Neutral">obsolete</FluentBadge>
+                        }
+                    </TemplateColumn>
+                    <PropertyColumn Property="@(c => c.Kind)" Title="Kind" Sortable="false" />
+                    <TemplateColumn Title="MUST / MAY" Sortable="false">
+                        @if (context.Must.Count > 0)
+                        {
+                            <div><strong>MUST</strong> @string.Join(", ", context.Must)</div>
+                        }
+                        @if (context.May.Count > 0)
+                        {
+                            <div title="@string.Join(", ", context.May)">MAY @Summarize(context.May)</div>
+                        }
+                    </TemplateColumn>
+                    <TemplateColumn Title="SUP" Sortable="false">
+                        @string.Join(", ", context.SuperiorNames)
+                    </TemplateColumn>
+                </FluentDataGrid>
+            </FluentTab>
+
+            <FluentTab Id="attributetypes" Label="@($"Attribute types ({FilteredAttributes.Count})")">
+                <FluentDataGrid Items="@FilteredAttributes.AsQueryable()" TGridItem="LdapAttributeType"
+                                GridTemplateColumns="2fr 3fr 1fr 1fr" ResizableColumns="true"
+                                MultiLine="true">
+                    <TemplateColumn Title="Name" Sortable="false">
+                        <strong>@PrimaryName(context.Names, context.Oid)</strong>
+                        @if (context.SingleValue)
+                        {
+                            <FluentBadge Appearance="@Appearance.Neutral">single</FluentBadge>
+                        }
+                        @if (context.NoUserModification)
+                        {
+                            <FluentBadge Appearance="@Appearance.Neutral">read-only</FluentBadge>
+                        }
+                        @if (context.Obsolete)
+                        {
+                            <FluentBadge Appearance="@Appearance.Neutral">obsolete</FluentBadge>
+                        }
+                    </TemplateColumn>
+                    <TemplateColumn Title="Description" Sortable="false">
+                        @context.Description
+                    </TemplateColumn>
+                    <TemplateColumn Title="Syntax" Sortable="false">
+                        <span title="@context.Syntax">@SyntaxLabel(context.Syntax)</span>
+                    </TemplateColumn>
+                    <PropertyColumn Property="@(a => a.SuperiorName)" Title="SUP" Sortable="false" />
+                </FluentDataGrid>
+            </FluentTab>
+
+            <FluentTab Id="syntaxes" Label="@($"Syntaxes ({FilteredSyntaxes.Count})")">
+                <FluentDataGrid Items="@FilteredSyntaxes.AsQueryable()" TGridItem="LdapSyntax"
+                                GridTemplateColumns="2fr 3fr 2fr" ResizableColumns="true">
+                    <PropertyColumn Property="@(s => s.Oid)" Title="OID" Sortable="false" />
+                    <PropertyColumn Property="@(s => s.Description)" Title="Description" Sortable="false" />
+                    <TemplateColumn Title="Transfer" Sortable="false">
+                        @if (context.NotHumanReadable)
+                        {
+                            <FluentBadge Appearance="@Appearance.Accent">binary</FluentBadge>
+                        }
+                        @if (context.BinaryTransferRequired)
+                        {
+                            <FluentBadge Appearance="@Appearance.Neutral">;binary required</FluentBadge>
+                        }
+                    </TemplateColumn>
+                </FluentDataGrid>
+            </FluentTab>
+
+            @if (_schema.Schema.UnparsedDefinitions.Count > 0)
+            {
+                <FluentTab Id="unparsed" Label="@($"Unparsed ({_schema.Schema.UnparsedDefinitions.Count})")">
+                    <FluentMessageBar Intent="@MessageIntent.Info" AllowDismiss="false">
+                        Definitions the parser could not interpret. They are listed rather than dropped,
+                        so nothing in the server's schema is invisible here.
+                    </FluentMessageBar>
+                    @foreach (var unparsed in _schema.Schema.UnparsedDefinitions)
+                    {
+                        <div>
+                            <FluentLabel Typo="@Typography.Body">@unparsed.Kind — @unparsed.Error</FluentLabel>
+                            <pre style="overflow-x: auto;"><code>@unparsed.Definition</code></pre>
+                        </div>
+                    }
+                </FluentTab>
+            }
+        </FluentTabs>
+    </FluentStack>
+}
+
+@code {
+    private LdapSchemaResult? _schema;
+    private string _query = string.Empty;
+    private string _activeTab = "objectclasses";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        // The service reports an unreadable schema as data (Available = false) rather than
+        // throwing, so there is no catch here: every outcome renders.
+        _schema = await SchemaService.GetSchemaAsync();
+    }
+
+    private IReadOnlyList<LdapObjectClass> FilteredClasses =>
+        _schema is null
+            ? []
+            : [.. _schema.Schema.ObjectClasses.Where(c => Matches(c.Names, c.Oid, c.Description))];
+
+    private IReadOnlyList<LdapAttributeType> FilteredAttributes =>
+        _schema is null
+            ? []
+            : [.. _schema.Schema.AttributeTypes.Where(a => Matches(a.Names, a.Oid, a.Description))];
+
+    private IReadOnlyList<LdapSyntax> FilteredSyntaxes =>
+        _schema is null
+            ? []
+            : [.. _schema.Schema.Syntaxes.Where(s => Matches(s.Names, s.Oid, s.Description))];
+
+    private bool Matches(IReadOnlyList<string> names, string oid, string? description)
+    {
+        if (string.IsNullOrWhiteSpace(_query))
+        {
+            return true;
+        }
+
+        return names.Any(n => n.Contains(_query, StringComparison.OrdinalIgnoreCase))
+            || oid.Contains(_query, StringComparison.OrdinalIgnoreCase)
+            || (description?.Contains(_query, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static string PrimaryName(IReadOnlyList<string> names, string oid) =>
+        names.Count > 0 ? names[0] : oid;
+
+    /// <summary>Keeps a long MAY list from swallowing the row; the full list is in the title.</summary>
+    private static string Summarize(IReadOnlyList<string> values) =>
+        values.Count <= 6
+            ? string.Join(", ", values)
+            : $"{string.Join(", ", values.Take(6))} +{values.Count - 6} more";
+
+    private string SyntaxLabel(string? oid)
+    {
+        if (oid is null)
+        {
+            return string.Empty;
+        }
+
+        // Prefer the server's own description over the raw OID — the subschema already
+        // carries it, and "Directory String" beats a dotted OID for every reader.
+        var known = _schema?.Schema.Syntaxes.FirstOrDefault(s => string.Equals(s.Oid, oid, StringComparison.Ordinal));
+        return known?.Description is { Length: > 0 } description ? description : oid;
+    }
+}
