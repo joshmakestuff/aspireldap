@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.DirectoryServices.Protocols;
 using Aspire.OpenLdap;
 using Microsoft.Extensions.Configuration;
@@ -56,6 +57,9 @@ public static class OpenLdapClientExtensions
         return AddOpenLdapClientCore(builder, connectionName: name, serviceKey: name, configureSettings);
     }
 
+    [SuppressMessage("Design", "MA0051:Method is too long",
+        Justification = "One registration sequence over a single builder: settings binding, client " +
+        "registration, health check, and telemetry read top-to-bottom (#63).")]
     private static IHostApplicationBuilder AddOpenLdapClientCore(
         IHostApplicationBuilder builder,
         string connectionName,

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 
 namespace Aspire.Hosting.ApplicationModel.Seeding;
@@ -10,6 +11,9 @@ internal static partial class LdapSeedValidator
     [GeneratedRegex("^[A-Za-z0-9._-]+$", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex SafeNameRegex();
 
+    [SuppressMessage("Design", "MA0051:Method is too long",
+        Justification = "A linear list of seed-model rules sharing the accumulated OU/uid lookup " +
+        "sets; each rule owns the message it produces (#63).")]
     public static void Validate(OpenLdapResource resource, LdapSeedModel model)
     {
         var ouSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

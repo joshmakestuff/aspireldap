@@ -255,7 +255,7 @@ public class ConfigLdifGenerationTests
     {
         var overlay = OpenLdapOverlay.MemberOf("groupOfNames", "member");
 
-        var ldif = OpenLdapResourceBuilderExtensions.GenerateOverlayLdif([overlay]);
+        var ldif = OpenLdapOverlayConfiguration.GenerateOverlayLdif([overlay]);
 
         Assert.DoesNotContain("version:", ldif);
 
@@ -282,7 +282,7 @@ public class ConfigLdifGenerationTests
     {
         const string rule0 = "to dn.subtree=\"ou=entity,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=entity,dc=example,dc=org\" write by * break";
         const string rule1 = "to attrs=userPassword by self write by * break";
-        var ldif = OpenLdapResourceBuilderExtensions.GenerateAccessLdif([rule0, rule1]);
+        var ldif = OpenLdapOverlayConfiguration.GenerateAccessLdif([rule0, rule1]);
 
         Assert.DoesNotContain("version:", ldif);
 
