@@ -233,17 +233,61 @@ internal sealed class DockerScope : IDisposable
 }
 
 /// <summary>
-/// Builds the bundled OpenLDAP image at most once per test run and shares the tag across all
-/// direct-docker integration tests. A failed build faults the cached task, so every dependent
-/// test fails fast with the same diagnostic instead of retrying the build.
+/// The one lock both Docker-using test families share. The AppHost start path (DCP host boot,
+/// which builds and starts its own OpenLDAP container) and the direct-docker bundled-image
+/// build each hold it for their full duration, so the two can structurally never overlap.
+/// Docker Desktop serializes badly under that overlap — a context-metadata lock during a
+/// concurrent build once cascaded into 30 misleading failures (#54). Everything after the
+/// gated sections (running containers, exec probes) stays parallel.
+/// </summary>
+internal static class DockerHostGate
+{
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+
+    public static async Task<IDisposable> AcquireAsync(CancellationToken cancellationToken)
+    {
+        await Gate.WaitAsync(cancellationToken);
+        return new Releaser();
+    }
+
+    private sealed class Releaser : IDisposable
+    {
+        private int _released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                Gate.Release();
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Builds the bundled OpenLDAP image once and shares the tag across all direct-docker
+/// integration tests. Tests that are already awaiting a build that fails all receive that
+/// one root diagnostic, but the fault is not cached: the next test retries the build, so a
+/// transient docker failure cannot cascade a stale error across the rest of the run.
 /// </summary>
 internal static class BundledImage
 {
     public const string Tag = "aspire-openldap-tests";
 
-    private static readonly Lazy<Task<string>> Build = new(BuildOnceAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lock Sync = new();
+    private static Task<string>? _build;
 
-    public static Task<string> GetAsync(CancellationToken cancellationToken) => Build.Value.WaitAsync(cancellationToken);
+    public static Task<string> GetAsync(CancellationToken cancellationToken)
+    {
+        lock (Sync)
+        {
+            if (_build is null || (_build.IsCompleted && !_build.IsCompletedSuccessfully))
+            {
+                _build = BuildOnceAsync();
+            }
+            return _build.WaitAsync(cancellationToken);
+        }
+    }
 
     private static async Task<string> BuildOnceAsync()
     {
@@ -251,10 +295,13 @@ internal static class BundledImage
         Assert.True(Directory.Exists(contextDir), $"bundled docker context not found at {contextDir}");
 
         // The build owns its lifetime: callers' tokens must not cancel (and thereby poison)
-        // the shared cached task for every other test.
+        // the shared task for every concurrently awaiting test.
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        var build = await DockerCli.RunAsync(cts.Token, "build", "-q", "-t", Tag, contextDir);
-        Assert.True(build.ExitCode == 0, $"docker build failed: {build.Output}");
-        return Tag;
+        using (await DockerHostGate.AcquireAsync(cts.Token))
+        {
+            var build = await DockerCli.RunAsync(cts.Token, "build", "-q", "-t", Tag, contextDir);
+            Assert.True(build.ExitCode == 0, $"docker build failed: {build.Output}");
+            return Tag;
+        }
     }
 }

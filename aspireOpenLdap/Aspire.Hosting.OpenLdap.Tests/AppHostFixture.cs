@@ -95,22 +95,40 @@ public sealed class AppHostFixture : IAsyncLifetime
     {
         string[] args = [$"--{TestAppHostScenarios.ScenarioKey}={scenario}", .. extraArgs];
 
-        var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(args, cancellationToken);
+        // Held from builder creation through healthy: DCP startup (and the image build it may
+        // trigger) must never overlap the direct-docker bundled-image build (#54).
+        using (await DockerHostGate.AcquireAsync(cancellationToken))
+        {
+            var appHost = await DistributedApplicationTestingBuilder
+                .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(args, cancellationToken);
 
-        var app = await appHost.BuildAsync(cancellationToken);
-        try
-        {
-            var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-            await app.StartAsync(cancellationToken);
-            // The bundled Dockerfile is built on first run, so this can take a while cold.
-            await notifications.WaitForResourceHealthyAsync(ResourceName, cancellationToken);
-            return app;
-        }
-        catch
-        {
-            await app.DisposeAsync();
-            throw;
+            DistributedApplication app;
+            try
+            {
+                app = await appHost.BuildAsync(cancellationToken);
+            }
+            catch
+            {
+                // The builder runs the AppHost entry point in the background, and the token only
+                // stops the waiting — without this dispose, a failed or timed-out build leaves
+                // that factory running alongside the next scenario's AppHost.
+                await appHost.DisposeAsync();
+                throw;
+            }
+
+            try
+            {
+                var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
+                await app.StartAsync(cancellationToken);
+                // The bundled Dockerfile is built on first run, so this can take a while cold.
+                await notifications.WaitForResourceHealthyAsync(ResourceName, cancellationToken);
+                return app;
+            }
+            catch
+            {
+                await app.DisposeAsync();
+                throw;
+            }
         }
     }
 
