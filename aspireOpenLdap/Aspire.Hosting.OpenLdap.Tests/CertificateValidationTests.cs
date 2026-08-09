@@ -103,12 +103,30 @@ public class CertificateValidationTests
     [InlineData("A.EXAMPLE.ORG", true)]
     [InlineData("example.org", false)]
     [InlineData("a.b.example.org", false)]
+    // A host that is nothing but the wildcard's suffix leaves an EMPTY label in front of it.
+    // The empty label must not count as "exactly one label" (#64 mutation witness: dropping the
+    // non-empty check turns this into a match).
+    [InlineData(".example.org", false)]
     public void Wildcard_Sans_Match_Exactly_One_Label(string host, bool expected)
     {
         using var ca = CreateCa();
         using var leaf = CreateLeaf(ca, ["*.example.org"]);
 
         Assert.Equal(expected, CertificateValidation.MatchesHost(leaf, host));
+    }
+
+    [Fact]
+    public void Non_Wildcard_Sans_Match_Exactly_And_Are_Never_Treated_As_Suffixes()
+    {
+        // "s.example.org" is a literal name, not a pattern. If the wildcard branch were entered
+        // for it (or its first character otherwise ignored), every "<label>.example.org" host
+        // would match a certificate issued for one specific host — a hostname-validation bypass.
+        using var ca = CreateCa();
+        using var leaf = CreateLeaf(ca, ["s.example.org"]);
+
+        Assert.True(CertificateValidation.MatchesHost(leaf, "s.example.org"));
+        Assert.False(CertificateValidation.MatchesHost(leaf, "www.example.org"));
+        Assert.False(CertificateValidation.MatchesHost(leaf, "example.org"));
     }
 
     [Fact]

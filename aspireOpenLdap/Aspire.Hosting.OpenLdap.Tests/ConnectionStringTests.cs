@@ -94,24 +94,50 @@ public class ConnectionStringTests
     [Fact]
     public void Duplicate_Keys_Are_Rejected()
     {
-        Assert.Throws<FormatException>(() => OpenLdapConnectionStringBuilder.Parse(
+        var ex = Assert.Throws<FormatException>(() => OpenLdapConnectionStringBuilder.Parse(
             "Endpoint=ldap://h:1;BaseDN=a;BindDN=b;BindPassword=c;BaseDN=again"));
+        Assert.Contains("duplicate key 'BaseDN'", ex.Message, StringComparison.Ordinal);
+    }
+
+    // Each row asserts WHICH rule rejected the input, not merely that something threw.
+    // Type-only assertions let a rejection be produced by an unrelated downstream rule — a
+    // mutation pass (#64) showed several parser mutants surviving exactly that way, because
+    // the mangled input still ended up throwing FormatException somewhere else.
+    [Theory]
+    [InlineData("Endpoint=http://h:1389;BaseDN=a;BindDN=b;BindPassword=c", "scheme must be 'ldap' or 'ldaps'")]
+    [InlineData("Endpoint=ldap://h:1389/path;BaseDN=a;BindDN=b;BindPassword=c", "must not contain a path or query")]
+    [InlineData("Endpoint=ldap://h:1389?q=1;BaseDN=a;BindDN=b;BindPassword=c", "must not contain a path or query")]
+    // user info is ignored by LdapDirectoryIdentifier, so it must be rejected rather than dropped
+    [InlineData("Endpoint=ldap://user:pw@h:1389;BaseDN=a;BindDN=b;BindPassword=c", "must not contain user info or a fragment")]
+    [InlineData("Endpoint=ldap://h:1389#frag;BaseDN=a;BindDN=b;BindPassword=c", "must not contain user info or a fragment")]
+    [InlineData("Endpoint=ldap://h:0;BaseDN=a;BindDN=b;BindPassword=c", "port 0 is not valid")]
+    [InlineData("Endpoint=notauri;BaseDN=a;BindDN=b;BindPassword=c", "is not a valid absolute URI")]
+    [InlineData("Endpoint=ldap:///;BaseDN=a;BindDN=b;BindPassword=c", "must include a host")]
+    [InlineData("BaseDN=a;BindDN=b;BindPassword=c", "missing the required 'Endpoint' key")]
+    [InlineData("Endpoint=ldap://h:1389;BindDN=b;BindPassword=c", "missing the required 'BaseDN' key")]
+    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindPassword=c", "missing the required 'BindDN' key")]
+    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b", "missing the required 'BindPassword' key")]
+    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"unterminated", "unterminated quoted value")]
+    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"x\"tail", "unexpected characters after a quoted value")]
+    [InlineData("Endpoint=ldap://h:1389;justakeywithnovalue;BindDN=b;BindPassword=c", "Malformed connection-string segment: 'justakeywithnovalue'")]
+    [InlineData("Endpoint=ldap://h:1389;=orphan;BaseDN=a;BindDN=b;BindPassword=c", "pair with an empty key")]
+    public void Malformed_Connection_Strings_Throw(string connectionString, string expectedMessageFragment)
+    {
+        var ex = Assert.Throws<FormatException>(() => OpenLdapConnectionStringBuilder.Parse(connectionString));
+        Assert.Contains(expectedMessageFragment, ex.Message, StringComparison.Ordinal);
     }
 
     [Theory]
-    [InlineData("Endpoint=http://h:1389;BaseDN=a;BindDN=b;BindPassword=c")] // wrong scheme
-    [InlineData("Endpoint=ldap://h:1389/path;BaseDN=a;BindDN=b;BindPassword=c")] // path
-    [InlineData("Endpoint=ldap://h:1389?q=1;BaseDN=a;BindDN=b;BindPassword=c")] // query
-    [InlineData("Endpoint=ldap://user:pw@h:1389;BaseDN=a;BindDN=b;BindPassword=c")] // user info (ignored by LdapDirectoryIdentifier)
-    [InlineData("Endpoint=ldap://h:1389#frag;BaseDN=a;BindDN=b;BindPassword=c")] // fragment
-    [InlineData("Endpoint=ldap://h:0;BaseDN=a;BindDN=b;BindPassword=c")] // explicit port 0
-    [InlineData("BaseDN=a;BindDN=b;BindPassword=c")] // missing endpoint
-    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"unterminated")] // bad quote
-    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=\"x\"tail")] // trailing junk
-    [InlineData("Endpoint=ldap://h:1389;justakeywithnovalue;BindDN=b;BindPassword=c")] // no '='
-    public void Malformed_Connection_Strings_Throw(string connectionString)
+    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=c;")]        // trailing separator
+    [InlineData("Endpoint=ldap://h:1389;BaseDN=a;BindDN=b;BindPassword=c;   ")]     // trailing separator + whitespace
+    [InlineData(" ;; Endpoint=ldap://h:1389;;BaseDN=a; BindDN=b ;BindPassword=c")]  // stray separators/whitespace between pairs
+    public void Separator_And_Whitespace_Noise_Between_Pairs_Is_Tolerated(string connectionString)
     {
-        Assert.Throws<FormatException>(() => OpenLdapConnectionStringBuilder.Parse(connectionString));
+        var parsed = OpenLdapConnectionStringBuilder.Parse(connectionString);
+        Assert.Equal("a", parsed.BaseDn);
+        Assert.Equal("b", parsed.BindDn);
+        Assert.Equal("c", parsed.BindPassword);
+        Assert.Equal(1389, parsed.Endpoint.Port);
     }
 
     [Fact]
@@ -137,6 +163,12 @@ public class ConnectionStringTests
 
         var withCa = OpenLdapConnectionStringBuilder.Parse(Build("p") + ";CaCertFile=C:\\certs\\ca.crt");
         Assert.Equal("C:\\certs\\ca.crt", withCa.CaCertFile);
+
+        // A present-but-blank CaCertFile means "no custom CA", not a path of whitespace: the
+        // client factory keys the custom-trust path off CaCertFile being non-null, so leaking
+        // "" or " " through here would send it looking for a certificate file named "".
+        Assert.Null(OpenLdapConnectionStringBuilder.Parse(Build("p") + ";CaCertFile=").CaCertFile);
+        Assert.Null(OpenLdapConnectionStringBuilder.Parse(Build("p") + ";CaCertFile=\"   \"").CaCertFile);
     }
 
     // ---- Build(): the public write path (#72) ----
