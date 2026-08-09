@@ -2,17 +2,24 @@
 <!--
   First-party-only coverage settings (#64).
 
-  Denominator: ONLY the two published assemblies (Aspire.OpenLdap,
-  Aspire.Hosting.OpenLdap). The collector's default aggregate also counted the whole
-  Aspire/framework dependency graph, which produced a meaningless headline number.
+  Denominator: ONLY first-party assemblies. The collector's default aggregate also counted the
+  whole Aspire/framework dependency graph, which produced a meaningless headline number
+  (11.7% overall, where the framework graph was almost all of the denominator).
+
+  The Include list is asserted in CI ("Assert coverage counts only first-party assemblies"):
+  the assertion fails if any package outside the allowed set appears in the report, so the
+  filter cannot silently drift back to counting framework source.
 
   Known limitations — read before quoting the percentage:
   - The number describes the FAST suite's in-process execution only. Docker containers and
     child AppHost processes do substantial verified work OUTSIDE the collector process, so
-    integration-witnessed behavior is structurally under-represented here.
+    integration-witnessed behavior is structurally under-represented here. A line only this
+    project's container executes is counted as uncovered no matter how thoroughly the
+    integration suite exercises it.
   - There is deliberately no enforced threshold: an arbitrary percentage rewards executing
     lines over protecting contracts. Treat this as a diagnostic artifact for spotting
-    untested areas, not a quality gate.
+    untested areas, not a quality gate. Contract protection is enforced by the targeted
+    mutation runs instead (stryker-config.*.json) — see docs/testing.md.
 -->
 <RunSettings>
   <DataCollectionRunSettings>
@@ -20,7 +27,19 @@
       <DataCollector friendlyName="XPlat Code Coverage">
         <Configuration>
           <Format>cobertura</Format>
-          <Include>[Aspire.OpenLdap]*,[Aspire.Hosting.OpenLdap]*</Include>
+          <!--
+            Shipped first-party assemblies only. Test apps (AspireOpenLdap.TestAppHost,
+            Aspire.LdapAdmin.AppHost) are deliberately absent: they are fixtures, not products,
+            so counting them would measure the harness.
+
+            Aspire.LdapAdmin.Core/.Web are listed ahead of their code: the admin service layer
+            and its test project are being built in parallel on another branch (#81), which does
+            not touch this file. Listing them now means that merge needs no coverage-config
+            change, and until the code lands they contribute (almost) nothing. Adding a further
+            first-party assembly is a one-line edit here plus the same name in the CI
+            allow-list ("Assert coverage counts only first-party assemblies").
+          -->
+          <Include>[Aspire.OpenLdap]*,[Aspire.Hosting.OpenLdap]*,[Aspire.LdapAdmin.Core]*,[Aspire.LdapAdmin.Web]*</Include>
         </Configuration>
       </DataCollector>
     </DataCollectors>

@@ -104,7 +104,7 @@ cd aspireOpenLdap
 dotnet build AspireOpenLdap.slnx
 ```
 
-Running the sample AppHost or the tests requires a running Docker daemon (the OpenLDAP image is built on first run).
+Running the sample AppHost or the integration tests requires a running Docker daemon (the OpenLDAP image is built on first run). The fast tier (`--filter "Category!=Integration"`) needs no Docker. What each test tier protects, how the coverage number should and should not be read, and the mutation-survivor policy are in [docs/testing.md](docs/testing.md).
 
 On **Linux**, the client and the hosting health check use `System.DirectoryServices.Protocols`, which needs the native `libldap` client library installed (any of the 2.4/2.5/2.6 sonames — the integrations resolve whichever your distro ships automatically). See [Requirements on Linux](aspireOpenLdap/Aspire.OpenLdap/README.md#requirements-on-linux).
 

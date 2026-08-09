@@ -19,11 +19,25 @@ dotnet build examples/AspireOpenLdap.Examples.slnx --configuration Release
 ```
 
 The first test run builds the bundled Docker image and is slow; later runs reuse it. Fast
-model/unit tests can be run without Docker:
+model/unit tests can be run without Docker — nothing in that tier may start a container:
 
 ```bash
-dotnet test aspireOpenLdap/AspireOpenLdap.slnx --filter "FullyQualifiedName!~Becomes_Healthy&FullyQualifiedName!~LargeSeed&FullyQualifiedName!~Instrumentation&FullyQualifiedName!~ClientTelemetry"
+dotnet test aspireOpenLdap/AspireOpenLdap.slnx --filter "Category!=Integration"
 ```
+
+Targeted mutation checks over the pure boundaries (connection-string parse/quote, DN and
+seed-model validation, certificate hostname validation, LDIF generation) run from
+`aspireOpenLdap/` and take about two minutes; they never start a container:
+
+```bash
+dotnet tool restore
+dotnet stryker -f stryker-config.client.json  -O ../artifacts/stryker/client
+dotnet stryker -f stryker-config.hosting.json -O ../artifacts/stryker/hosting
+```
+
+**Read [`docs/testing.md`](docs/testing.md)** before adding a test or quoting a coverage
+number: it says which tier protects which contracts, why the coverage percentage structurally
+cannot represent container/child-process work, and what to do with a surviving mutant.
 
 ## Pull request expectations
 

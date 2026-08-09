@@ -27,7 +27,26 @@ public class AdminBindDnTests
         // verbatim, so such usernames can never bind consistently — they are rejected
         // at model construction rather than escaped into a host/container mismatch.
         var ex = Assert.Throws<ArgumentException>(() => CreateResource("Doe, John", "dc=example,dc=org"));
-        Assert.Contains("DN escaping", ex.Message);
+
+        // The whole message is the contract, not just the fact that something threw: it has to
+        // name the offending value, enumerate the rejected characters, and say what to do
+        // instead. This is the only place a user learns why an ordinary-looking name is refused.
+        Assert.Contains("Admin username 'Doe, John'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("DN escaping", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(", + \" \\ < > ;", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("use a username without DN special characters", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Admin_Username_With_Control_Characters_Is_Rejected()
+    {
+        // The value is interpolated into shell-generated cn=config LDIF, so a control character
+        // is an injection vector, not a cosmetic problem — and it is rejected by a different
+        // rule than DN escaping, which the message must make clear.
+        var ex = Assert.Throws<ArgumentException>(() => CreateResource("ad\nmin", "dc=example,dc=org"));
+
+        Assert.Contains("Admin username", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("control character", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
 }
@@ -121,6 +140,106 @@ public class LdapSeedLdifGeneratorTests
         // The password is stored hashed, never cleartext (F05).
         Assert.StartsWith("{SSHA}", Assert.Single(user["userPassword"]!.Values).AsString());
         Assert.DoesNotContain("password1", ldif);
+    }
+
+    [Fact]
+    public void Records_Are_Emitted_In_Ordinal_Order_Within_Each_Entry_Kind()
+    {
+        // Declaration order must not leak into the file: the generated LDIF is mounted into the
+        // container and diffed by humans, and ldapadd applies it top-down, so the OU/user/group
+        // blocks are each sorted ordinal. Two runs of the SAME declarations being identical is
+        // not enough to pin this — that holds under any stable order.
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap")
+            .WithOrganizationalUnit("zeta")
+            .WithOrganizationalUnit("alpha")
+            .WithUser("zoe", "pw", ou: "alpha")
+            .WithUser("amy", "pw", ou: "alpha")
+            .WithGroup("zookeepers", ["amy"], ou: "alpha")
+            .WithGroup("admins", ["amy"], ou: "alpha");
+
+        var records = LdifReader.Parse(LdapSeedLdifGenerator.Generate(ldap.Resource, ldap.Resource.SeedModel!));
+
+        Assert.Equal(
+            [
+                "dc=example,dc=org",
+                "ou=alpha,dc=example,dc=org",
+                "ou=zeta,dc=example,dc=org",
+                "uid=amy,ou=alpha,dc=example,dc=org",
+                "uid=zoe,ou=alpha,dc=example,dc=org",
+                "cn=admins,ou=alpha,dc=example,dc=org",
+                "cn=zookeepers,ou=alpha,dc=example,dc=org",
+            ],
+            records.Select(r => r.Dn).ToArray());
+    }
+
+    [Fact]
+    public void Emitted_Object_Classes_Are_The_Schema_Contract_For_Each_Entry_Kind()
+    {
+        // slapd rejects an entry whose objectClass set does not carry its naming/required
+        // attributes, and that rejection only shows up as a failed container load. These are the
+        // exact classes each generated entry kind must declare.
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap")
+            .WithOrganizationalUnit("people")
+            .WithUser("user01", "pw", ou: "people")
+            .WithGroup("admins", ["user01"]);
+
+        var records = LdifReader.Parse(LdapSeedLdifGenerator.Generate(ldap.Resource, ldap.Resource.SeedModel!))
+            .Cast<LdifContentRecord>()
+            .ToArray();
+
+        static string[] ObjectClasses(LdifContentRecord record)
+            => record["objectClass"]!.Values.Select(v => v.AsString()).ToArray();
+
+        Assert.Equal(["dcObject", "organization"], ObjectClasses(records[0]));
+        Assert.Equal(["organizationalUnit"], ObjectClasses(records[1]));
+        Assert.Equal(["inetOrgPerson", "organizationalPerson", "person", "top"], ObjectClasses(records[2]));
+        Assert.Equal(["groupOfNames", "top"], ObjectClasses(records[3]));
+    }
+
+    [Fact]
+    public void Group_Members_Are_Uid_Resolved_Unless_They_Are_Literal_Dns()
+    {
+        // The '=' carve-out lets a group reference an entry outside the seed model (the admin
+        // DN here). A literal DN must be emitted verbatim; a bare uid must be expanded to the
+        // DN the user entry was written under, OU included.
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap")
+            .WithOrganizationalUnit("people")
+            .WithUser("user01", "pw", ou: "people")
+            .WithGroup("admins", ["user01", "cn=admin,dc=example,dc=org"]);
+
+        var records = LdifReader.Parse(LdapSeedLdifGenerator.Generate(ldap.Resource, ldap.Resource.SeedModel!));
+        var group = Assert.IsType<LdifContentRecord>(records[^1]);
+
+        Assert.Equal(
+            ["uid=user01,ou=people,dc=example,dc=org", "cn=admin,dc=example,dc=org"],
+            group["member"]!.Values.Select(v => v.AsString()).ToArray());
+    }
+
+    [Fact]
+    public void Generated_File_Carries_The_Do_Not_Edit_Header()
+    {
+        // The file lands in the user's AppHost output; without the header a reader has no way
+        // to tell it is generated and edits get silently overwritten on the next run.
+        var ldif = LdapSeedLdifGenerator.Generate(CreateResource(), new LdapSeedModel());
+
+        Assert.StartsWith("# Generated by Aspire.Hosting.OpenLdap. Do not edit;", ldif, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unsupported_Root_Naming_Attribute_Is_Rejected_At_Model_Construction()
+    {
+        // dc=/o=/c= are the supported roots; anything else has no correct root objectClass.
+        // The fast witness for that rule is here, at resource construction — the generator's
+        // own matching throw is unreachable defence-in-depth because no resource carrying an
+        // unsupported root can be built (the container-side guard is covered by
+        // InitializationIntegrityTests, which needs Docker).
+        var ex = Assert.Throws<ArgumentException>(() => CreateResource("ou=nope,dc=example,dc=org"));
+
+        Assert.Contains("starts with 'ou='", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'dc=', 'o=', and 'c='", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -496,3 +496,6 @@ phpldapadmin-logged-in.png
 .agents/
 
 #
+# Stryker.NET mutation scratch (reports go to artifacts/, but an interrupted run can
+# leave a workspace beside the project).
+StrykerOutput/
