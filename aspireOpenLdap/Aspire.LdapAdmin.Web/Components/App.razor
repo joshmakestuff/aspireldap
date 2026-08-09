@@ -6,7 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <ResourcePreloader />
-    <link rel="stylesheet" href="@Assets["app.css"]" />
+    @* Fluent's own baseline styles only — the template's app.css is deliberately gone;
+       components are configured, never styled around (fluent-ui skill). *@
+    <link rel="stylesheet" href="@Assets["_content/Microsoft.FluentUI.AspNetCore.Components/css/reboot.css"]" />
     <link rel="stylesheet" href="@Assets["Aspire.LdapAdmin.Web.styles.css"]" />
     <ImportMap />
     <HeadOutlet @rendermode="InteractiveServer" />

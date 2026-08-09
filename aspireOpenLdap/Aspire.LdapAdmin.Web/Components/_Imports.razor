@@ -6,6 +6,11 @@
 @using static Microsoft.AspNetCore.Components.Web.RenderMode
 @using Microsoft.AspNetCore.Components.Web.Virtualization
 @using Microsoft.JSInterop
+@using Aspire.LdapAdmin.Core
 @using Aspire.LdapAdmin.Web
 @using Aspire.LdapAdmin.Web.Components
 @using Aspire.LdapAdmin.Web.Components.Layout
+@using Microsoft.FluentUI.AspNetCore.Components
+@* The icon sets live in a child namespace that the using above does not reach; the alias
+   makes `Icons.Regular.Size16.*` resolve. *@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
