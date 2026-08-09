@@ -1,0 +1,114 @@
+@*
+    Attribute grid for one entry.
+
+    Representation comes from the service's IsBinary flag and is never re-derived here: the
+    service decides it from the schema's declared syntax, the RFC 4522 ;binary transfer
+    option, or — last — the bytes, and says which (Classification). When IsBinary is true
+    every value is base64, so it is labelled and sized rather than printed as text.
+
+    MultiLine, and no Virtualize/ItemSize: an attribute renders one row with every value
+    stacked in the cell, so rows must size to their content. FluentDataGrid writes fixed row
+    tracks otherwise and slices the second value through the middle (docs/findings.md).
+*@
+
+<FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8"
+             VerticalAlignment="@VerticalAlignment.Center">
+    <FluentLabel Typo="@Typography.H4" Style="word-break: break-all;">@Entry.Dn</FluentLabel>
+    <FluentButton Appearance="@Appearance.Stealth" Title="Copy DN to clipboard"
+                  IconStart="@(new Icons.Regular.Size16.Copy())" OnClick="CopyDnAsync" />
+</FluentStack>
+
+<FluentDataGrid Items="@Rows" TGridItem="LdapAttributeValues" GridTemplateColumns="1fr 2fr"
+                MultiLine="true" ResizableColumns="true">
+    <TemplateColumn Title="Attribute" Sortable="false">
+        <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="6"
+                     VerticalAlignment="@VerticalAlignment.Center" Wrap="true">
+            <strong>@context.Name</strong>
+            @if (context.IsBinary)
+            {
+                <FluentBadge Appearance="@Appearance.Neutral" title="@ClassificationTitle(context.Classification)">binary</FluentBadge>
+            }
+            @if (context.Values.Count > 1)
+            {
+                <FluentBadge Appearance="@Appearance.Neutral">@context.Values.Count values</FluentBadge>
+            }
+            @if (OnEdit.HasDelegate)
+            {
+                <FluentButton Appearance="@Appearance.Stealth" Title="@($"Edit {context.Name}")"
+                              IconStart="@(new Icons.Regular.Size16.Edit())"
+                              OnClick="@(() => OnEdit.InvokeAsync(context))" />
+            }
+        </FluentStack>
+    </TemplateColumn>
+    <TemplateColumn Title="Value" Sortable="false">
+        @if (context.Values.Count == 0)
+        {
+            <em>(no values)</em>
+        }
+        else
+        {
+            @foreach (var value in context.Values)
+            {
+                <div style="overflow-wrap: anywhere;">
+                    @if (context.IsBinary)
+                    {
+                        <em>@DescribeBinary(value)</em>
+                        <details>
+                            <summary>base64</summary>
+                            <code>@value</code>
+                        </details>
+                    }
+                    else
+                    {
+                        @value
+                    }
+                </div>
+            }
+        }
+    </TemplateColumn>
+</FluentDataGrid>
+
+@code {
+    [Inject]
+    private IJSRuntime Js { get; set; } = default!;
+
+    [Inject]
+    private IToastService Toasts { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public required LdapEntry Entry { get; set; }
+
+    /// <summary>Raised with the attribute the user asked to edit; absent = read-only view.</summary>
+    [Parameter]
+    public EventCallback<LdapAttributeValues> OnEdit { get; set; }
+
+    private IQueryable<LdapAttributeValues> Rows =>
+        Entry.Attributes.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase).AsQueryable();
+
+    private async Task CopyDnAsync()
+    {
+        await Js.InvokeVoidAsync("navigator.clipboard.writeText", Entry.Dn);
+        Toasts.ShowSuccess("DN copied");
+    }
+
+    /// <summary>Why this attribute is shown as binary — the classification travels with the value.</summary>
+    private static string ClassificationTitle(LdapValueClassification classification) => classification switch
+    {
+        LdapValueClassification.Schema => "Binary per the server schema's declared syntax; transported as base64",
+        LdapValueClassification.TransferOption => "Binary per the RFC 4522 ;binary transfer option; transported as base64",
+        _ => "Binary because a value is not valid UTF-8 (schema unavailable or silent); transported as base64",
+    };
+
+    /// <summary>
+    /// Decoded size of a base64 value, computed from its length rather than by decoding, so
+    /// a large certificate or photo is not materialised just to label it.
+    /// </summary>
+    internal static string DescribeBinary(string base64)
+    {
+        var padding = base64.EndsWith("==", StringComparison.Ordinal) ? 2
+            : base64.EndsWith('=') ? 1
+            : 0;
+        var bytes = Math.Max((base64.Length / 4 * 3) - padding, 0);
+        return bytes == 1 ? "1 byte" : $"{bytes:N0} bytes";
+    }
+}
