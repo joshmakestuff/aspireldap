@@ -37,6 +37,7 @@ builder.Build().Run();
 - `WithSeedRecords(...)` — seed arbitrary entries built with the [LdifDotNet](https://www.nuget.org/packages/LdifDotNet) record model (custom objectClasses, binary attributes) without hand-writing LDIF.
 - `WithAnonymousBinding(...)` — allow unauthenticated binds.
 - `WithTls(...)` / `WithRequiredTls(...)` — enable LDAPS; auto-generates a self-signed cert if you don't supply one.
+- `WithLdapAdmin(...)` — add the bundled LdapAdmin web UI as a sibling container. The app and its Dockerfile ship inside this package and the container is built locally (no registry pull). No login: it opens straight onto the directory with the AppHost admin credentials. Requires consuming this package as a `PackageReference` (the payload arrives via NuGet contentFiles).
 - `WithPhpLdapAdmin(...)` — add a sibling phpLDAPadmin UI container.
 - `WithLogLevel(...)` — set slapd's debug log level (default `Stats`: connection/operation/result lines).
 - `WithHealthCheckProbeLogging(...)` — keep the health-check probe's connections in the container log. By default the container filters out each wholly-successful probe block so the dashboard console isn't drowned in probe noise; probes that fail in any way always log in full.

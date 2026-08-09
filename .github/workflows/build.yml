@@ -44,6 +44,8 @@ jobs:
         run: dotnet build AspireOpenLdap.slnx --configuration Release --no-restore
 
       # The fast suite must pass without Docker; nothing in it may start a container.
+      # Category=CleanConsumer is excluded too — it packs and boots a full AppHost, and runs
+      # as its own publish-gating job below.
       # Coverage (#64): first-party assemblies only (see coverage.runsettings for the
       # denominator and limitations — container/child-process work is not in this number,
       # and there is deliberately no threshold). Published as a diagnostic artifact.
@@ -51,7 +53,7 @@ jobs:
         working-directory: aspireOpenLdap
         run: >
           dotnet test AspireOpenLdap.slnx --configuration Release --no-build
-          --filter "Category!=Integration"
+          --filter "Category!=Integration&Category!=CleanConsumer"
           --collect "XPlat Code Coverage" --settings coverage.runsettings
           --results-directory ../artifacts/test-results
 
@@ -204,7 +206,33 @@ jobs:
 
       - name: Fast tests
         working-directory: aspireOpenLdap
-        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category!=Integration"
+        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category!=Integration&Category!=CleanConsumer"
+
+  # The clean-consumer packed-artifact test (#82): packs the hosting package, restores it into
+  # a scaffolded consumer AppHost in an isolated temp workspace (local feed + nuget.org only),
+  # and runs AddOpenLdap(...).WithLdapAdmin() end to end from package-delivered assets. Its own
+  # job — not part of the integration step — so a packaging regression (missing payload file,
+  # checkout-relative path) is legible on its own, and publish is gated on it explicitly.
+  clean-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        working-directory: aspireOpenLdap
+        run: dotnet restore AspireOpenLdap.slnx
+
+      - name: Build
+        working-directory: aspireOpenLdap
+        run: dotnet build AspireOpenLdap.slnx --configuration Release --no-restore
+
+      - name: Clean-consumer packed-artifact test
+        working-directory: aspireOpenLdap
+        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category=CleanConsumer"
 
   pack:
     runs-on: ubuntu-latest
@@ -253,12 +281,13 @@ jobs:
           if-no-files-found: error
 
   # Publishes the artifacts packed from the exact tagged commit, and only after the
-  # test job (unit + Docker integration + example build), the Windows fast-suite witness, and
-  # the targeted mutation run have all passed on that commit.
+  # test job (unit + Docker integration + example build), the Windows fast-suite witness,
+  # the targeted mutation run, and the clean-consumer packed-artifact test have all passed
+  # on that commit.
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [test, test-windows, mutation, pack]
+    needs: [test, test-windows, mutation, pack, clean-consumer]
     permissions:
       contents: read
       id-token: write   # OIDC trusted publishing to nuget.org — scoped to this job only

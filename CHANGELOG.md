@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`WithLdapAdmin()`** — the LdapAdmin web UI as a sibling container resource wired to the
+  parent OpenLDAP resource ([#78](https://github.com/joshmakestuff/aspireldap/issues/78)).
+  The hosting package carries the admin app as an internal runtime payload: the web host is
+  published during pack and bundled with a small Dockerfile under
+  `contentFiles/any/any/ldapadmin/`, and Aspire builds the container locally — no registry
+  image and no separate admin package, by decision. The admin binds every operation with the
+  AppHost-provided admin credentials (no login), waits for the directory, and reports healthy
+  through its `/health` endpoint, which performs a real LDAP bind + root-DSE search. With
+  `WithRequiredTls()` it connects over LDAPS — encrypted but without server certificate
+  verification (the phpLDAPadmin-sidecar precedent: the certificate cannot name the
+  dynamically-assigned container address, and libldap has no CA-pinned-without-hostname mode).
+  Requires consuming the package as a `PackageReference`; project-referenced dev AppHosts keep
+  running the admin via `AddProject`.
+- **Clean-consumer packed-artifact test**
+  ([#82](https://github.com/joshmakestuff/aspireldap/issues/82)): packs the hosting package,
+  restores it into a scaffolded consumer AppHost in an isolated temp workspace (local feed +
+  nuget.org only, no project references, no checkout paths), and verifies
+  `AddOpenLdap(...).WithLdapAdmin()` end to end — admin startup, `/health` over HTTP, the
+  admin→LDAP round trip, required TLS. Wired into CI as its own job gating publish.
+
 ## 0.7.0-preview.1 — 2026-08-08
 
 ### Added
