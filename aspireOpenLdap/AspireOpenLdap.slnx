@@ -1,6 +1,16 @@
 <Solution>
-  <Project Path="Aspire.Hosting.OpenLdap/Aspire.Hosting.OpenLdap.csproj" />
-  <Project Path="Aspire.OpenLdap/Aspire.OpenLdap.csproj" />
-  <Project Path="AspireOpenLdap.TestAppHost/AspireOpenLdap.TestAppHost.csproj" />
-  <Project Path="Aspire.Hosting.OpenLdap.Tests/Aspire.Hosting.OpenLdap.Tests.csproj" />
+  <Folder Name="/src/">
+    <Project Path="Aspire.Hosting.OpenLdap/Aspire.Hosting.OpenLdap.csproj" />
+    <Project Path="Aspire.LdapAdmin.Core/Aspire.LdapAdmin.Core.csproj" />
+    <Project Path="Aspire.LdapAdmin.Web/Aspire.LdapAdmin.Web.csproj" />
+    <Project Path="Aspire.OpenLdap/Aspire.OpenLdap.csproj" />
+  </Folder>
+  <Folder Name="/testapps/">
+    <Project Path="Aspire.LdapAdmin.AppHost/Aspire.LdapAdmin.AppHost.csproj" />
+    <Project Path="AspireOpenLdap.TestAppHost/AspireOpenLdap.TestAppHost.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="Aspire.Hosting.OpenLdap.Tests/Aspire.Hosting.OpenLdap.Tests.csproj" />
+    <Project Path="Aspire.LdapAdmin.Tests/Aspire.LdapAdmin.Tests.csproj" />
+  </Folder>
 </Solution>

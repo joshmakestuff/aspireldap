@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    LdapAdmin host: ASP.NET Core + server-rendered Blazor (InteractiveServer) calling the
+    admin services directly. Not a package product — the admin ships inside the hosting
+    integration via WithLdapAdmin() (#78).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aspire.LdapAdmin.Core\Aspire.LdapAdmin.Core.csproj" />
+  </ItemGroup>
+
+</Project>
