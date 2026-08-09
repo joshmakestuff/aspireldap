@@ -314,26 +314,6 @@ public class OpenLdapBuilderModelTests
         Assert.Equal(expected, env["LDAP_LOG_HEALTH_PROBES"]);
     }
 
-    private static async Task<Dictionary<string, string>> EvaluateEnvironmentAsync(IResource resource)
-    {
-        var context = new EnvironmentCallbackContext(
-            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run),
-            resource);
-        foreach (var annotation in resource.Annotations.OfType<EnvironmentCallbackAnnotation>())
-        {
-            await annotation.Callback(context);
-        }
-
-        var result = new Dictionary<string, string>();
-        foreach (var (name, value) in context.EnvironmentVariables)
-        {
-            result[name] = value switch
-            {
-                string s => s,
-                IValueProvider provider => await provider.GetValueAsync() ?? string.Empty,
-                _ => value?.ToString() ?? string.Empty,
-            };
-        }
-        return result;
-    }
+    private static Task<Dictionary<string, string>> EvaluateEnvironmentAsync(IResource resource) =>
+        EnvironmentEvaluation.EvaluateEnvironmentAsync(resource);
 }

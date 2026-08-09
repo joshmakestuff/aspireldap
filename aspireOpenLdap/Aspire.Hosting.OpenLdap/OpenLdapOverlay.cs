@@ -1,3 +1,4 @@
+using System.Globalization;
 using LdifDotNet;
 
 namespace Aspire.Hosting.ApplicationModel;
@@ -96,6 +97,65 @@ public sealed class OpenLdapOverlay
                 new("olcMemberOfRefInt", referentialIntegrity ? "TRUE" : "FALSE"),
             ],
         };
+    }
+
+    /// <summary>
+    /// The <c>syncprov</c> overlay (slapo-syncprov): makes the server an RFC 4533 sync provider,
+    /// so any RFC 4533 client (<c>ldapsearch -E sync=rp</c> is the verified baseline) receives
+    /// change notifications. Prefer the <c>WithChangeNotifications(...)</c> extension, which
+    /// delegates here.
+    /// </summary>
+    /// <param name="checkpoint">
+    /// <c>olcSpCheckpoint</c> as <c>"&lt;ops&gt; &lt;minutes&gt;"</c>; both values must be positive
+    /// integers. Default <c>"1 1"</c>, the measured dev-right value: it keeps <c>contextCSN</c>
+    /// durable across unclean container stops, where the production-style <c>"100 10"</c>
+    /// regressed the CSN by minutes and made resuming clients replay seen changes.
+    /// </param>
+    /// <param name="sessionLog">
+    /// <c>olcSpSessionLog</c> size. Must be at least 1. Default 100: gives delta deletes on a
+    /// cookie-resumed refresh; without a session log the server falls back to present mode and
+    /// the client diffs the whole directory per reconnect.
+    /// </param>
+    public static OpenLdapOverlay SyncProv(string checkpoint = "1 1", int sessionLog = 100)
+    {
+        ValidateCheckpoint(checkpoint, nameof(checkpoint));
+        ArgumentOutOfRangeException.ThrowIfLessThan(sessionLog, 1);
+
+        return new()
+        {
+            Name = "syncprov",
+            ModuleLoads = ["syncprov.so"],
+            OverlayObjectClass = "olcSyncProvConfig",
+            Attributes =
+            [
+                new("olcSpCheckpoint", checkpoint),
+                new("olcSpSessionLog", sessionLog.ToString(CultureInfo.InvariantCulture)),
+            ],
+        };
+    }
+
+    /// <summary>
+    /// A zero-minute checkpoint (<c>"N 0"</c>) is not caught by the generic descriptor
+    /// validation — the value is structurally clean LDIF — but slapd rejects it while applying
+    /// the overlay, which kills container bootstrap with exit code 80 and an error against
+    /// generated LDIF the user never wrote. Reject it (and any non-<c>"&lt;ops&gt; &lt;minutes&gt;"</c>
+    /// shape) here, at the .NET call, with an attributable message.
+    /// </summary>
+    private static void ValidateCheckpoint(string checkpoint, string paramName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(checkpoint, paramName);
+        var parts = checkpoint.Split(' ');
+        if (parts.Length != 2
+            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var ops)
+            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes)
+            || ops < 1 || minutes < 1)
+        {
+            throw new ArgumentException(
+                $"Checkpoint '{checkpoint}' must be \"<ops> <minutes>\" with both values positive " +
+                "integers (e.g. \"1 1\"). In particular slapd rejects a zero-minute checkpoint " +
+                "while the container bootstraps (exit code 80), so it is rejected here instead.",
+                paramName);
+        }
     }
 
     /// <summary>

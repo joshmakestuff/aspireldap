@@ -48,6 +48,49 @@
     <Content Include="$(MSBuildThisFileDirectory)..\..\openldap\2.6\debian-13\**\*" Link="openldap\2.6\debian-13\%(RecursiveDir)%(Filename)%(Extension)" Pack="true" PackagePath="contentFiles/any/any/openldap/2.6/debian-13/" PackageCopyToOutput="true" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!--
+    Bundle the LdapAdmin container build context (#78): the Dockerfile plus the published
+    Aspire.LdapAdmin.Web output, packed into contentFiles/any/any/ldapadmin/ so a
+    PackageReference lands the whole context in the consumer's build output — mirroring the
+    OpenLDAP context above. Unlike the OpenLDAP context this is pack-time-only (no
+    CopyToOutputDirectory): project-referenced dev AppHosts run the admin via AddProject, and
+    WithLdapAdmin() fails with an actionable error when the payload is absent.
+  -->
+  <PropertyGroup>
+    <LdapAdminPayloadDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'ldapadmin-payload'))</LdapAdminPayloadDir>
+    <!-- NU5100: the published admin app's assemblies live under contentFiles/ deliberately —
+         they are container-image cargo, not references for the consuming project. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\ldapadmin\Dockerfile" Pack="true" PackagePath="contentFiles/any/any/ldapadmin" PackageCopyToOutput="true" Visible="false" />
+  </ItemGroup>
+
+  <!--
+    Publishes the admin web host into the pack payload immediately before NuGet collects package
+    files. Deliberately an MSBuild-task publish rather than a ProjectReference: the dependency
+    direction stays one-way (no public assembly depends on admin assemblies) and the payload is
+    runtime cargo, not a compile-time dependency. Global properties (Version,
+    ContinuousIntegrationBuild, ...) flow into the publish, so the payload is stamped identically
+    to the hosting assemblies in the same pack.
+  -->
+  <Target Name="PublishLdapAdminPayload" BeforeTargets="_GetPackageFiles">
+    <!-- Publish never deletes stale files from a previous PublishDir; start clean so the
+         payload is exactly this publish. -->
+    <RemoveDir Directories="$(LdapAdminPayloadDir)" />
+    <MSBuild
+      Projects="$(MSBuildThisFileDirectory)..\Aspire.LdapAdmin.Web\Aspire.LdapAdmin.Web.csproj"
+      Targets="Publish"
+      Properties="Configuration=$(Configuration);PublishDir=$(LdapAdminPayloadDir)app\;SelfContained=false;UseAppHost=false" />
+    <ItemGroup>
+      <!-- NuGet appends each wildcard-matched file's recursive subpath to PackagePath itself,
+           preserving the publish layout under ldapadmin/app/. -->
+      <_LdapAdminPayloadFile Include="$(LdapAdminPayloadDir)app\**\*" />
+      <Content Include="@(_LdapAdminPayloadFile)" Pack="true" PackagePath="contentFiles/any/any/ldapadmin/app/" PackageCopyToOutput="true" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" />
     <PackageReference Include="LdifDotNet" />

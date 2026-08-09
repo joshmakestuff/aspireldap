@@ -22,6 +22,9 @@ var ldap = builder.AddOpenLdap("openldap")
     .WithFakePeople(30, ou: "directory", seed: 81);
 
 builder.AddProject<Projects.Aspire_LdapAdmin_Web>("ldapadmin")
+    // Same configuration contract WithLdapAdmin() sets on the packaged container: the admin
+    // host reads LdapAdmin:ConnectionName and binds with that connection string.
+    .WithEnvironment("LdapAdmin__ConnectionName", "openldap")
     .WithReference(ldap)
     .WaitFor(ldap);
 
