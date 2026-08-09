@@ -82,6 +82,8 @@ Misc: `WithAnonymousBinding(bool)`, `WithLogLevel(OpenLdapLogLevel)`, `WithHealt
 
 `AddOpenLdapClient(string connectionName, Action<OpenLdapClientSettings>? configure = null)` and `AddKeyedOpenLdapClient(...)` (service key = name, for multiple directories). Registers: `OpenLdapClientFactory` (singleton), `LdapConnection` (transient), `OpenLdapClient` (transient), health check `openldap_{name}` (root-DSE search).
 
+`OpenLdapClientFactory` also exposes `CreateClient()` (a new instrumented `OpenLdapClient`, caller disposes) and `CreateConnection()`. A service whose lifetime outlives a single LDAP operation must take the factory and create a client per operation — never capture the transient `OpenLdapClient`, which is no more thread-safe than the connection it wraps.
+
 `OpenLdapClientSettings`: `ConnectionString`, `DisableHealthChecks`, `DisableTracing`, `DisableMetrics`, `TrustConnectionStringCaCertificate` (default true), `DisableTlsHostnameValidation` (Windows-only relaxation; rejected on Linux), `Timeout` (default 30 s). Config section `Aspire:OpenLdap`.
 
 Connection string shape (published by the resource, consumed by the client):

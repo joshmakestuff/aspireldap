@@ -27,6 +27,21 @@ public sealed class OpenLdapClientFactory
     /// <summary>The parsed connection-string settings this factory was created with.</summary>
     public OpenLdapConnectionStringBuilder ConnectionString => _connectionString;
 
+    /// <summary>
+    /// Creates a new instrumented <see cref="OpenLdapClient"/> over a fresh connection. Caller
+    /// owns disposal (disposing the client disposes its connection).
+    /// </summary>
+    /// <remarks>
+    /// The DI registration hands out transient clients, which only serves consumers that can
+    /// take one per operation. A component with a longer lifetime than an LDAP operation —
+    /// a singleton service issuing one request per call, say — must not capture a transient
+    /// <see cref="OpenLdapClient"/> (it is no more thread-safe than the <see cref="LdapConnection"/>
+    /// it wraps); it takes this factory and creates a client per operation instead. Without
+    /// this method that consumer's only option is <see cref="CreateConnection"/>, which drops
+    /// the telemetry the wrapper exists to provide.
+    /// </remarks>
+    public OpenLdapClient CreateClient() => new(CreateConnection(), _settings, _connectionString);
+
     /// <summary>Creates a new <see cref="LdapConnection"/>. Caller owns disposal.</summary>
     [SuppressMessage("Design", "MA0051:Method is too long",
         Justification = "One connection-construction sequence: option validation, TLS trust wiring, " +
