@@ -1,10 +1,7 @@
 using System.DirectoryServices.Protocols;
-using Aspire.Hosting;
-using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
+using AspireOpenLdap.TestAppHost;
 using LdifDotNet;
-using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
@@ -18,7 +15,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]
-public class LargeSeedHealthGatingTests
+public class LargeSeedHealthGatingTests(AppHostFixture appHost)
 {
     private const int UserCount = 1500;
 
@@ -35,24 +32,12 @@ public class LargeSeedHealthGatingTests
 
             DockerCli.WidenPermissionsForContainer(seedDir);
 
-            var appHost = await DistributedApplicationTestingBuilder
-                .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(
-                    [$"--OpenLdap:SeedDir={seedDir}"],
-                    cts.Token);
+            // StartAsync returns only once the resource is healthy — so the connection string
+            // it hands back is observed at exactly the instant health went green.
+            var started = await appHost.StartAsync(
+                TestAppHostScenarios.LargeSeed, cts.Token, $"--{TestAppHostScenarios.SeedDirKey}={seedDir}");
 
-            await using var app = await appHost.BuildAsync(cts.Token);
-
-            var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-            await app.StartAsync(cts.Token);
-
-            // The bundled Dockerfile is built on first run, so this can take a while cold.
-            await notifications.WaitForResourceHealthyAsync("openldap", cts.Token);
-
-            // The moment health goes green, the whole seed must already be queryable.
-            var connectionString = await app.GetConnectionStringAsync("openldap", cts.Token);
-            Assert.NotNull(connectionString);
-
-            var count = CountSubtreeEntries(connectionString!);
+            var count = CountSubtreeEntries(started.Settings);
 
             // Exactly base (dc=example,dc=org) + ou=people + UserCount users: fewer means the
             // health check went green before the seed finished; more means something else got
@@ -61,6 +46,8 @@ public class LargeSeedHealthGatingTests
         }
         finally
         {
+            // Release the bind mount before deleting its source directory.
+            await appHost.ShutdownAsync(CancellationToken.None);
             Directory.Delete(seedDir, recursive: true);
         }
     }
@@ -91,12 +78,11 @@ public class LargeSeedHealthGatingTests
         return LdifWriter.WriteToString(records, new LdifWriterOptions { IncludeVersionLine = false });
     }
 
-    private static int CountSubtreeEntries(string connectionString)
+    private static int CountSubtreeEntries(OpenLdapConnectionStringBuilder settings)
     {
         // The supported client path: OpenLdapConnectionStringBuilder handles the quoted/escaped
         // values the hosting side emits (a naive Split(';') breaks on generated passwords
         // containing ';' or quotes), and the factory owns connection configuration.
-        var settings = OpenLdapConnectionStringBuilder.Parse(connectionString);
         var factory = new OpenLdapClientFactory(
             settings,
             new OpenLdapClientSettings { Timeout = TimeSpan.FromSeconds(30) });

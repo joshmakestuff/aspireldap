@@ -1,7 +1,7 @@
 using System.DirectoryServices.Protocols;
 using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
+using AspireOpenLdap.TestAppHost;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -12,11 +12,11 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// <c>WithOverlay(...)</c> and <c>WithAccessControl(...)</c> (issue #38). LDIF generation for
 /// both is unit-tested; these tests prove the generated files actually apply inside the
 /// container and change server behavior — overlay population and ACL enforcement — via the
-/// TestAppHost's <c>--OpenLdap:ConfigWitness</c> scenario.
+/// TestAppHost's <c>config-witness</c> scenario.
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]
-public class OverlayAccessControlIntegrationTests
+public class OverlayAccessControlIntegrationTests(AppHostFixture appHost)
 {
     private const string SvcDn = "uid=svc,ou=users,dc=example,dc=org";
     private const string AliceDn = "uid=alice,ou=users,dc=example,dc=org";
@@ -25,9 +25,11 @@ public class OverlayAccessControlIntegrationTests
     public async Task MemberOf_Overlay_Populates_MemberOf_On_Seeded_Members()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        await using var app = await StartConfigWitnessAppAsync(cts.Token);
+        // Both facts in this class ask for the same scenario, so they share one boot.
+        var started = await appHost.StartAsync(TestAppHostScenarios.ConfigWitness, cts.Token);
+        var app = started.App;
 
-        var settings = await GetAdminSettingsAsync(app, cts.Token);
+        var settings = started.Settings;
         var factory = new OpenLdapClientFactory(settings, new OpenLdapClientSettings());
         using var connection = factory.CreateConnection();
 
@@ -60,9 +62,7 @@ public class OverlayAccessControlIntegrationTests
     public async Task AccessControl_Rules_Grant_Svc_And_Deny_Others()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        await using var app = await StartConfigWitnessAppAsync(cts.Token);
-
-        var admin = await GetAdminSettingsAsync(app, cts.Token);
+        var admin = (await appHost.StartAsync(TestAppHostScenarios.ConfigWitness, cts.Token)).Settings;
 
         // Explicit Bind() is the auth-rule witness. CreateConnection never binds (SDS.P binds
         // lazily on the first request), and with the rules applied slapd's implicit default is
@@ -92,34 +92,6 @@ public class OverlayAccessControlIntegrationTests
         var aliceReadsSvc = (SearchResponse)aliceConnection.SendRequest(new SearchRequest(
             SvcDn, "(objectClass=*)", SearchScope.Base, "uid"));
         Assert.Single(aliceReadsSvc.Entries.Cast<SearchResultEntry>());
-    }
-
-    private static async Task<DistributedApplication> StartConfigWitnessAppAsync(CancellationToken cancellationToken)
-    {
-        var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(["--OpenLdap:ConfigWitness=true"], cancellationToken);
-
-        var app = await appHost.BuildAsync(cancellationToken);
-        try
-        {
-            var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-            await app.StartAsync(cancellationToken);
-            await notifications.WaitForResourceHealthyAsync("openldap", cancellationToken);
-            return app;
-        }
-        catch
-        {
-            await app.DisposeAsync();
-            throw;
-        }
-    }
-
-    private static async Task<OpenLdapConnectionStringBuilder> GetAdminSettingsAsync(
-        DistributedApplication app, CancellationToken cancellationToken)
-    {
-        var connectionString = await app.GetConnectionStringAsync("openldap", cancellationToken);
-        Assert.NotNull(connectionString);
-        return OpenLdapConnectionStringBuilder.Parse(connectionString!);
     }
 
     private static LdapConnection CreateUserConnection(
