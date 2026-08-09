@@ -15,7 +15,7 @@ public class FakeDataSeedTests
 {
     private static List<LdifRecord> Materialize(IResourceBuilder<OpenLdapResource> ldap)
     {
-        OpenLdapResourceBuilderExtensions.MaterializeFakeDataSpecs(ldap.Resource);
+        OpenLdapSeedPipeline.MaterializeFakeDataSpecs(ldap.Resource);
         return ldap.Resource.SeedRecords!;
     }
 
@@ -243,7 +243,7 @@ public class FakeDataSeedTests
                 new LdifAttribute("objectClass", "organization"),
                 new LdifAttribute("o", "example")));
 
-        OpenLdapResourceBuilderExtensions.MaterializeFakeDataSpecs(ldap.Resource);
+        OpenLdapSeedPipeline.MaterializeFakeDataSpecs(ldap.Resource);
 
         Assert.Single(ldap.Resource.SeedRecords!);
         Assert.Null(ldap.Resource.SeedModel); // no OU auto-declare either
