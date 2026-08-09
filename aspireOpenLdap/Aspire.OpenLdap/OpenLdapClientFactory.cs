@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.DirectoryServices.Protocols;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
@@ -27,6 +28,9 @@ public sealed class OpenLdapClientFactory
     public OpenLdapConnectionStringBuilder ConnectionString => _connectionString;
 
     /// <summary>Creates a new <see cref="LdapConnection"/>. Caller owns disposal.</summary>
+    [SuppressMessage("Design", "MA0051:Method is too long",
+        Justification = "One connection-construction sequence: option validation, TLS trust wiring, " +
+        "and bind setup are order-dependent and only meaningful read together (#63).")]
     public LdapConnection CreateConnection()
     {
         // DisableTlsHostnameValidation only modifies the custom-CA trust path; in any other

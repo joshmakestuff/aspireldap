@@ -9,11 +9,10 @@ root = true
 # health check).
 dotnet_diagnostic.MA0048.severity = none
 
-# MA0051 (method too long): fluent resource-builder methods and Docker-backed integration
-# tests are legitimately long and read top-to-bottom; splitting them hurts more than helps.
-dotnet_diagnostic.MA0051.severity = none
-
 [Aspire.Hosting.OpenLdap.Tests/**.cs]
+# MA0051 (method too long): Docker-backed integration tests are arrange-act-assert scripts that
+# read top-to-bottom; splitting them hides the scenario. Product code keeps this rule on (#63).
+dotnet_diagnostic.MA0051.severity = none
 # xunit runs without a SynchronizationContext, so ConfigureAwait(false) is pure noise there.
 dotnet_diagnostic.MA0004.severity = none
 # Culture-explicit comparisons in assertions (Assert.Contains/StartsWith, LINQ over test
