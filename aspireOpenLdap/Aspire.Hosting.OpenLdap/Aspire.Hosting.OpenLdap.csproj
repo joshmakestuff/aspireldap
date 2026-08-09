@@ -59,8 +59,13 @@
   <PropertyGroup>
     <LdapAdminPayloadDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'ldapadmin-payload'))</LdapAdminPayloadDir>
     <!-- NU5100: the published admin app's assemblies live under contentFiles/ deliberately —
-         they are container-image cargo, not references for the consuming project. -->
-    <NoWarn>$(NoWarn);NU5100</NoWarn>
+         they are container-image cargo, not references for the consuming project.
+         NU5123: the Fluent UI static web assets in the same payload (#83) sit under
+         _content/Microsoft.FluentUI.AspNetCore.Components/..., which NuGet flags as
+         potentially too long to extract on a long-path-disabled Windows host. The paths are
+         fixed by the library, not by us, and the clean-consumer pack test is the decisive
+         check that the payload actually extracts and serves. -->
+    <NoWarn>$(NoWarn);NU5100;NU5123</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
