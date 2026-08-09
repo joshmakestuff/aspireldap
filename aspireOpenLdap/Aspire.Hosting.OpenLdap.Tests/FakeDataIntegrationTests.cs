@@ -1,48 +1,33 @@
 using System.DirectoryServices.Protocols;
-using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
-using Microsoft.Extensions.DependencyInjection;
+using AspireOpenLdap.TestAppHost;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
 /// Runtime witness for the fake-data seeding pipeline: the TestAppHost's
-/// <c>--OpenLdap:FakeData=true</c> scenario runs <c>WithFakeDirectory(people: 5, groups: 2,
+/// <c>fake-data</c> scenario runs <c>WithFakeDirectory(people: 5, groups: 2,
 /// seed: 1)</c> plus one typed user, so the deferred materialization (the
 /// <c>OnBeforeResourceStarted</c> hook) is exercised against a live slapd — not simulated by
 /// calling the materializer directly like the fast tests do.
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]
-public class FakeDataIntegrationTests
+public class FakeDataIntegrationTests(AppHostFixture appHost)
 {
     [Fact]
     public async Task FakeDirectory_Materializes_And_Loads_Into_The_Running_Container()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
-        var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(
-                ["--OpenLdap:FakeData=true"],
-                cts.Token);
-
-        await using var app = await appHost.BuildAsync(cts.Token);
-
-        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-        await app.StartAsync(cts.Token);
-        await notifications.WaitForResourceHealthyAsync("openldap", cts.Token);
-
-        var connectionString = await app.GetConnectionStringAsync("openldap", cts.Token);
-        Assert.NotNull(connectionString);
-
-        var settings = OpenLdapConnectionStringBuilder.Parse(connectionString!);
+        var started = await appHost.StartAsync(TestAppHostScenarios.FakeData, cts.Token);
+        var settings = started.Settings;
 
         // #72: emitter equivalence on the plain no-CaCertFile arm — Build() must reproduce real
         // hosting output byte for byte, or a consumer that writes its own connection string
         // (AspireLdapAdmin) drifts from the one the integration emits.
-        Assert.Equal(connectionString, settings.Build());
+        Assert.Equal(started.ConnectionString, settings.Build());
 
         var factory = new OpenLdapClientFactory(
             settings,

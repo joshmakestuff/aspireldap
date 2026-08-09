@@ -20,8 +20,7 @@ public class BootstrapRegressionTests : IDisposable
 {
     private const string AdminPassword = "bootstrap-regression-pw";
 
-    private readonly List<string> _containers = [];
-    private readonly List<string> _volumes = [];
+    private readonly DockerScope _docker = DockerCli.NewScope("bootstraptest");
 
     [Fact]
     public async Task Accesslog_Admin_Password_Resolution_Honors_Canonical_And_Alias()
@@ -128,7 +127,7 @@ public class BootstrapRegressionTests : IDisposable
 
         // The default must be dead — the secret really replaced it.
         var defaultBind = await DockerCli.RunAsync(cts.Token,
-            "exec", name, "ldapwhoami", "-x", "-H", "ldap://localhost:1389",
+            "exec", name, "ldapwhoami", "-x", "-H", DockerCli.InContainerLdapUri,
             "-D", "cn=admin,dc=example,dc=org", "-w", "adminpassword");
         Assert.True(defaultBind.ExitCode != 0, "the default admin password must not remain active");
     }
@@ -181,7 +180,7 @@ public class BootstrapRegressionTests : IDisposable
         Assert.Contains($"userPassword:: {storedBase64}", slapcat.Output);
 
         var bind = await DockerCli.RunAsync(cts.Token,
-            "exec", name, "ldapwhoami", "-x", "-H", "ldap://localhost:1389",
+            "exec", name, "ldapwhoami", "-x", "-H", DockerCli.InContainerLdapUri,
             "-D", "cn=svc01,ou=users,dc=example,dc=org", "-w", cleartext);
         Assert.True(bind.ExitCode == 0, $"bind with the original cleartext failed: {bind.Output}");
     }
@@ -259,7 +258,7 @@ public class BootstrapRegressionTests : IDisposable
 
         // The second boot must reuse the volume (no re-init) and still serve the entry.
         var search = await DockerCli.RunAsync(cts.Token,
-            "exec", name, "ldapsearch", "-x", "-H", "ldap://localhost:1389",
+            "exec", name, "ldapsearch", "-x", "-H", DockerCli.InContainerLdapUri,
             "-D", "cn=admin,dc=example,dc=org", "-w", AdminPassword,
             "-b", "dc=example,dc=org", "(cn=persisted)", "dn");
         Assert.Contains("dn: cn=persisted,ou=users,dc=example,dc=org", search.Output);
@@ -286,12 +285,12 @@ public class BootstrapRegressionTests : IDisposable
         await DockerCli.WaitForLdapReadyAsync(name, "cn=admin,dc=example,dc=org", AdminPassword, cts.Token);
 
         var goodBind = await DockerCli.RunAsync(cts.Token,
-            "exec", name, "ldapwhoami", "-x", "-H", "ldap://localhost:1389",
+            "exec", name, "ldapwhoami", "-x", "-H", DockerCli.InContainerLdapUri,
             "-D", "cn=admin,cn=accesslog", "-w", configured);
         Assert.True(goodBind.ExitCode == 0, $"configured accesslog password was rejected: {goodBind.Output}");
 
         var defaultBind = await DockerCli.RunAsync(cts.Token,
-            "exec", name, "ldapwhoami", "-x", "-H", "ldap://localhost:1389",
+            "exec", name, "ldapwhoami", "-x", "-H", DockerCli.InContainerLdapUri,
             "-D", "cn=admin,cn=accesslog", "-w", "accesspassword");
         Assert.True(defaultBind.ExitCode != 0, "the default accesslog password must not remain active");
     }
@@ -321,7 +320,7 @@ public class BootstrapRegressionTests : IDisposable
 
         // Hashing must not break the advertised default credentials.
         var userBind = await DockerCli.RunAsync(cts.Token,
-            "exec", name, "ldapwhoami", "-x", "-H", "ldap://localhost:1389",
+            "exec", name, "ldapwhoami", "-x", "-H", DockerCli.InContainerLdapUri,
             "-D", "cn=user01,ou=users,dc=example,dc=org", "-w", "bitnami1");
         Assert.True(userBind.ExitCode == 0, $"default user bind failed after hashing: {userBind.Output}");
     }
@@ -489,30 +488,9 @@ public class BootstrapRegressionTests : IDisposable
         Assert.DoesNotContain("o: Acme2C", slapcat.Output);
     }
 
-    private string NewContainer()
-    {
-        var name = $"aspire-openldap-bootstraptest-{Guid.NewGuid():N}";
-        _containers.Add(name);
-        return name;
-    }
+    private string NewContainer() => _docker.NewContainer();
 
-    private string NewVolume()
-    {
-        var name = $"aspire-openldap-bootstraptest-vol-{Guid.NewGuid():N}";
-        _volumes.Add(name);
-        return name;
-    }
+    private string NewVolume() => _docker.NewVolume();
 
-    public void Dispose()
-    {
-        foreach (var container in _containers)
-        {
-            DockerCli.BestEffort("rm", "-f", container);
-        }
-        // Volumes after containers: a volume can't be removed while a container holds it.
-        foreach (var volume in _volumes)
-        {
-            DockerCli.BestEffort("volume", "rm", "-f", volume);
-        }
-    }
+    public void Dispose() => _docker.Dispose();
 }

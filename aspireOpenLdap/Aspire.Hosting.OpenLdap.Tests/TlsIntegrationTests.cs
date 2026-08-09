@@ -1,11 +1,9 @@
 using System.DirectoryServices.Protocols;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Aspire.Hosting;
-using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
-using Microsoft.Extensions.DependencyInjection;
+using AspireOpenLdap.TestAppHost;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
@@ -19,29 +17,18 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]
-public class TlsIntegrationTests
+public class TlsIntegrationTests(AppHostFixture appHost)
 {
     [Fact]
     public async Task RequiredTls_Resource_Is_Healthy_And_Client_Searches_Over_Ldaps()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
-        var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(["--OpenLdap:Tls=true"], cts.Token);
+        // Reaching healthy is already the positive native-path assertion: on Linux the health
+        // check itself connects over LDAPS through native libldap trust.
+        var started = await appHost.StartAsync(TestAppHostScenarios.Tls, cts.Token);
 
-        await using var app = await appHost.BuildAsync(cts.Token);
-
-        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-        await app.StartAsync(cts.Token);
-
-        // On Linux the health check itself connects over LDAPS through native libldap trust,
-        // so reaching healthy is already the positive native-path assertion.
-        await notifications.WaitForResourceHealthyAsync("openldap", cts.Token);
-
-        var connectionString = await app.GetConnectionStringAsync("openldap", cts.Token);
-        Assert.NotNull(connectionString);
-
-        var settings = OpenLdapConnectionStringBuilder.Parse(connectionString!);
+        var settings = started.Settings;
         Assert.True(settings.UsesLdaps);
         Assert.NotNull(settings.CaCertFile);
 
@@ -49,7 +36,7 @@ public class TlsIntegrationTests
         // hosting emitter cannot use it (the password is a deferred ParameterResource). This
         // pins the two against REAL emitted output — including the CaCertFile arm — so key
         // names, order, and quoting cannot drift apart across the package boundary.
-        Assert.Equal(connectionString, settings.Build());
+        Assert.Equal(started.ConnectionString, settings.Build());
 
         if (OperatingSystem.IsMacOS())
         {
@@ -59,12 +46,15 @@ public class TlsIntegrationTests
         }
 
         // Positive: the client integration's real connection path trusts the generated CA.
+        // SendRequest throws on a non-success result code, so the entry the base-scope search
+        // returns is the assertion that carries information.
         var factory = new OpenLdapClientFactory(settings, new OpenLdapClientSettings());
         using (var connection = factory.CreateConnection())
         {
             var response = (SearchResponse)connection.SendRequest(
                 new SearchRequest(settings.BaseDn, "(objectClass=*)", SearchScope.Base, "dn"));
-            Assert.Equal(ResultCode.Success, response.ResultCode);
+            var entry = Assert.Single(response.Entries.Cast<SearchResultEntry>());
+            Assert.Equal(settings.BaseDn, entry.DistinguishedName, ignoreCase: true);
         }
 
         // Negative: a server certificate that does not chain to the trusted CA must be
@@ -107,17 +97,8 @@ public class TlsIntegrationTests
         // still accepted" mode, previously only the required-TLS path had a runtime witness.
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
-        var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(["--OpenLdap:TlsOptional=true"], cts.Token);
-
-        await using var app = await appHost.BuildAsync(cts.Token);
-        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-        await app.StartAsync(cts.Token);
-        await notifications.WaitForResourceHealthyAsync("openldap", cts.Token);
-
-        var connectionString = await app.GetConnectionStringAsync("openldap", cts.Token);
-        Assert.NotNull(connectionString);
-        var settings = OpenLdapConnectionStringBuilder.Parse(connectionString!);
+        var started = await appHost.StartAsync(TestAppHostScenarios.TlsOptional, cts.Token);
+        var settings = started.Settings;
 
         // Not required → the connection string stays plain ldap://, but advertises the CA so
         // clients can opt into the LDAPS endpoint.
@@ -125,7 +106,7 @@ public class TlsIntegrationTests
         Assert.NotNull(settings.CaCertFile);
 
         // Emitter equivalence on the ldap:// arm — see the note in the TLS-required test.
-        Assert.Equal(connectionString, settings.Build());
+        Assert.Equal(started.ConnectionString, settings.Build());
 
         // Plain path serves.
         var plainFactory = new OpenLdapClientFactory(settings, new OpenLdapClientSettings());
@@ -133,7 +114,8 @@ public class TlsIntegrationTests
         {
             var response = (SearchResponse)connection.SendRequest(
                 new SearchRequest(settings.BaseDn, "(objectClass=*)", SearchScope.Base, "dn"));
-            Assert.Equal(ResultCode.Success, response.ResultCode);
+            var entry = Assert.Single(response.Entries.Cast<SearchResultEntry>());
+            Assert.Equal(settings.BaseDn, entry.DistinguishedName, ignoreCase: true);
         }
 
         if (OperatingSystem.IsMacOS())
@@ -142,7 +124,7 @@ public class TlsIntegrationTests
         }
 
         // LDAPS is served side by side on the ldaps endpoint, trusted via the generated CA.
-        var ldapsEndpoint = app.GetEndpoint("openldap", "ldaps");
+        var ldapsEndpoint = started.App.GetEndpoint("openldap", "ldaps");
         var ldapsSettings = new OpenLdapConnectionStringBuilder
         {
             Endpoint = new Uri($"ldaps://{ldapsEndpoint.Host}:{ldapsEndpoint.Port}"),
@@ -155,6 +137,7 @@ public class TlsIntegrationTests
         using var ldapsConnection = ldapsFactory.CreateConnection();
         var ldapsResponse = (SearchResponse)ldapsConnection.SendRequest(
             new SearchRequest(settings.BaseDn, "(objectClass=*)", SearchScope.Base, "dn"));
-        Assert.Equal(ResultCode.Success, ldapsResponse.ResultCode);
+        var ldapsEntry = Assert.Single(ldapsResponse.Entries.Cast<SearchResultEntry>());
+        Assert.Equal(settings.BaseDn, ldapsEntry.DistinguishedName, ignoreCase: true);
     }
 }
