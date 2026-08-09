@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using LdifDotNet;
 
 namespace Aspire.Hosting.OpenLdap;
@@ -21,6 +22,9 @@ internal static class OpenLdapDnValidation
     /// value smuggle extra lines into shell-generated cn=config LDIF), no empty values, and a
     /// single-valued leading RDN whose type the root-entry bootstrap supports.
     /// </summary>
+    [SuppressMessage("Design", "MA0051:Method is too long",
+        Justification = "A linear list of validation rules, each with the message it produces; " +
+        "splitting it separates a rule from its rationale (#63).")]
     public static void ValidateBaseDn(string baseDn, string paramName)
     {
         RejectControlCharacters(baseDn, paramName, "Base DN");

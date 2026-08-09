@@ -49,8 +49,8 @@ public class DashboardCommandTests
         var runner = new FakeCliRunner(); // default handler: every call exits 0
         using var services = BuildServices(runner);
 
-        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
-            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+        var (runtime, failure) = await ContainerRuntime
+            .ResolveAsync(services, CancellationToken.None);
 
         Assert.Null(failure);
         Assert.Equal("docker", runtime);
@@ -72,8 +72,8 @@ public class DashboardCommandTests
         };
         using var services = BuildServices(runner);
 
-        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
-            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+        var (runtime, failure) = await ContainerRuntime
+            .ResolveAsync(services, CancellationToken.None);
 
         Assert.Null(failure);
         Assert.Equal("podman", runtime);
@@ -88,8 +88,8 @@ public class DashboardCommandTests
         };
         using var services = BuildServices(runner);
 
-        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
-            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+        var (runtime, failure) = await ContainerRuntime
+            .ResolveAsync(services, CancellationToken.None);
 
         Assert.Null(runtime);
         Assert.NotNull(failure);
@@ -108,8 +108,8 @@ public class DashboardCommandTests
             ["ASPIRE_CONTAINER_RUNTIME"] = "podman",
         });
 
-        var (runtime, failure) = await OpenLdapResourceBuilderExtensions
-            .ResolveContainerRuntimeAsync(services, CancellationToken.None);
+        var (runtime, failure) = await ContainerRuntime
+            .ResolveAsync(services, CancellationToken.None);
 
         Assert.Null(failure);
         Assert.Equal("podman", runtime);
@@ -125,10 +125,10 @@ public class DashboardCommandTests
             ["ASPIRE_CONTAINER_RUNTIME"] = "podman",
             ["DcpPublisher:ContainerRuntime"] = "docker",
         });
-        Assert.Equal("docker", OpenLdapResourceBuilderExtensions.GetConfiguredContainerRuntime(both));
+        Assert.Equal("docker", ContainerRuntime.GetConfigured(both));
 
         using var none = BuildServices(new FakeCliRunner());
-        Assert.Null(OpenLdapResourceBuilderExtensions.GetConfiguredContainerRuntime(none));
+        Assert.Null(ContainerRuntime.GetConfigured(none));
     }
 
     // --- Reset removal core -------------------------------------------------------------
@@ -142,7 +142,7 @@ public class DashboardCommandTests
             ["ASPIRE_CONTAINER_RUNTIME"] = "podman",
         });
 
-        var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
+        var failure = await ContainerRuntime.RemoveContainerAndVolumeAsync(
             services, "cid-123", "my-volume", CancellationToken.None);
 
         Assert.Null(failure);
@@ -161,7 +161,7 @@ public class DashboardCommandTests
             ["ASPIRE_CONTAINER_RUNTIME"] = "docker", // explicit: keep probing out of this witness
         });
 
-        var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
+        var failure = await ContainerRuntime.RemoveContainerAndVolumeAsync(
             services, containerId: null, "my-volume", CancellationToken.None);
 
         Assert.Null(failure);
@@ -183,7 +183,7 @@ public class DashboardCommandTests
             ["ASPIRE_CONTAINER_RUNTIME"] = "docker", // explicit: keep probing out of this witness
         });
 
-        var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
+        var failure = await ContainerRuntime.RemoveContainerAndVolumeAsync(
             services, "cid", "my-volume", CancellationToken.None);
 
         Assert.Null(failure);
@@ -202,7 +202,7 @@ public class DashboardCommandTests
             ["ASPIRE_CONTAINER_RUNTIME"] = "podman",
         });
 
-        var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
+        var failure = await ContainerRuntime.RemoveContainerAndVolumeAsync(
             services, containerId: null, "my-volume", CancellationToken.None);
 
         Assert.NotNull(failure);
@@ -224,7 +224,7 @@ public class DashboardCommandTests
             ["ASPIRE_CONTAINER_RUNTIME"] = "podman", // explicitly configured and missing: fail loudly
         });
 
-        var failure = await OpenLdapResourceBuilderExtensions.RemoveContainerAndVolumeAsync(
+        var failure = await ContainerRuntime.RemoveContainerAndVolumeAsync(
             services, "cid", "my-volume", CancellationToken.None);
 
         Assert.NotNull(failure);

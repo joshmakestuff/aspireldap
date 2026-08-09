@@ -1,12 +1,12 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ApplicationModel.Seeding;
-using LdifDotNet;
-using LdifDotNet.Generator;
+using Aspire.Hosting.OpenLdap;
 
 namespace Aspire.Hosting;
 
 // Fake-data seeding: generate realistic directory entries with LdifDotNet.Generator and load
-// them through the record-seed pipeline. (Class-level XML docs live on the main partial.)
+// them through the record-seed pipeline (see OpenLdapSeedPipeline). (Class-level XML docs live
+// on the main partial.)
 public static partial class OpenLdapResourceBuilderExtensions
 {
     /// <summary>
@@ -48,9 +48,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(ou);
         LdapSeedValidator.RequireSafeName(ou, "organizational unit");
 
-        EnsureSeedRecordsPipeline(builder);
-        EnsureOrganizationalUnitDeclared(builder, ou);
-        (builder.Resource.FakeDataSpecs ??= []).Add(new FakeDataSpec(FakeDataKind.People, count, ou, seed));
+        OpenLdapSeedPipeline.AddFakeDataSpec(builder, new FakeDataSpec(FakeDataKind.People, count, ou, seed));
         return builder;
     }
 
@@ -92,9 +90,7 @@ public static partial class OpenLdapResourceBuilderExtensions
                 "members from. Call WithFakePeople(...) earlier in the chain, or use WithFakeDirectory(...).");
         }
 
-        EnsureSeedRecordsPipeline(builder);
-        EnsureOrganizationalUnitDeclared(builder, ou);
-        builder.Resource.FakeDataSpecs.Add(new FakeDataSpec(FakeDataKind.Groups, count, ou, seed));
+        OpenLdapSeedPipeline.AddFakeDataSpec(builder, new FakeDataSpec(FakeDataKind.Groups, count, ou, seed));
         return builder;
     }
 
@@ -117,52 +113,4 @@ public static partial class OpenLdapResourceBuilderExtensions
         int groups = 4,
         int? seed = null)
         => builder.WithFakePeople(people, seed: seed).WithFakeGroups(groups, seed: seed);
-
-    /// <summary>
-    /// Declares <paramref name="ou"/> in the typed seed model unless an entry with that name
-    /// (ordinal-ignore-case, matching <see cref="LdapSeedValidator"/>) already exists. Routing the
-    /// OU through the typed model also emits the base-DN root entry, so a fake-only chain gets a
-    /// complete parent tree.
-    /// </summary>
-    private static void EnsureOrganizationalUnitDeclared(IResourceBuilder<OpenLdapResource> builder, string ou)
-    {
-        var model = GetOrInitializeSeedModel(builder);
-        if (!model.OrganizationalUnits.Any(entry => string.Equals(entry.Name, ou, StringComparison.OrdinalIgnoreCase)))
-        {
-            model.OrganizationalUnits.Add(new OrganizationalUnitEntry(ou));
-        }
-    }
-
-    /// <summary>
-    /// Turns pending fake-data specs into LDIF records appended to
-    /// <see cref="OpenLdapResource.SeedRecords"/>, then consumes the specs. All People specs
-    /// materialize first (building the group member pool and putting people before the groups
-    /// that reference them in the emitted LDIF), then all Groups specs. Runs inside the
-    /// record-seed serialization hook; internal for direct fast-test invocation.
-    /// </summary>
-    internal static void MaterializeFakeDataSpecs(OpenLdapResource resource)
-    {
-        if (resource.FakeDataSpecs is not { Count: > 0 } specs)
-        {
-            return;
-        }
-
-        var pool = new List<LdifContentRecord>();
-        foreach (var spec in specs.Where(s => s.Kind == FakeDataKind.People))
-        {
-            var generator = new LdifGenerator(new LdifGeneratorOptions { Seed = spec.Seed });
-            var people = generator.People(spec.Count, Dn.Combine(Dn.Rdn("ou", spec.Ou), resource.BaseDn));
-            pool.AddRange(people);
-            resource.SeedRecords!.AddRange(people);
-        }
-        foreach (var spec in specs.Where(s => s.Kind == FakeDataKind.Groups))
-        {
-            var generator = new LdifGenerator(new LdifGeneratorOptions { Seed = spec.Seed });
-            resource.SeedRecords!.AddRange(
-                generator.Groups(spec.Count, Dn.Combine(Dn.Rdn("ou", spec.Ou), resource.BaseDn), pool));
-        }
-
-        // Consume: the hook re-fires on an in-run container restart and must not duplicate.
-        resource.FakeDataSpecs = null;
-    }
 }

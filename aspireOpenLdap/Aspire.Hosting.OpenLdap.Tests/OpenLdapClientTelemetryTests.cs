@@ -1,9 +1,8 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.DirectoryServices.Protocols;
-using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
+using AspireOpenLdap.TestAppHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -20,33 +19,24 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]
-public class OpenLdapClientTelemetryTests
+public class OpenLdapClientTelemetryTests(AppHostFixture appHost)
 {
     [Fact]
     public async Task Search_Through_Registered_OpenLdapClient_Emits_Spans_And_DurationMetrics()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
-        var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.AspireOpenLdap_TestAppHost>(cts.Token);
-        await using var app = await appHost.BuildAsync(cts.Token);
-
-        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-        await app.StartAsync(cts.Token);
-        await notifications.WaitForResourceHealthyAsync("openldap", cts.Token);
-
-        var connectionString = await app.GetConnectionStringAsync("openldap", cts.Token);
-        Assert.NotNull(connectionString);
+        var started = await appHost.StartAsync(TestAppHostScenarios.Default, cts.Token);
 
         // Consumer-facing registration: AddOpenLdapClient reads the connection string from
         // configuration, and OpenLdapClient comes out of DI.
         var hostBuilder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
-        hostBuilder.Configuration["ConnectionStrings:openldap"] = connectionString;
+        hostBuilder.Configuration["ConnectionStrings:openldap"] = started.ConnectionString;
         hostBuilder.AddOpenLdapClient("openldap");
         using var host = hostBuilder.Build();
 
         using var client = host.Services.GetRequiredService<OpenLdapClient>();
-        var baseDn = OpenLdapConnectionStringBuilder.Parse(connectionString!).BaseDn;
+        var baseDn = started.Settings.BaseDn;
 
         // Listen for spans from the Aspire.OpenLdap activity source.
         var spans = new List<Activity>();

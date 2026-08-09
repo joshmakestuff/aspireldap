@@ -1,18 +1,21 @@
 using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.ApplicationModel.Seeding;
 using Aspire.Hosting.OpenLdap;
 using LdifDotNet;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting;
 
 /// <summary>
 /// Extension methods for adding and configuring an OpenLDAP container resource in an Aspire AppHost.
 /// </summary>
+/// <remarks>
+/// The methods here are the public fluent surface; each validates its arguments and then hands
+/// off to an internal collaborator in <c>Aspire.Hosting.OpenLdap</c> — resource construction to
+/// <c>OpenLdapResourceFactory</c>, mounts to <c>OpenLdapMounts</c>, seeding to
+/// <c>OpenLdapSeedPipeline</c>, <c>cn=config</c> declarations to <c>OpenLdapOverlayConfiguration</c>,
+/// TLS to <c>OpenLdapTlsConfiguration</c>, dashboard commands to <c>OpenLdapDashboardCommands</c>,
+/// and the admin sidecar to <c>PhpLdapAdminBuilder</c>.
+/// </remarks>
 public static partial class OpenLdapResourceBuilderExtensions
 {
     /// <summary>
@@ -37,192 +40,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        // On Linux distros shipping OpenLDAP 2.6+ the runtime's hardcoded libldap-2.5 load
-        // fails; register the soname fallback resolver so the health check's LdapConnection
-        // works without a hand-made symlink.
-        Aspire.Hosting.OpenLdap.OpenLdapNativeLibraryResolver.EnsureRegistered();
-
-        // Dashboard commands shell out to the container CLI through this abstraction; TryAdd
-        // so tests (or advanced users) can substitute a runner before AddOpenLdap.
-        builder.Services.TryAddSingleton<IContainerCliRunner, ProcessContainerCliRunner>();
-
-        var passwordParameter = adminPassword?.Resource
-            ?? ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder, $"{name}-password");
-
-        var resource = new OpenLdapResource(
-            name,
-            baseDn: OpenLdapResource.DefaultBaseDn,
-            adminUsername: OpenLdapResource.DefaultAdminUsername,
-            adminPasswordParameter: passwordParameter);
-
-        var openLdap = builder
-            .AddResource(resource)
-            // Sets the publish-time image name. The local docker build tag is content-hash-addressed
-            // by Aspire's WithDockerfile and not affected by this call.
-            .WithImage(OpenLdapResource.DefaultImageName, OpenLdapResource.DefaultImageTag)
-            .WithDockerfile(OpenLdapResource.DefaultDockerContextPath, OpenLdapResource.DefaultDockerfilePath)
-            // Proxied endpoints: Aspire allocates a free host port per run, so multiple
-            // AppHosts (or multiple LDAP resources) never collide. Pin a fixed host port
-            // via WithLdapPort / WithLdapsPort when a stable address is needed.
-            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapTargetPort, name: OpenLdapResource.LdapEndpointName)
-            .WithEndpoint(targetPort: OpenLdapResource.DefaultLdapsTargetPort, name: OpenLdapResource.LdapsEndpointName)
-            // Late-binding env values so fluent overrides (e.g. WithBaseDn) take effect when the container starts.
-            .WithEnvironment(context =>
-            {
-                context.EnvironmentVariables["LDAP_ROOT"] = resource.BaseDn;
-                context.EnvironmentVariables["LDAP_ADMIN_USERNAME"] = resource.AdminUsername;
-                context.EnvironmentVariables["LDAP_ADMIN_PASSWORD"] = passwordParameter;
-            });
-
-        // Register LDAP root DSE health check
-        var healthCheckName = $"openldap-{name}";
-        builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
-            healthCheckName,
-            sp => new OpenLdapHealthCheck(resource),
-            failureStatus: HealthStatus.Unhealthy,
-            tags: null));
-
-        openLdap.WithHealthCheck(healthCheckName);
-        RegisterDashboardCommands(openLdap);
-
-        // Surface the base DN next to the endpoint URL on the dashboard so users don't have to
-        // click through env vars. Lambdas read resource.BaseDn lazily, so WithBaseDn(...) overrides
-        // are picked up.
-        openLdap
-            .WithUrlForEndpoint(OpenLdapResource.LdapEndpointName, url =>
-            {
-                url.DisplayText = $"ldap (base={resource.BaseDn})";
-            })
-            .WithUrlForEndpoint(OpenLdapResource.LdapsEndpointName, url =>
-            {
-                url.DisplayText = $"ldaps (base={resource.BaseDn})";
-            });
-
-        return openLdap;
-    }
-
-    private static void RegisterDashboardCommands(IResourceBuilder<OpenLdapResource> builder)
-    {
-        var resource = builder.Resource;
-
-        builder.WithCommand(
-            name: "copy-base-dn",
-            displayName: "Show base DN",
-            executeCommand: _ => Task.FromResult(new ExecuteCommandResult
-            {
-                Success = true,
-                Data = new CommandResultData
-                {
-                    Value = resource.BaseDn,
-                    Format = CommandResultFormat.Text,
-                    DisplayImmediately = true,
-                },
-            }),
-            commandOptions: new CommandOptions
-            {
-                Description = "Show the directory's base DN.",
-                IconName = "Copy",
-            });
-
-        builder.WithCommand(
-            name: "copy-bind-dn",
-            displayName: "Show admin bind DN",
-            executeCommand: _ => Task.FromResult(new ExecuteCommandResult
-            {
-                Success = true,
-                Data = new CommandResultData
-                {
-                    Value = resource.AdminBindDn,
-                    Format = CommandResultFormat.Text,
-                    DisplayImmediately = true,
-                },
-            }),
-            commandOptions: new CommandOptions
-            {
-                Description = "Show the admin bind DN.",
-                IconName = "Copy",
-            });
-
-        builder.WithCommand(
-            name: "export-ldif",
-            displayName: "Export LDIF",
-            executeCommand: async ctx =>
-            {
-                var containerId = TryGetContainerId(ctx);
-                if (containerId is null)
-                {
-                    return new ExecuteCommandResult
-                    {
-                        Success = false,
-                        Message = "Container is not running.",
-                    };
-                }
-
-                var runner = ctx.ServiceProvider.GetRequiredService<IContainerCliRunner>();
-                var (runtime, resolveFailure) = await ResolveContainerRuntimeAsync(
-                    ctx.ServiceProvider, ctx.CancellationToken).ConfigureAwait(false);
-                if (runtime is null)
-                {
-                    return resolveFailure!;
-                }
-                var (exitCode, stdout, stderr) = await runner.RunAsync(
-                    runtime,
-                    ["exec", containerId, "slapcat", "-b", resource.BaseDn],
-                    ctx.CancellationToken).ConfigureAwait(false);
-
-                if (exitCode == ProcessContainerCliRunner.StartFailureExitCode)
-                {
-                    return new ExecuteCommandResult { Success = false, Message = stderr.Trim() };
-                }
-                if (exitCode != 0)
-                {
-                    return new ExecuteCommandResult
-                    {
-                        Success = false,
-                        Message = $"slapcat via {runtime} failed (exit {exitCode}): {stderr.Trim()}",
-                    };
-                }
-
-                return new ExecuteCommandResult
-                {
-                    Success = true,
-                    Data = new CommandResultData
-                    {
-                        Value = $"```ldif\n{stdout}\n```",
-                        Format = CommandResultFormat.Markdown,
-                        DisplayImmediately = true,
-                    },
-                };
-            },
-            commandOptions: new CommandOptions
-            {
-                Description = "Dump the directory contents as LDIF (via slapcat).",
-                IconName = "ArrowDownload",
-            });
-
-        builder.WithCommand(
-            name: "copy-admin-password",
-            displayName: "Show admin password",
-            executeCommand: async ctx =>
-            {
-                var pw = await resource.AdminPasswordParameter.GetValueAsync(ctx.CancellationToken).ConfigureAwait(false);
-                return new ExecuteCommandResult
-                {
-                    Success = true,
-                    Data = new CommandResultData
-                    {
-                        Value = pw ?? string.Empty,
-                        Format = CommandResultFormat.Text,
-                        DisplayImmediately = true,
-                    },
-                };
-            },
-            commandOptions: new CommandOptions
-            {
-                Description = "Reveal the admin password (sensitive).",
-                IconName = "Key",
-                ConfirmationMessage = "Reveal the admin password? It will be shown in a dialog.",
-            });
+        return OpenLdapResourceFactory.Create(builder, name, adminPassword);
     }
 
     /// <summary>
@@ -272,7 +90,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         int port)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        SetEndpointPort(builder, OpenLdapResource.LdapEndpointName, port);
+        OpenLdapResourceFactory.SetEndpointPort(builder, OpenLdapResource.LdapEndpointName, port);
         return builder;
     }
 
@@ -284,22 +102,8 @@ public static partial class OpenLdapResourceBuilderExtensions
         int port)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        SetEndpointPort(builder, OpenLdapResource.LdapsEndpointName, port);
+        OpenLdapResourceFactory.SetEndpointPort(builder, OpenLdapResource.LdapsEndpointName, port);
         return builder;
-    }
-
-    private static void SetEndpointPort(IResourceBuilder<OpenLdapResource> builder, string endpointName, int port)
-    {
-        // Validate here so a bad value fails at the fluent call rather than later inside
-        // Aspire's endpoint allocation with a less attributable error.
-        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
-        var annotation = builder.Resource.Annotations
-            .OfType<EndpointAnnotation>()
-            .FirstOrDefault(e => string.Equals(e.Name, endpointName, StringComparison.OrdinalIgnoreCase))
-            ?? throw new DistributedApplicationException(
-                $"Endpoint '{endpointName}' not found on OpenLDAP resource '{builder.Resource.Name}'.");
-        annotation.Port = port;
     }
 
     /// <summary>
@@ -319,168 +123,7 @@ public static partial class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        var volumeName = name ?? VolumeNameGenerator.Generate(builder, "data");
-        builder.WithVolume(volumeName, OpenLdapResource.DataPath, isReadOnly);
-        RegisterResetDataVolumeCommand(builder, volumeName);
-        return builder;
-    }
-
-    private static void RegisterResetDataVolumeCommand(
-        IResourceBuilder<OpenLdapResource> builder,
-        string volumeName)
-    {
-        builder.WithCommand(
-            name: "reset-data-volume",
-            displayName: "Reset data volume",
-            executeCommand: async ctx =>
-            {
-                var commandService = ctx.ServiceProvider.GetRequiredService<ResourceCommandService>();
-
-                // Capture the container ID before Stop — once stopped, the snapshot's
-                // container.id property is gone.
-                var containerId = TryGetContainerId(ctx);
-
-                var stopResult = await commandService
-                    .ExecuteCommandAsync(ctx.ResourceName, KnownResourceCommands.StopCommand, ctx.CancellationToken)
-                    .ConfigureAwait(false);
-                if (!stopResult.Success)
-                {
-                    return stopResult;
-                }
-
-                var removalFailure = await RemoveContainerAndVolumeAsync(
-                    ctx.ServiceProvider, containerId, volumeName, ctx.CancellationToken).ConfigureAwait(false);
-                if (removalFailure is not null)
-                {
-                    return removalFailure;
-                }
-
-                return await commandService
-                    .ExecuteCommandAsync(ctx.ResourceName, KnownResourceCommands.StartCommand, ctx.CancellationToken)
-                    .ConfigureAwait(false);
-            },
-            commandOptions: new CommandOptions
-            {
-                Description = "Stop the container, delete the data volume, and start fresh.",
-                IconName = "Delete",
-                ConfirmationMessage = $"Delete the '{volumeName}' volume and restart? All directory data will be lost.",
-            });
-    }
-
-    private static string? TryGetContainerId(ExecuteCommandContext ctx)
-    {
-        var notify = ctx.ServiceProvider.GetRequiredService<ResourceNotificationService>();
-        if (!notify.TryGetCurrentState(ctx.ResourceName, out var evt) || evt is null)
-        {
-            return null;
-        }
-        var prop = evt.Snapshot.Properties.FirstOrDefault(p => string.Equals(p.Name, "container.id", StringComparison.Ordinal));
-        return prop?.Value as string;
-    }
-
-    /// <summary>
-    /// Force-removes the stopped container (Aspire's Stop only stops it; the volume stays
-    /// bound until the container is gone) and then removes the data volume. Returns a failure
-    /// <see cref="ExecuteCommandResult"/>, or <see langword="null"/> when both are gone —
-    /// "no such container"/"no such volume" count as gone (the user wanted them gone).
-    /// Internal so tests can drive it against a fake <see cref="IContainerCliRunner"/>.
-    /// </summary>
-    internal static async Task<ExecuteCommandResult?> RemoveContainerAndVolumeAsync(
-        IServiceProvider services,
-        string? containerId,
-        string volumeName,
-        CancellationToken cancellationToken)
-    {
-        var runner = services.GetRequiredService<IContainerCliRunner>();
-        var (runtime, resolveFailure) = await ResolveContainerRuntimeAsync(services, cancellationToken).ConfigureAwait(false);
-        if (runtime is null)
-        {
-            return resolveFailure;
-        }
-
-        if (containerId is not null)
-        {
-            var (containerRmExit, _, containerRmErr) = await runner.RunAsync(
-                runtime, ["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
-            if (containerRmExit == ProcessContainerCliRunner.StartFailureExitCode)
-            {
-                return new ExecuteCommandResult { Success = false, Message = containerRmErr.Trim() };
-            }
-            if (containerRmExit != 0 && !containerRmErr.Contains("no such container", StringComparison.OrdinalIgnoreCase))
-            {
-                return new ExecuteCommandResult
-                {
-                    Success = false,
-                    Message = $"{runtime} rm -f failed (exit {containerRmExit}): {containerRmErr.Trim()}",
-                };
-            }
-        }
-
-        var (rmExit, _, rmErr) = await runner.RunAsync(
-            runtime, ["volume", "rm", volumeName], cancellationToken).ConfigureAwait(false);
-        if (rmExit == ProcessContainerCliRunner.StartFailureExitCode)
-        {
-            return new ExecuteCommandResult { Success = false, Message = rmErr.Trim() };
-        }
-        if (rmExit != 0 && !rmErr.Contains("no such volume", StringComparison.OrdinalIgnoreCase))
-        {
-            return new ExecuteCommandResult
-            {
-                Success = false,
-                Message = $"{runtime} volume rm failed (exit {rmExit}): {rmErr.Trim()}",
-            };
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The explicitly configured container runtime, or <see langword="null"/> when none is
-    /// set. Reads the same configuration keys Aspire binds its (internal) DCP options from:
-    /// <c>DcpPublisher:ContainerRuntime</c>, then <c>ASPIRE_CONTAINER_RUNTIME</c> (the
-    /// documented selector, which environment/host config surfaces as this key).
-    /// </summary>
-    internal static string? GetConfiguredContainerRuntime(IServiceProvider services)
-    {
-        var configuration = services.GetService<IConfiguration>();
-        var fromConfiguration = configuration?["DcpPublisher:ContainerRuntime"]
-            ?? configuration?["ASPIRE_CONTAINER_RUNTIME"];
-        return string.IsNullOrWhiteSpace(fromConfiguration) ? null : fromConfiguration.Trim();
-    }
-
-    /// <summary>
-    /// Resolves the container runtime the dashboard commands shell out to (#58). An explicit
-    /// configuration is authoritative — used as-is so a misconfiguration fails loudly on use
-    /// rather than being silently papered over. With no configuration, mirror Aspire's own
-    /// behavior of probing known runtimes (DCP auto-detects when unconfigured, so LDAP can be
-    /// running under podman on a docker-less machine): try <c>docker --version</c>, then
-    /// <c>podman --version</c>. Returns the runtime, or a failure result naming what was tried.
-    /// </summary>
-    internal static async Task<(string? Runtime, ExecuteCommandResult? Failure)> ResolveContainerRuntimeAsync(
-        IServiceProvider services, CancellationToken cancellationToken)
-    {
-        var configured = GetConfiguredContainerRuntime(services);
-        if (configured is not null)
-        {
-            return (configured, null);
-        }
-
-        var runner = services.GetRequiredService<IContainerCliRunner>();
-        foreach (var candidate in (string[])["docker", "podman"])
-        {
-            var (exitCode, _, _) = await runner.RunAsync(candidate, ["--version"], cancellationToken).ConfigureAwait(false);
-            if (exitCode == 0)
-            {
-                return (candidate, null);
-            }
-        }
-
-        return (null, new ExecuteCommandResult
-        {
-            Success = false,
-            Message = "No container runtime found: tried 'docker --version' and 'podman --version'. " +
-                "Install one, or set ASPIRE_CONTAINER_RUNTIME to the runtime this AppHost uses.",
-        });
+        return OpenLdapMounts.AddDataVolume(builder, name, isReadOnly);
     }
 
     /// <summary>
@@ -520,13 +163,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldifFile);
 
-        var fullPath = ResolveAppHostRelativePath(builder, ldifFile);
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException($"Schema LDIF file not found: {fullPath}", fullPath);
-        }
-
-        return builder.WithBindMount(fullPath, "/schema/custom.ldif", isReadOnly: true);
+        return OpenLdapMounts.AddSchemaFile(builder, ldifFile);
     }
 
     /// <summary>
@@ -550,13 +187,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
 
-        var fullPath = ResolveAppHostRelativePath(builder, directory);
-        if (!Directory.Exists(fullPath))
-        {
-            throw new DirectoryNotFoundException($"Schema directory not found: {fullPath}");
-        }
-
-        return builder.WithBindMount(fullPath, "/schemas", isReadOnly: true);
+        return OpenLdapMounts.AddSchemaDirectory(builder, directory);
     }
 
     /// <summary>
@@ -634,29 +265,8 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(ldifFileOrDirectory);
 
-        var fullPath = ResolveAppHostRelativePath(builder, ldifFileOrDirectory);
-
-        if (continueOnError)
-        {
-            builder.WithEnvironment("LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR", "yes");
-        }
-
-        if (Directory.Exists(fullPath))
-        {
-            return builder.WithBindMount(fullPath, "/ldifs", isReadOnly: true);
-        }
-
-        if (File.Exists(fullPath))
-        {
-            var fileName = Path.GetFileName(fullPath);
-            return builder.WithBindMount(fullPath, $"/ldifs/{fileName}", isReadOnly: true);
-        }
-
-        throw new FileNotFoundException(
-            $"Seed data path not found: {fullPath}", fullPath);
+        return OpenLdapMounts.AddSeedData(builder, ldifFileOrDirectory, continueOnError);
     }
-
-    private const string GeneratedSeedContainerPath = "/ldifs/00-aspire-seed.ldif";
 
     /// <summary>
     /// Declares an organizational unit under the base DN. Other seed builder calls
@@ -674,8 +284,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        var model = GetOrInitializeSeedModel(builder);
-        model.OrganizationalUnits.Add(new OrganizationalUnitEntry(name));
+        OpenLdapSeedPipeline.AddOrganizationalUnit(builder, name);
         return builder;
     }
 
@@ -707,14 +316,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(uid);
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
 
-        var model = GetOrInitializeSeedModel(builder);
-        model.Users.Add(new SeedUserEntry(
-            Uid: uid,
-            Password: password,
-            OrganizationalUnit: string.IsNullOrWhiteSpace(ou) ? null : ou,
-            Cn: string.IsNullOrWhiteSpace(cn) ? uid : cn,
-            Sn: string.IsNullOrWhiteSpace(sn) ? uid : sn,
-            Mail: string.IsNullOrWhiteSpace(mail) ? null : mail));
+        OpenLdapSeedPipeline.AddUser(builder, uid, password, ou, cn, sn, mail);
         return builder;
     }
 
@@ -738,16 +340,9 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(cn);
         ArgumentNullException.ThrowIfNull(members);
 
-        var memberList = members.ToList();
-        var model = GetOrInitializeSeedModel(builder);
-        model.Groups.Add(new SeedGroupEntry(
-            Cn: cn,
-            Members: memberList,
-            OrganizationalUnit: string.IsNullOrWhiteSpace(ou) ? null : ou));
+        OpenLdapSeedPipeline.AddGroup(builder, cn, members, ou);
         return builder;
     }
-
-    private const string GeneratedSeedRecordsContainerPath = "/ldifs/01-aspire-seed-records.ldif";
 
     /// <summary>
     /// Seeds the directory from LDIF records built with the <c>LdifDotNet</c> object model
@@ -770,17 +365,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(records);
 
-        EnsureSeedRecordsPipeline(builder);
-
-        var resource = builder.Resource;
-        foreach (var record in records)
-        {
-            if (record is null)
-            {
-                throw new ArgumentException("Seed records must not contain null.", nameof(records));
-            }
-            resource.SeedRecords!.Add(record);
-        }
+        OpenLdapSeedPipeline.AddRecords(builder, records, nameof(records));
         return builder;
     }
 
@@ -803,42 +388,7 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(overlay);
         overlay.Validate();
 
-        var resource = builder.Resource;
-        if (resource.Overlays?.Any(o => string.Equals(o.Name, overlay.Name, StringComparison.OrdinalIgnoreCase)) == true)
-        {
-            throw new DistributedApplicationException(
-                $"Overlay '{overlay.Name}' is already declared on resource '{resource.Name}'. " +
-                "Each overlay can be added once; combine its settings into a single declaration.");
-        }
-        if (resource.Overlays is null)
-        {
-            resource.Overlays = [];
-
-            // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
-            var overlayDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-overlays");
-            Directory.CreateDirectory(overlayDir);
-            var overlayPath = Path.Combine(overlayDir, $"{resource.Name}-overlays.ldif");
-            resource.OverlayFilePath = overlayPath;
-
-            // Bind-mount needs an existing file at start time; real content is written by the handler below.
-            if (!File.Exists(overlayPath))
-            {
-                File.WriteAllText(overlayPath, string.Empty);
-            }
-
-            builder.WithBindMount(overlayPath, OpenLdapResource.GeneratedOverlayContainerPath, isReadOnly: true);
-
-            builder.OnBeforeResourceStarted((res, _, ct) =>
-            {
-                if (res.Overlays is not { Count: > 0 } overlays || res.OverlayFilePath is null)
-                {
-                    return Task.CompletedTask;
-                }
-                return File.WriteAllTextAsync(res.OverlayFilePath, GenerateOverlayLdif(overlays), ct);
-            });
-        }
-
-        resource.Overlays.Add(overlay);
+        OpenLdapOverlayConfiguration.AddOverlay(builder, overlay);
         return builder;
     }
 
@@ -882,163 +432,8 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(rules);
 
-        var resource = builder.Resource;
-        if (resource.AccessRules is null)
-        {
-            resource.AccessRules = [];
-
-            // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
-            var accessDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-access");
-            Directory.CreateDirectory(accessDir);
-            var accessPath = Path.Combine(accessDir, $"{resource.Name}-access.ldif");
-            resource.AccessFilePath = accessPath;
-
-            // Bind-mount needs an existing file at start time; real content is written by the handler below.
-            if (!File.Exists(accessPath))
-            {
-                File.WriteAllText(accessPath, string.Empty);
-            }
-
-            builder.WithBindMount(accessPath, OpenLdapResource.GeneratedAccessContainerPath, isReadOnly: true);
-
-            builder.OnBeforeResourceStarted((res, _, ct) =>
-            {
-                if (res.AccessRules is not { Count: > 0 } accessRules || res.AccessFilePath is null)
-                {
-                    return Task.CompletedTask;
-                }
-                return File.WriteAllTextAsync(res.AccessFilePath, GenerateAccessLdif(accessRules), ct);
-            });
-        }
-
-        foreach (var rule in rules)
-        {
-            // Name the real parameter: CallerArgumentExpression would report "rule", which is
-            // not an argument the caller can see.
-            ArgumentException.ThrowIfNullOrWhiteSpace(rule, nameof(rules));
-            resource.AccessRules.Add(rule.Trim());
-        }
+        OpenLdapOverlayConfiguration.AddAccessRules(builder, rules, nameof(rules));
         return builder;
-    }
-
-    // A single olcAccess modify on the mdb database, prepending the declared rules ({0}, {1}, …).
-    // Applied online via ldapmodify inside the container.
-    internal static string GenerateAccessLdif(IReadOnlyList<string> rules)
-    {
-        var record = new LdifModifyRecord(
-            OpenLdapResource.MdbDatabaseDn,
-            new LdifModification(
-                LdifModificationType.Add,
-                "olcAccess",
-                rules.Select((rule, i) => (LdifValue)$"{{{i}}}{rule}")));
-        return LdifWriter.WriteToString([record], LdapSeedLdifGenerator.WriterOptions);
-    }
-
-    // Applied online via ldapadd inside the container.
-    internal static string GenerateOverlayLdif(IReadOnlyList<OpenLdapOverlay> overlays)
-    {
-        var records = new List<LdifRecord>();
-
-        // A single extra module list ({0} is the bootstrap one) carrying every overlay's modules.
-        var modules = overlays
-            .SelectMany(o => o.ModuleLoads)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (modules.Count > 0)
-        {
-            records.Add(new LdifContentRecord(
-                "cn=module{1},cn=config",
-                new LdifAttribute("objectClass", "olcModuleList"),
-                new LdifAttribute("cn", "module{1}"),
-                new LdifAttribute("olcModulePath", "/usr/lib/ldap"),
-                new LdifAttribute("olcModuleLoad", modules.Select(m => (LdifValue)m))));
-        }
-
-        records.AddRange(overlays.Select(o => o.ToOverlayEntry(OpenLdapResource.MdbDatabaseDn)));
-
-        return LdifWriter.WriteToString(records, LdapSeedLdifGenerator.WriterOptions);
-    }
-
-    /// <summary>
-    /// Sets up the record-seed pipeline once per resource: the generated LDIF file under the
-    /// AppHost's obj directory, its read-only bind mount, and the single
-    /// <c>OnBeforeResourceStarted</c> hook that first materializes any pending fake-data specs
-    /// and then serializes the accumulated records. Materialization and serialization share one
-    /// hook on purpose — correctness must not depend on handler registration order.
-    /// </summary>
-    private static void EnsureSeedRecordsPipeline(IResourceBuilder<OpenLdapResource> builder)
-    {
-        var resource = builder.Resource;
-        if (resource.SeedRecords is not null)
-        {
-            return;
-        }
-        resource.SeedRecords = [];
-
-        // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
-        var seedDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-seed");
-        Directory.CreateDirectory(seedDir);
-        var recordsPath = Path.Combine(seedDir, $"{resource.Name}-seed-records.ldif");
-        resource.SeedRecordsFilePath = recordsPath;
-
-        // Bind-mount needs an existing file at start time; real content is written by the handler below.
-        if (!File.Exists(recordsPath))
-        {
-            File.WriteAllText(recordsPath, string.Empty);
-        }
-
-        builder.WithBindMount(recordsPath, GeneratedSeedRecordsContainerPath, isReadOnly: true);
-
-        builder.OnBeforeResourceStarted((res, _, ct) =>
-        {
-            MaterializeFakeDataSpecs(res);
-            if (res.SeedRecords is not { Count: > 0 } seedRecords || res.SeedRecordsFilePath is null)
-            {
-                return Task.CompletedTask;
-            }
-            var ldif = LdifWriter.WriteToString(seedRecords, LdapSeedLdifGenerator.WriterOptions);
-            return File.WriteAllTextAsync(res.SeedRecordsFilePath, ldif, ct);
-        });
-    }
-
-    private static LdapSeedModel GetOrInitializeSeedModel(IResourceBuilder<OpenLdapResource> builder)
-    {
-        var resource = builder.Resource;
-        if (resource.SeedModel is { } existing)
-        {
-            return existing;
-        }
-
-        var model = new LdapSeedModel();
-        resource.SeedModel = model;
-
-        // Stable path under the AppHost's obj directory so the bind mount target survives rebuilds.
-        var seedDir = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", "aspire-openldap-seed");
-        Directory.CreateDirectory(seedDir);
-        var seedPath = Path.Combine(seedDir, $"{resource.Name}-seed.ldif");
-        resource.SeedFilePath = seedPath;
-
-        // Bind-mount needs an existing file at start time; the real content is written
-        // by the OnBeforeResourceStarted handler below.
-        if (!File.Exists(seedPath))
-        {
-            File.WriteAllText(seedPath, string.Empty);
-        }
-
-        builder.WithBindMount(seedPath, GeneratedSeedContainerPath, isReadOnly: true);
-
-        builder.OnBeforeResourceStarted((res, _, ct) =>
-        {
-            if (res.SeedModel is not { } m || m.IsEmpty || res.SeedFilePath is null)
-            {
-                return Task.CompletedTask;
-            }
-            LdapSeedValidator.Validate(res, m);
-            var ldif = LdapSeedLdifGenerator.Generate(res, m);
-            return File.WriteAllTextAsync(res.SeedFilePath, ldif, ct);
-        });
-
-        return model;
     }
 
     /// <summary>
@@ -1113,11 +508,6 @@ public static partial class OpenLdapResourceBuilderExtensions
         return builder.WithEnvironment("LDAP_ALLOW_ANON_BINDING", allow ? "yes" : "no");
     }
 
-    private const string ContainerTlsDir = "/tls";
-    private const string ContainerServerCertPath = "/tls/server.crt";
-    private const string ContainerServerKeyPath = "/tls/server.key";
-    private const string ContainerCaCertPath = "/tls/ca.crt";
-
     /// <summary>
     /// Adds a phpLDAPadmin web UI container that targets this OpenLDAP resource.
     /// The admin container connects to the parent over the Aspire-managed container network.
@@ -1156,56 +546,7 @@ public static partial class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        var parent = builder.Resource;
-        var adminName = containerName ?? $"{parent.Name}-admin";
-        var adminResource = new PhpLdapAdminResource(adminName, parent);
-
-        var admin = builder.ApplicationBuilder
-            .AddResource(adminResource)
-            .WithImage(PhpLdapAdminResource.DefaultImageName, PhpLdapAdminResource.DefaultImageTag)
-            .WithHttpEndpoint(targetPort: PhpLdapAdminResource.ContainerHttpPort, name: PhpLdapAdminResource.HttpEndpointName)
-            .WithEnvironment("LDAP_LOGIN_OBJECTCLASS", loginObjectClass ?? "inetOrgPerson")
-            // The image is a Laravel app whose default log channel is a file inside the
-            // container ('daily'), so LDAP failures — unreachable server, bad admin bind —
-            // never reach the container log or the dashboard console. Route the app log to
-            // stderr, at 'info' so failures (ERROR) and login attempts (INFO) surface while
-            // the per-page-render DEBUG dumps (full root-DSE etc.) stay suppressed.
-            .WithEnvironment("LOG_CHANNEL", "stderr")
-            .WithEnvironment("LOG_LEVEL", "info")
-            // All parent-derived settings resolve when the admin container starts, so fluent
-            // calls chained on the parent AFTER WithPhpLdapAdmin (WithBaseDn, WithAdminUsername,
-            // WithTls().WithRequiredTls()) still take effect here.
-            .WithEnvironment(context =>
-            {
-                // Inside the container network the admin connects to the parent by resource name.
-                // If TLS is required we point at the LDAPS target port; otherwise plain LDAP.
-                context.EnvironmentVariables["LDAP_HOST"] = parent.Name;
-                context.EnvironmentVariables["LDAP_PORT"] = (parent.TlsRequired
-                    ? OpenLdapResource.DefaultLdapsTargetPort
-                    : OpenLdapResource.DefaultLdapTargetPort).ToString(CultureInfo.InvariantCulture);
-                context.EnvironmentVariables["LDAP_BASE_DN"] = parent.BaseDn;
-                context.EnvironmentVariables["LDAP_USERNAME"] = parent.AdminBindDn;
-                context.EnvironmentVariables["LDAP_PASSWORD"] = parent.AdminPasswordParameter;
-
-                if (parent.TlsRequired)
-                {
-                    // Use the image's preconfigured 'ldaps' connection (use_ssl=true). Self-signed
-                    // CA isn't trusted inside the admin container so disable libldap's cert
-                    // verification for local dev.
-                    context.EnvironmentVariables["LDAP_CONNECTION"] = "ldaps";
-                    context.EnvironmentVariables["LDAP_SSL"] = "true";
-                    context.EnvironmentVariables["LDAPTLS_REQCERT"] = "never";
-                }
-            })
-            // Deliberately a static asset, not the login page: the login page performs a real
-            // admin bind + root-DSE query on every render, so health-polling it flooded the
-            // LDAP container's log with un-filterable query noise (#31). LDAP connectivity is
-            // covered by the parent resource's own health check plus WaitFor below; this check
-            // only proves the admin container serves HTTP.
-            .WithHttpHealthCheck(path: "/robots.txt", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)
-            .WaitFor(builder);
-
-        configureContainer?.Invoke(admin);
+        PhpLdapAdminBuilder.Add(builder, configureContainer, containerName, loginObjectClass);
         return builder;
     }
 
@@ -1219,11 +560,7 @@ public static partial class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        var resource = builder.Resource;
-        var appHostDir = builder.ApplicationBuilder.AppHostDirectory;
-        var generated = OpenLdapCertificateGenerator.EnsureCertificates(appHostDir, resource.Name);
-
-        return ApplyTls(builder, generated.Directory, generated.CaCertPath);
+        return OpenLdapTlsConfiguration.EnableGeneratedTls(builder);
     }
 
     /// <summary>
@@ -1260,41 +597,9 @@ public static partial class OpenLdapResourceBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKeyFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(caCertFile);
 
-        builder.Resource.TlsHostnameValidationDisabled = disableHealthCheckHostnameValidation;
-
-        var certPath = RequireTlsFile(builder, serverCertFile, "server certificate");
-        var keyPath = RequireTlsFile(builder, serverKeyFile, "server private key");
-        var caPath = RequireTlsFile(builder, caCertFile, "CA certificate");
-
-        builder
-            .WithBindMount(certPath, ContainerServerCertPath, isReadOnly: true)
-            .WithBindMount(keyPath, ContainerServerKeyPath, isReadOnly: true)
-            .WithBindMount(caPath, ContainerCaCertPath, isReadOnly: true);
-
-        return ApplyTlsEnvironment(builder, caPath);
+        return OpenLdapTlsConfiguration.EnableProvidedTls(
+            builder, serverCertFile, serverKeyFile, caCertFile, disableHealthCheckHostnameValidation);
     }
-
-    private static string RequireTlsFile(
-        IResourceBuilder<OpenLdapResource> builder, string path, string description)
-    {
-        var fullPath = ResolveAppHostRelativePath(builder, path);
-        if (!File.Exists(fullPath))
-        {
-            throw new DistributedApplicationException(
-                $"TLS {description} file not found: {fullPath}");
-        }
-        return fullPath;
-    }
-
-    /// <summary>
-    /// Resolves a user-supplied path the way Aspire's own <c>WithBindMount</c> does: relative
-    /// paths are based at the AppHost project directory, not the process working directory, so
-    /// an AppHost finds the same files whether launched from an IDE, the project directory, or
-    /// the repository root. Rooted paths are only normalized.
-    /// </summary>
-    private static string ResolveAppHostRelativePath(
-        IResourceBuilder<OpenLdapResource> builder, string path) =>
-        Path.GetFullPath(path, builder.ApplicationBuilder.AppHostDirectory);
 
     /// <summary>
     /// Requires TLS for all LDAP connections. Switches the connection string scheme to <c>ldaps://</c>.
@@ -1317,40 +622,6 @@ public static partial class OpenLdapResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        if (!builder.Resource.TlsEnabled)
-        {
-            throw new DistributedApplicationException(
-                "WithRequiredTls() must be called after WithTls(...).");
-        }
-
-        builder.Resource.TlsRequired = true;
-        if (OperatingSystem.IsMacOS())
-        {
-            return builder;
-        }
-        return builder.WithEnvironment("LDAP_REQUIRE_TLS", "yes");
-    }
-
-    private static IResourceBuilder<OpenLdapResource> ApplyTls(
-        IResourceBuilder<OpenLdapResource> builder,
-        string hostCertDir,
-        string caCertHostPath)
-    {
-        builder.WithBindMount(hostCertDir, ContainerTlsDir, isReadOnly: true);
-        return ApplyTlsEnvironment(builder, caCertHostPath);
-    }
-
-    private static IResourceBuilder<OpenLdapResource> ApplyTlsEnvironment(
-        IResourceBuilder<OpenLdapResource> builder,
-        string caCertHostPath)
-    {
-        builder.Resource.TlsEnabled = true;
-        builder.Resource.CaCertHostPath = caCertHostPath;
-
-        return builder
-            .WithEnvironment("LDAP_ENABLE_TLS", "yes")
-            .WithEnvironment("LDAP_TLS_CERT_FILE", ContainerServerCertPath)
-            .WithEnvironment("LDAP_TLS_KEY_FILE", ContainerServerKeyPath)
-            .WithEnvironment("LDAP_TLS_CA_FILE", ContainerCaCertPath);
+        return OpenLdapTlsConfiguration.RequireTls(builder);
     }
 }

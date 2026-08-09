@@ -19,6 +19,7 @@
   <ItemGroup>
     <PackageVersion Include="LdifDotNet" Version="0.8.0" />
     <PackageVersion Include="LdifDotNet.Generator" Version="0.8.0" />
+    <PackageVersion Include="LdifDotNet.Schema" Version="0.8.0" />
   </ItemGroup>
 
   <!-- Microsoft.Extensions / runtime — keep on the current net10 servicing release -->
@@ -28,6 +29,7 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
     <PackageVersion Include="System.DirectoryServices.Protocols" Version="10.0.10" />
   </ItemGroup>
 

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LdapAdmin service layer. Not a package product: the admin ships inside the hosting
+    integration via WithLdapAdmin(), so this project is never packed on its own.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LdifDotNet" />
+    <PackageReference Include="LdifDotNet.Schema" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="System.DirectoryServices.Protocols" />
+  </ItemGroup>
+
+  <!-- In-repo dependencies are consumed as project references, never as released packages. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Aspire.OpenLdap\Aspire.OpenLdap.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aspire.LdapAdmin.Tests" />
+  </ItemGroup>
+
+</Project>

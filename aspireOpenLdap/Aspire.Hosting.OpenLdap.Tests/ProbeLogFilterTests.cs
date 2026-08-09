@@ -19,7 +19,7 @@ public class ProbeLogFilterTests : IDisposable
     private const string AdminDn = "cn=admin,dc=example,dc=org";
     private const string AdminPassword = "probe-filter-test-pw";
 
-    private readonly List<string> _containers = [];
+    private readonly DockerScope _docker = DockerCli.NewScope("probefiltertest");
 
     [Fact]
     public async Task Filter_Drops_Only_Wholly_Successful_Probe_Blocks()
@@ -255,24 +255,13 @@ public class ProbeLogFilterTests : IDisposable
         string[] baseArgs =
         [
             "exec", container, "ldapsearch",
-            "-x", "-H", "ldap://localhost:1389",
+            "-x", "-H", DockerCli.InContainerLdapUri,
             "-D", AdminDn, "-w", AdminPassword,
         ];
         return DockerCli.RunAsync(ct, [.. baseArgs, .. searchArgs]);
     }
 
-    private string NewContainer()
-    {
-        var name = $"aspire-openldap-probefiltertest-{Guid.NewGuid():N}";
-        _containers.Add(name);
-        return name;
-    }
+    private string NewContainer() => _docker.NewContainer();
 
-    public void Dispose()
-    {
-        foreach (var container in _containers)
-        {
-            DockerCli.BestEffort("rm", "-f", container);
-        }
-    }
+    public void Dispose() => _docker.Dispose();
 }

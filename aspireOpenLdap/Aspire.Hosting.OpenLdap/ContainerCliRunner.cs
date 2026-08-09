@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Aspire.Hosting.OpenLdap;
 
@@ -34,6 +35,9 @@ internal sealed class ProcessContainerCliRunner : IContainerCliRunner
     /// <summary>Test hook: observes the child PID so kill-on-cancel is provable.</summary>
     internal Action<int>? OnProcessStarted { get; set; }
 
+    [SuppressMessage("Design", "MA0051:Method is too long",
+        Justification = "One child-process lifetime: start, stream capture, wait, and kill-on-cancel " +
+        "all operate on the same Process instance inside its using scope (#63).")]
     public async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,

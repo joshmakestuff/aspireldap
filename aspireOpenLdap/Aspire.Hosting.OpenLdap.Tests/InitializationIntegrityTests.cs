@@ -20,8 +20,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 [Trait("Category", "Integration")]
 public class InitializationIntegrityTests : IDisposable
 {
-    private readonly List<string> _containers = [];
-    private readonly List<string> _volumes = [];
+    private readonly DockerScope _docker = DockerCli.NewScope("inittest");
 
     [Fact]
     public async Task Failed_Seed_Fails_Loudly_And_Restart_Over_Partial_Data_Is_Refused()
@@ -50,8 +49,8 @@ public class InitializationIntegrityTests : IDisposable
                 cts.Token);
             DockerCli.WidenPermissionsForContainer(seedDir);
 
-            var name = NewName("container");
-            var volume = NewName("volume");
+            var name = _docker.NewContainer();
+            var volume = _docker.NewVolume();
             const string password = "test-admin-password";
 
             var first = await DockerCli.RunAsync(cts.Token,
@@ -92,7 +91,7 @@ public class InitializationIntegrityTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
-        var name = NewName("container");
+        var name = _docker.NewContainer();
         _ = await DockerCli.RunAsync(cts.Token,
             "run", "-d", "--name", name,
             "-e", $"LDAP_ADMIN_PASSWORD={password}",
@@ -128,7 +127,7 @@ public class InitializationIntegrityTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
-        var name = NewName("container");
+        var name = _docker.NewContainer();
         const string password = "test-admin-password";
         _ = await DockerCli.RunAsync(cts.Token,
             "run", "-d", "--name", name,
@@ -179,7 +178,7 @@ public class InitializationIntegrityTests : IDisposable
             await File.WriteAllTextAsync(Path.Combine(seedDir, "00-seed.ldif"), ldif, cts.Token);
             DockerCli.WidenPermissionsForContainer(seedDir);
 
-            var name = NewName("container");
+            var name = _docker.NewContainer();
             _ = await DockerCli.RunAsync(cts.Token,
                 "run", "-d", "--name", name,
                 "-v", $"{seedDir}:/ldifs:ro",
@@ -231,7 +230,7 @@ public class InitializationIntegrityTests : IDisposable
 
         // Unsupported root naming attribute: fail at validation, never reach tree creation.
         var badRoot = await DockerCli.RunAsync(cts.Token,
-            "run", "--name", NewName("container"),
+            "run", "--name", _docker.NewContainer(),
             "-e", "LDAP_ROOT=ou=nope,dc=example,dc=org",
             "-e", "LDAP_ADMIN_PASSWORD=t",
             image);
@@ -242,7 +241,7 @@ public class InitializationIntegrityTests : IDisposable
         // DN-special characters in the admin username can never bind consistently (the
         // container composes cn={username},{root} verbatim): fail at validation.
         var badUser = await DockerCli.RunAsync(cts.Token,
-            "run", "--name", NewName("container"),
+            "run", "--name", _docker.NewContainer(),
             "-e", "LDAP_ADMIN_USERNAME=Doe, John",
             "-e", "LDAP_ADMIN_PASSWORD=t",
             image);
@@ -251,22 +250,5 @@ public class InitializationIntegrityTests : IDisposable
         Assert.DoesNotContain("Starting slapd", badUser.Output);
     }
 
-    private string NewName(string kind)
-    {
-        var name = $"aspire-openldap-inittest-{kind}-{Guid.NewGuid():N}";
-        (kind == "volume" ? _volumes : _containers).Add(name);
-        return name;
-    }
-
-    public void Dispose()
-    {
-        foreach (var container in _containers)
-        {
-            DockerCli.BestEffort("rm", "-f", container);
-        }
-        foreach (var volume in _volumes)
-        {
-            DockerCli.BestEffort("volume", "rm", "-f", volume);
-        }
-    }
+    public void Dispose() => _docker.Dispose();
 }

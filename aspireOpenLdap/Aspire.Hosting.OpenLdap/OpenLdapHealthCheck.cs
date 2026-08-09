@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.DirectoryServices.Protocols;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
@@ -22,6 +23,9 @@ internal sealed class OpenLdapHealthCheck(OpenLdapResource resource) : IHealthCh
     // LDAP result code for invalid credentials (RFC 4511).
     private const int InvalidCredentialsResultCode = 49;
 
+    [SuppressMessage("Design", "MA0051:Method is too long",
+        Justification = "One probe: connect, optionally negotiate TLS, bind, search the root DSE. " +
+        "The platform-specific TLS branches share the connection and its disposal (#63).")]
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
