@@ -28,12 +28,13 @@
         }
         else
         {
+            @* No ItemTemplate, deliberately: the FAST tree-view's click handler only selects
+               when the click's event.target IS the fluent-tree-item, so any template element
+               (a span for a tooltip, say) swallows selection clicks — measured on 4.14.4.
+               The default rendering keeps the item text as a text node, which clicks
+               attribute to the tree item itself. *@
             <FluentTreeView Items="@_roots" LazyLoadItems="true" @bind-SelectedItem="_selectedItem"
-                            @bind-SelectedItem:after="OnSelectionChangedAsync">
-                <ItemTemplate>
-                    <span title="@context.Id">@context.Text</span>
-                </ItemTemplate>
-            </FluentTreeView>
+                            @bind-SelectedItem:after="OnSelectionChangedAsync" />
         }
     </FluentStack>
 

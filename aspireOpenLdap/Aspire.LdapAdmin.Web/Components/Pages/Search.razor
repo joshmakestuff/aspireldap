@@ -67,9 +67,12 @@
 
         @if (_result.Entries.Count > 0)
         {
+            @* MultiLine: rows must size to their content — the copy button and a wrapped DN
+               are taller than the grid's fixed row track, which clips them otherwise
+               (measured 44px content in a 31px cell; docs/findings.md). *@
             <FluentDataGrid Items="@_result.Entries.AsQueryable()" TGridItem="LdapEntry"
                             GridTemplateColumns="2fr 1.2fr 1.2fr 3rem" ResizableColumns="true"
-                            ShowHover="true" OnRowClick="@OnRowClick">
+                            MultiLine="true" ShowHover="true" OnRowClick="@OnRowClick">
                 <TemplateColumn Title="DN" Sortable="false">
                     <span title="@context.Dn"><code>@DnDisplay.Relative(context.Dn, _commonSuffix)</code></span>
                 </TemplateColumn>
