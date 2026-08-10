@@ -39,5 +39,11 @@ public sealed class RenameDialogModel
 public sealed class DeleteDialogModel
 {
     public required string Dn { get; init; }
+
+    /// <summary>Delete the whole subtree, children first (client-side recursion — the
+    /// bundled server has no Tree Delete control). Off by default: a plain delete of a
+    /// non-leaf is refused by the server, never silently widened.</summary>
+    public bool Subtree { get; set; }
+
     public required Func<DeleteDialogModel, Task<string?>> SaveAsync { get; init; }
 }

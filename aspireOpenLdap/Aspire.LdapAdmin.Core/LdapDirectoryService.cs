@@ -245,12 +245,113 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         return await SendWriteAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Deletes an entry, which must have no children.</summary>
-    public async Task<LdapOperationResult> DeleteEntryAsync(string dn, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Deletes an entry. A plain delete requires a leaf — the server refuses non-leaves.
+    /// With <paramref name="subtree"/>, deletes the entry's whole subtree depth-first,
+    /// children before parents: the bundled OpenLDAP does not advertise the Tree Delete
+    /// control (1.2.840.113556.1.4.805; root DSE measured 2026-08-10, workspace
+    /// findings.md), so the recursion is client-side, as <c>ldapdelete -r</c> does. The
+    /// walk stops at the first refusal and the result names the DN that failed — a partial
+    /// delete is never silent.
+    /// </summary>
+    public Task<LdapOperationResult> DeleteEntryAsync(string dn, CancellationToken cancellationToken = default) =>
+        DeleteEntryAsync(dn, subtree: false, cancellationToken);
+
+    /// <inheritdoc cref="DeleteEntryAsync(string, CancellationToken)"/>
+    public async Task<LdapOperationResult> DeleteEntryAsync(
+        string dn,
+        bool subtree,
+        CancellationToken cancellationToken = default)
     {
-        return TryInvalidDn(dn, out var dnError)
-            ? dnError
-            : await SendWriteAsync(new DeleteRequest(dn), cancellationToken).ConfigureAwait(false);
+        if (TryInvalidDn(dn, out var dnError))
+        {
+            return dnError;
+        }
+        if (!subtree)
+        {
+            return await SendWriteAsync(new DeleteRequest(dn), cancellationToken).ConfigureAwait(false);
+        }
+
+        // One client for the whole walk: paging cookies are connection-scoped, and a
+        // subtree delete is one logical operation.
+        using var client = factory.CreateClient();
+        return await DeleteSubtreeAsync(client, dn, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<LdapOperationResult> DeleteSubtreeAsync(
+        OpenLdapClient client,
+        string dn,
+        CancellationToken cancellationToken)
+    {
+        // Children first. Re-list after each sweep — the final DeleteRequest below is the
+        // authoritative "now empty" check either way.
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            List<string> children = [];
+            byte[] cookie = [];
+            do
+            {
+                // "1.1" = no attributes; only the DNs matter here.
+                var request = new SearchRequest(dn, "(objectClass=*)", SearchScope.OneLevel, "1.1");
+                request.Controls.Add(new PageResultRequestControl(MaxPageSize) { Cookie = cookie });
+                SearchResponse response;
+                try
+                {
+                    response = (SearchResponse)await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch (DirectoryOperationException ex) when (ex.Response is not null)
+                {
+                    var code = ex.Response.ResultCode;
+                    return new LdapOperationResult(Classify(code), code,
+                        $"listing children of '{dn}': {ex.Response.ErrorMessage ?? ex.Message}");
+                }
+                foreach (SearchResultEntry entry in response.Entries)
+                {
+                    children.Add(entry.DistinguishedName);
+                }
+                cookie = response.Controls.OfType<PageResultResponseControl>().FirstOrDefault()?.Cookie ?? [];
+            }
+            while (cookie.Length > 0);
+
+            if (children.Count == 0)
+            {
+                break;
+            }
+            foreach (var child in children)
+            {
+                var result = await DeleteSubtreeAsync(client, child, cancellationToken).ConfigureAwait(false);
+                if (!result.Succeeded)
+                {
+                    return result;
+                }
+            }
+        }
+
+        return await DeleteOneAsync(client, dn, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>One delete on the walk's shared client; the result names the DN on failure.</summary>
+    private static async Task<LdapOperationResult> DeleteOneAsync(
+        OpenLdapClient client,
+        string dn,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await client.SendAsync(new DeleteRequest(dn), cancellationToken).ConfigureAwait(false);
+            return response.ResultCode == ResultCode.Success
+                ? LdapOperationResult.Ok()
+                : new LdapOperationResult(Classify(response.ResultCode), response.ResultCode,
+                    $"deleting '{dn}': {response.ErrorMessage}");
+        }
+        catch (DirectoryOperationException ex) when (ex.Response is not null)
+        {
+            var code = ex.Response.ResultCode;
+            return new LdapOperationResult(Classify(code), code,
+                $"deleting '{dn}': {ex.Response.ErrorMessage ?? ex.Message}");
+        }
     }
 
     /// <summary>

@@ -844,14 +844,16 @@
 
     private async Task<string?> ConfirmDeleteAsync(DeleteDialogModel dialog)
     {
-        var result = await GuardedAsync(() => Directory.DeleteEntryAsync(dialog.Dn));
+        var result = await GuardedAsync(() => Directory.DeleteEntryAsync(dialog.Dn, dialog.Subtree));
 
         if (!result.Succeeded)
         {
             return Describe(result);
         }
 
-        ShowToast($"ldapdelete — {dialog.Dn} deleted");
+        ShowToast(dialog.Subtree
+            ? $"ldapdelete -r — {dialog.Dn} and its subtree deleted"
+            : $"ldapdelete — {dialog.Dn} deleted");
         var parent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
         await ReloadChildrenAsync(parent);
         await SelectAsync(parent, reveal: true);
