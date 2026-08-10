@@ -134,6 +134,16 @@
    overflows, thin and token-tinted, which also suits the wireframe language. */
 .rail,.pane,.ta,.dbody,.pre{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
 
+/* ── Owned picker (schema-aware dialogs, #103/#105) ────────────────────────
+   A filterable dropdown on native elements: .input above an absolutely positioned
+   option list. Guidance, not enforcement — free text stays valid. */
+.combo{position:relative}
+.combo-list{position:absolute;left:0;right:0;top:100%;z-index:5;max-height:220px;overflow:auto;background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:var(--shadow-md);scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
+.combo-opt{display:flex;gap:var(--space-2);align-items:center;width:100%;text-align:left;padding:4px 8px;font:inherit;font-size:12px;background:transparent;border:0;cursor:pointer;color:inherit}
+.combo-opt:hover,.combo-opt[aria-selected=true]{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.hint{font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+.picklist{max-height:240px;overflow:auto;border:1px solid var(--color-divider);scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
+
 /* ── Notices, dialogs, toast ───────────────────────────────────────────── */
 .bar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--color-accent);background:var(--color-accent-100);margin-bottom:var(--space-4);font-size:13px}
 /* Errors stay inside the mono palette: full-strength text treatment instead of a second

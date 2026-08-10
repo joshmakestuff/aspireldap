@@ -25,6 +25,7 @@
 @using LdifDotNet
 @implements IAsyncDisposable
 @inject LdapDirectoryService Directory
+@inject LdapSchemaService SchemaService
 @inject LdapAdminSettings Settings
 @inject ConsoleConnectionInfo Connection
 @inject NavigationManager Navigation
@@ -150,13 +151,13 @@
     </div>
 </div>
 
-@if (_attributeDialog is { } attributeDialog)
+@if (_attributeDialog is { } attributeDialog && _entry is { } dialogEntry)
 {
-    <AttributeDialog Model="attributeDialog" OnClose="CloseDialogs" />
+    <AttributeDialog Model="attributeDialog" Entry="dialogEntry" Schema="_dialogSchema" OnClose="CloseDialogs" />
 }
-@if (_childDialog is { } childDialog)
+@if (_newEntry is { } newEntry)
 {
-    <NewChildDialog Model="childDialog" OnClose="CloseDialogs" />
+    <NewEntryWizard Model="newEntry" Schema="_dialogSchema" OnClose="CloseDialogs" />
 }
 @if (_renameDialog is { } renameDialog)
 {
@@ -196,9 +197,12 @@
     private IJSObjectReference? _js;
 
     private AttributeDialogModel? _attributeDialog;
-    private ChildDialogModel? _childDialog;
+    private NewEntryModel? _newEntry;
     private RenameDialogModel? _renameDialog;
     private DeleteDialogModel? _deleteDialog;
+
+    /// <summary>The subschema for the schema-aware dialogs; null degrades them to free text.</summary>
+    private LdifDotNet.Schema.LdapSchema? _dialogSchema;
 
     private string? _toast;
     private CancellationTokenSource? _toastCts;
@@ -281,6 +285,11 @@
         {
             _error = Describe(ex);
         }
+
+        // For the schema-aware dialogs (#103/#105). Process-lifetime cached in the service;
+        // an unreadable subschema comes back as data (Available = false), never a throw.
+        var schema = await SchemaService.GetSchemaAsync();
+        _dialogSchema = schema.Available ? schema.Schema : null;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -713,7 +722,7 @@
     private void CloseDialogs()
     {
         _attributeDialog = null;
-        _childDialog = null;
+        _newEntry = null;
         _renameDialog = null;
         _deleteDialog = null;
     }
@@ -735,7 +744,7 @@
     {
         if (_selectedDn is { } dn)
         {
-            _childDialog = new ChildDialogModel { ParentDn = dn, SaveAsync = SaveChildAsync };
+            _newEntry = new NewEntryModel { ParentDn = dn, SaveAsync = SaveNewEntryAsync };
         }
     }
 
@@ -786,54 +795,22 @@
         return null;
     }
 
-    private async Task<string?> SaveChildAsync(ChildDialogModel dialog)
+    /// <summary>
+    /// The wizard composes the entry (chained classes, escaped RDN — a pasted full DN is
+    /// structurally impossible there); this applies it and lands on the new entry.
+    /// </summary>
+    private async Task<string?> SaveNewEntryAsync(LdapNewEntry entry)
     {
-        var objectClasses = dialog.ObjectClasses
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (dialog.Rdn.Length == 0 || objectClasses.Length == 0)
-        {
-            return "An RDN and at least one object class are required.";
-        }
-
-        string childDn;
-        try
-        {
-            // Exactly one RDN: a full DN pasted here would compose a child under a parent
-            // that does not exist, and the server's NoSuchObject reads as a mystery
-            // ("parent doesn't exist" against a parent visibly in the tree).
-            if (Dn.Parse(dialog.Rdn).Count != 1)
-            {
-                return $"'{dialog.Rdn}' is not a single RDN (one attribute=value). " +
-                    $"The parent is already {dialog.ParentDn} — do not include it.";
-            }
-            childDn = Dn.Combine(dialog.Rdn, dialog.ParentDn);
-        }
-        catch (ArgumentException ex)
-        {
-            return ex.Message;
-        }
-
-        List<LdapNewAttribute> attributes = [new("objectClass", objectClasses)];
-        foreach (var line in Lines(dialog.AttributesText))
-        {
-            var colon = line.IndexOf(':', StringComparison.Ordinal);
-            if (colon <= 0)
-            {
-                return $"'{line}' is not in 'name: value' form.";
-            }
-            attributes.Add(new LdapNewAttribute(line[..colon].Trim(), [line[(colon + 1)..].Trim()]));
-        }
-
-        var result = await GuardedAsync(() => Directory.AddEntryAsync(new LdapNewEntry(childDn, attributes)));
+        var result = await GuardedAsync(() => Directory.AddEntryAsync(entry));
 
         if (!result.Succeeded)
         {
             return Describe(result);
         }
 
-        ShowToast($"ldapadd — {childDn} created");
-        await ReloadChildrenAsync(dialog.ParentDn);
-        await SelectAsync(childDn, reveal: true);
+        ShowToast($"ldapadd — {entry.Dn} created");
+        await ReloadChildrenAsync(ParentOf(entry.Dn) ?? Directory.BaseDn);
+        await SelectAsync(entry.Dn, reveal: true);
         return null;
     }
 

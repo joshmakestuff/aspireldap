@@ -1,7 +1,13 @@
 @*
-    Add/edit attribute dialog on the owned ConsoleDialog frame. The model carries the save
-    delegate the shell provides: a returned error renders inline and the dialog closes only
-    on null (success), so a failed write never dismisses the user's input.
+    Add/edit attribute dialog on the owned ConsoleDialog frame, schema-aware (#103): the
+    add path offers a filtered picker over the MUST/MAY set of the entry's object classes,
+    and the value input adapts to the chosen type (SINGLE-VALUE gets one field). The schema
+    is guidance, not enforcement — free-typed names still go to the server, which stays
+    authoritative; a null Schema (unavailable subschema) degrades to the free-text form.
+
+    The model carries the save delegate the shell provides: a returned error renders inline
+    and the dialog closes only on null (success), so a failed write never dismisses the
+    user's input.
 *@
 
 <ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="Close">
@@ -10,12 +16,43 @@
     {
         <div class="field">
             <label>Attribute name</label>
-            <input class="input mono" @bind="Model.Name" spellcheck="false" />
+            @if (Schema is not null)
+            {
+                <AttributePicker Candidates="_candidates" @bind-Value="Model.Name"
+                                 Placeholder="attributeType" />
+            }
+            else
+            {
+                <input class="input mono" @bind="Model.Name" spellcheck="false" />
+            }
         </div>
     }
+    @if (Guidance is { } guidance)
+    {
+        <div class="hint mono">
+            @guidance.SyntaxLabel · @(guidance.SingleValued ? "single-valued" : "multi-valued")@(guidance.Required ? " · required by the object classes" : "")
+        </div>
+        @if (guidance.NoUserModification)
+        {
+            <div class="bar err" role="alert" style="margin-bottom: 0;">
+                @guidance.Name is NO-USER-MODIFICATION — the server maintains it and will refuse this write.
+            </div>
+        }
+    }
+    else if (Schema is not null && Model.Name.Length > 0)
+    {
+        <div class="hint">Not in the schema for this entry's object classes — the server decides.</div>
+    }
     <div class="field">
-        <label>@(Model.IsBinary ? "Values (base64, one per line)" : "Values (one per line)")</label>
-        <textarea class="ta" style="min-height: 120px;" @bind="Model.ValuesText" spellcheck="false"></textarea>
+        <label>@ValueLabel</label>
+        @if (Guidance is { SingleValued: true })
+        {
+            <input class="input mono" @bind="Model.ValuesText" spellcheck="false" />
+        }
+        else
+        {
+            <textarea class="ta" style="min-height: 120px;" @bind="Model.ValuesText" spellcheck="false"></textarea>
+        }
     </div>
     @if (!Model.IsNew)
     {
@@ -38,12 +75,43 @@
     [Parameter, EditorRequired]
     public required AttributeDialogModel Model { get; set; }
 
+    /// <summary>The entry being edited — its object classes and present attributes feed the picker.</summary>
+    [Parameter, EditorRequired]
+    public required LdapEntry Entry { get; set; }
+
+    /// <summary>The loaded subschema, or null when unavailable (free-text fallback).</summary>
+    [Parameter]
+    public LdifDotNet.Schema.LdapSchema? Schema { get; set; }
+
     /// <summary>Raised when the dialog is done (saved or cancelled); the shell removes it.</summary>
     [Parameter]
     public EventCallback OnClose { get; set; }
 
     private string? _error;
     private bool _busy;
+    private IReadOnlyList<AttributeGuidance> _candidates = [];
+
+    private IEnumerable<string> EntryObjectClasses =>
+        Entry.Attributes.FirstOrDefault(static a =>
+            a.Name.Equals("objectClass", StringComparison.OrdinalIgnoreCase))?.Values ?? [];
+
+    private AttributeGuidance? Guidance =>
+        Schema is null || Model.Name.Length == 0
+            ? null
+            : SchemaGuide.Describe(Schema, Model.Name,
+                _candidates.FirstOrDefault(c => c.Name.Equals(Model.Name, StringComparison.OrdinalIgnoreCase))?.Required ?? false);
+
+    private string ValueLabel =>
+        Guidance is { SingleValued: true }
+            ? (Model.IsBinary ? "Value (base64)" : "Value")
+            : (Model.IsBinary ? "Values (base64, one per line)" : "Values (one per line)");
+
+    protected override void OnParametersSet()
+    {
+        _candidates = Schema is null
+            ? []
+            : SchemaGuide.AddCandidates(Schema, EntryObjectClasses, Entry.Attributes.Select(static a => a.Name));
+    }
 
     private Task Close() => OnClose.InvokeAsync();
 

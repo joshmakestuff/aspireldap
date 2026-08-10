@@ -1,0 +1,498 @@
+@*
+    The handoff's three-step new-entry wizard (§ 5) on the ConsoleDialog frame, schema-aware
+    (#105): object classes → attributes → review-as-LDIF.
+
+    Step 1 chains object classes: picking inetOrgPerson brings organizationalPerson, person
+    and top with it (SchemaGuide.WithSuperiors) — an entry cannot be composed without its
+    superior chain. Step 2 derives the form from the chained classes: MUST attributes
+    render as required fields, MAY attributes are addable through the picker, and the RDN
+    is attribute + value (escaped via LdifDotNet Dn.Rdn — a pasted full DN is structurally
+    impossible here). Step 3 shows the exact LDIF (LdifDotNet writer) before Create.
+
+    The server stays authoritative: empty MUST values warn on review but do not block, and
+    every schema-violation outcome still renders as words from the save delegate. Without a
+    readable schema the wizard degrades to the free-text form (classes + name: value blob).
+*@
+@using Aspire.LdapAdmin.Core
+@using LdifDotNet
+@using LdifDotNet.Schema
+
+<ConsoleDialog Title="New entry" OnCancel="Close">
+    <ChildContent>
+    <div class="steps">
+        <span class="step" aria-current="@Current(1)">1 — object class</span>
+        <span class="step" aria-current="@Current(2)">2 — attributes</span>
+        <span class="step" aria-current="@Current(3)">3 — review</span>
+    </div>
+
+    @if (_step == 1)
+    {
+        @if (Schema is { } schema)
+        {
+            <input class="input mono" placeholder="filter object classes…" spellcheck="false"
+                   aria-label="Filter object classes" @bind="_classFilter" @bind:event="oninput" />
+            @if (_picked.Count > 0)
+            {
+                <div style="display: flex; flex-wrap: wrap; gap: var(--space-2);">
+                    @foreach (var name in Chained)
+                    {
+                        <span class="tag tag-outline mono">@name</span>
+                    }
+                </div>
+                @if (!HasStructural)
+                {
+                    <div class="hint">No structural class selected — most servers refuse such an entry.</div>
+                }
+            }
+            <div class="picklist" role="listbox" aria-label="Object classes">
+                @foreach (var objectClass in FilteredClasses)
+                {
+                    var name = objectClass.Name ?? objectClass.Oid;
+                    var picked = _picked.Contains(name);
+                    <button type="button" class="combo-opt" role="option"
+                            aria-selected="@(picked ? "true" : "false")"
+                            @onclick="@(() => TogglePick(name))">
+                        <i class="tw">@(picked ? "✓" : "·")</i>
+                        <span class="mono">@name</span>
+                        <i class="tk mono">@objectClass.Kind.ToString().ToLowerInvariant()</i>
+                        @if (objectClass.SuperiorNames.Count > 0)
+                        {
+                            <span class="hint" style="margin-left: auto;">sup @string.Join(", ", objectClass.SuperiorNames)</span>
+                        }
+                    </button>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="text-muted" style="font-size: 13px; margin: 0;">
+                The server's schema is not readable, so classes are free text; the server decides.
+            </p>
+            <div class="field">
+                <label>Object classes <span class="mono text-muted">comma-separated</span></label>
+                <input class="input mono" @bind="_freeClasses" spellcheck="false"
+                       placeholder="inetOrgPerson, posixAccount" />
+            </div>
+        }
+    }
+    else if (_step == 2)
+    {
+        <div class="field">
+            <label>Parent DN</label>
+            <input class="input mono" @bind="_parentDn" spellcheck="false" />
+        </div>
+        <div class="frow" style="grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); margin-bottom: 0;">
+            <div class="field">
+                <label>RDN attribute <span style="color: var(--color-accent-700);">·must</span></label>
+                @if (Schema is not null)
+                {
+                    <select class="input mono" @bind="_rdnAttribute">
+                        @foreach (var name in RdnChoices)
+                        {
+                            <option value="@name">@name</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <input class="input mono" @bind="_rdnAttribute" spellcheck="false" placeholder="uid" />
+                }
+            </div>
+            <div class="field">
+                <label>RDN value <span style="color: var(--color-accent-700);">·must</span></label>
+                <input class="input mono" @bind="_rdnValue" @bind:event="oninput" spellcheck="false" />
+            </div>
+        </div>
+        @if (PreviewDn is { } previewDn)
+        {
+            <div class="dnline mono" style="margin-top: 0;">creates @previewDn</div>
+        }
+        @if (Schema is not null)
+        {
+            <div class="grid2">
+                @foreach (var guidance in FormFields)
+                {
+                    <div class="field">
+                        <label>
+                            <span class="mono">@guidance.Name</span>
+                            @if (guidance.Required)
+                            {
+                                <span style="color: var(--color-accent-700);"> ·must</span>
+                            }
+                            @if (guidance.SyntaxLabel.Length > 0)
+                            {
+                                <span class="hint"> @guidance.SyntaxLabel</span>
+                            }
+                            @if (!guidance.Required)
+                            {
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                        @onclick="@(() => _added.Remove(guidance.Name))">×</button>
+                            }
+                        </label>
+                        <input class="input mono" spellcheck="false"
+                               value="@FieldValue(guidance.Name)"
+                               @oninput="@(args => _values[guidance.Name] = args.Value?.ToString() ?? string.Empty)" />
+                    </div>
+                }
+            </div>
+            <div class="frow" style="grid-template-columns: minmax(180px, 1fr) auto; margin-bottom: 0;">
+                <div class="field">
+                    <label>Add optional attribute</label>
+                    <AttributePicker Candidates="MayCandidates" @bind-Value="_mayName" Placeholder="attributeType" />
+                </div>
+                <button type="button" class="btn btn-secondary" @onclick="AddMay"
+                        disabled="@(_mayName.Length == 0)">Add</button>
+            </div>
+        }
+        else
+        {
+            <div class="field">
+                <label>Attributes <span class="mono text-muted">name: value, one per line</span></label>
+                <textarea class="ta" style="min-height: 120px;" @bind="_freeAttributes" spellcheck="false"
+                          placeholder="cn: Jane Doe&#10;sn: Doe"></textarea>
+            </div>
+        }
+    }
+    else
+    {
+        @if (_missingMust.Count > 0)
+        {
+            <div class="bar" role="alert">
+                Required and empty: <span class="mono">@string.Join(", ", _missingMust)</span> —
+                the server will likely refuse. Go back to fill them, or create anyway.
+            </div>
+        }
+        <div class="pre mono">@_ldifPreview</div>
+    }
+
+    @if (_error is not null)
+    {
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+    }
+    </ChildContent>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        @if (_step > 1)
+        {
+            <button class="btn btn-secondary" @onclick="Back">Back</button>
+        }
+        @if (_step < 3)
+        {
+            <button class="btn btn-primary" @onclick="ContinueStep">Continue</button>
+        }
+        else
+        {
+            <button class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">@(_busy ? "Creating…" : "Create entry")</button>
+        }
+    </Actions>
+</ConsoleDialog>
+
+@code {
+    [Parameter, EditorRequired]
+    public required NewEntryModel Model { get; set; }
+
+    /// <summary>The loaded subschema, or null when unavailable (free-text fallback).</summary>
+    [Parameter]
+    public LdapSchema? Schema { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private int _step = 1;
+    private string? _error;
+    private bool _busy;
+
+    // Step 1
+    private string _classFilter = string.Empty;
+    private readonly HashSet<string> _picked = new(StringComparer.OrdinalIgnoreCase);
+    private string _freeClasses = string.Empty;
+
+    // Step 2
+    private string _parentDn = string.Empty;
+    private string _rdnAttribute = string.Empty;
+    private string _rdnValue = string.Empty;
+    private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _added = [];
+    private string _mayName = string.Empty;
+    private string _freeAttributes = string.Empty;
+
+    // Step 3
+    private string _ldifPreview = string.Empty;
+    private List<string> _missingMust = [];
+    private LdapNewEntry? _plan;
+
+    protected override void OnInitialized() => _parentDn = Model.ParentDn;
+
+    private string? Current(int step) => _step == step ? "true" : null;
+
+    /// <summary>The picked classes plus every superior they imply, top first.</summary>
+    private IReadOnlyList<string> Chained =>
+        Schema is { } schema ? SchemaGuide.WithSuperiors(schema, _picked) : [.. _picked];
+
+    private bool HasStructural =>
+        Schema is { } schema && Chained.Any(name =>
+            schema.FindObjectClass(name) is { Kind: LdapObjectClassKind.Structural });
+
+    private IEnumerable<LdapObjectClass> FilteredClasses =>
+        Schema is not { } schema
+            ? []
+            : schema.ObjectClasses
+                .Where(c => !c.Obsolete && (_classFilter.Length == 0
+                    || c.Names.Any(n => n.Contains(_classFilter, StringComparison.OrdinalIgnoreCase))))
+                .OrderBy(static c => c.Kind)
+                .ThenBy(static c => c.Name, StringComparer.OrdinalIgnoreCase);
+
+    private void TogglePick(string name)
+    {
+        if (!_picked.Remove(name))
+        {
+            _picked.Add(name);
+        }
+    }
+
+    private (IReadOnlyList<string> Must, IReadOnlyList<string> May) Sets =>
+        Schema is { } schema ? SchemaGuide.EffectiveSets(schema, Chained) : ([], []);
+
+    /// <summary>RDN attribute choices: the effective set, common naming attributes first.</summary>
+    private IReadOnlyList<string> RdnChoices
+    {
+        get
+        {
+            var (must, may) = Sets;
+            var all = must.Concat(may)
+                .Where(static n => !n.Equals("objectClass", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            all.Sort((a, b) => Preference(a).CompareTo(Preference(b)));
+            return all;
+
+            static int Preference(string name) => name.ToLowerInvariant() switch
+            {
+                "uid" => 0,
+                "cn" => 1,
+                "ou" => 2,
+                _ => 3,
+            };
+        }
+    }
+
+    /// <summary>MUST fields (minus objectClass and the RDN attribute) plus explicitly added MAYs.</summary>
+    private IReadOnlyList<AttributeGuidance> FormFields
+    {
+        get
+        {
+            if (Schema is not { } schema)
+            {
+                return [];
+            }
+            var (must, _) = Sets;
+            List<AttributeGuidance> fields = [];
+            foreach (var name in must)
+            {
+                if (name.Equals("objectClass", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals(_rdnAttribute, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                fields.Add(SchemaGuide.Describe(schema, name, required: true)
+                    ?? new AttributeGuidance(null!, name, true, false, false, string.Empty));
+            }
+            foreach (var name in _added)
+            {
+                if (SchemaGuide.Describe(schema, name, required: false) is { } guidance)
+                {
+                    fields.Add(guidance);
+                }
+                else
+                {
+                    fields.Add(new AttributeGuidance(null!, name, false, false, false, string.Empty));
+                }
+            }
+            return fields;
+        }
+    }
+
+    private IReadOnlyList<AttributeGuidance> MayCandidates
+    {
+        get
+        {
+            if (Schema is not { } schema)
+            {
+                return [];
+            }
+            var (_, may) = Sets;
+            return [.. may
+                .Where(n => !_added.Contains(n, StringComparer.OrdinalIgnoreCase)
+                    && !n.Equals(_rdnAttribute, StringComparison.OrdinalIgnoreCase))
+                .Select(n => SchemaGuide.Describe(schema, n, required: false))
+                .OfType<AttributeGuidance>()
+                .Where(static g => !g.NoUserModification)];
+        }
+    }
+
+    private string FieldValue(string name) => _values.TryGetValue(name, out var value) ? value : string.Empty;
+
+    private void AddMay()
+    {
+        if (_mayName.Length > 0 && !_added.Contains(_mayName, StringComparer.OrdinalIgnoreCase))
+        {
+            _added.Add(_mayName);
+        }
+        _mayName = string.Empty;
+    }
+
+    private string? PreviewDn
+    {
+        get
+        {
+            if (_rdnAttribute.Length == 0 || _rdnValue.Length == 0)
+            {
+                return null;
+            }
+            try
+            {
+                return Dn.Combine(Dn.Rdn(_rdnAttribute, _rdnValue), _parentDn);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+    }
+
+    private void Back()
+    {
+        _error = null;
+        _step = Math.Max(1, _step - 1);
+    }
+
+    private void ContinueStep()
+    {
+        _error = null;
+        if (_step == 1)
+        {
+            if (Schema is not null && _picked.Count == 0)
+            {
+                _error = "Pick at least one object class.";
+                return;
+            }
+            if (Schema is null && _freeClasses.Trim().Length == 0)
+            {
+                _error = "Enter at least one object class.";
+                return;
+            }
+            // Default the RDN attribute once classes are known.
+            if (_rdnAttribute.Length == 0 && RdnChoices.Count > 0)
+            {
+                _rdnAttribute = RdnChoices[0];
+            }
+            _step = 2;
+            return;
+        }
+
+        // Step 2 → 3: compose the plan; a bad parent DN or RDN stops here with the reason.
+        try
+        {
+            Dn.Parse(_parentDn);
+        }
+        catch (ArgumentException ex)
+        {
+            _error = $"Parent DN: {ex.Message}";
+            return;
+        }
+        if (_rdnAttribute.Trim().Length == 0 || _rdnValue.Trim().Length == 0)
+        {
+            _error = "The RDN attribute and value are required.";
+            return;
+        }
+        try
+        {
+            BuildPlan();
+        }
+        catch (ArgumentException ex)
+        {
+            _error = ex.Message;
+            return;
+        }
+        _step = 3;
+    }
+
+    /// <summary>
+    /// Composes the entry once for both the LDIF preview and the save: chained object
+    /// classes, the RDN value as the RDN attribute's value, then every non-empty field.
+    /// </summary>
+    private void BuildPlan()
+    {
+        var dn = Dn.Combine(Dn.Rdn(_rdnAttribute.Trim(), _rdnValue.Trim()), _parentDn.Trim());
+        List<LdapNewAttribute> attributes = [];
+        List<string> classes;
+        _missingMust = [];
+
+        if (Schema is not null)
+        {
+            classes = [.. Chained];
+            attributes.Add(new LdapNewAttribute("objectClass", classes));
+            attributes.Add(new LdapNewAttribute(_rdnAttribute.Trim(), [_rdnValue.Trim()]));
+            foreach (var field in FormFields)
+            {
+                var value = FieldValue(field.Name).Trim();
+                if (value.Length > 0)
+                {
+                    attributes.Add(new LdapNewAttribute(field.Name, [value]));
+                }
+                else if (field.Required)
+                {
+                    _missingMust.Add(field.Name);
+                }
+            }
+        }
+        else
+        {
+            classes = [.. _freeClasses.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
+            attributes.Add(new LdapNewAttribute("objectClass", classes));
+            attributes.Add(new LdapNewAttribute(_rdnAttribute.Trim(), [_rdnValue.Trim()]));
+            foreach (var line in _freeAttributes.Split('\n')
+                .Select(static l => l.TrimEnd('\r'))
+                .Where(static l => l.Length > 0))
+            {
+                var colon = line.IndexOf(':', StringComparison.Ordinal);
+                if (colon <= 0)
+                {
+                    throw new ArgumentException($"'{line}' is not in 'name: value' form.");
+                }
+                attributes.Add(new LdapNewAttribute(line[..colon].Trim(), [line[(colon + 1)..].Trim()]));
+            }
+        }
+
+        _plan = new LdapNewEntry(dn, attributes);
+        // The review is the record as ldapmodify would apply it — LdifDotNet writes it.
+        _ldifPreview = LdifWriter.WriteToString(
+            [new LdifAddRecord(dn, attributes.Select(static a =>
+                new LdifAttribute(a.Name, a.Values.Select(LdifValue.FromString))))],
+            new LdifWriterOptions());
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task CreateAsync()
+    {
+        if (_plan is not { } plan)
+        {
+            return;
+        }
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await Model.SaveAsync(plan);
+        }
+        finally
+        {
+            _busy = false;
+        }
+        if (_error is null)
+        {
+            await Close();
+        }
+    }
+}

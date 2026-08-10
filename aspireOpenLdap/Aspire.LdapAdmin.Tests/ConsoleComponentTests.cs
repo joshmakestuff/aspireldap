@@ -89,6 +89,7 @@ public sealed class ConsoleComponentTests : TestContext
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
+            .Add(p => p.Entry, Entry(Text("objectClass", "top", "person")))
             .Add(p => p.OnClose, () => { closed = true; }));
 
         cut.Find("button.btn-primary").Click();
@@ -111,6 +112,7 @@ public sealed class ConsoleComponentTests : TestContext
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
+            .Add(p => p.Entry, Entry(Text("objectClass", "top", "person")))
             .Add(p => p.OnClose, () => { closed = true; }));
 
         cut.Find("button.btn-primary").Click();
@@ -119,26 +121,75 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public void NewChildDialog_Previews_The_Composed_Dn_And_Warns_On_A_Pasted_Full_Dn()
+    public void AttributeDialog_With_Schema_Adapts_The_Value_Input_And_Shows_Guidance()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
-        var model = new ChildDialogModel
+        var model = new AttributeDialogModel
         {
-            ParentDn = "ou=directory,dc=example,dc=org",
+            IsNew = true,
+            Name = "uidNumber",
             SaveAsync = _ => Task.FromResult<string?>(null),
         };
-        var cut = RenderComponent<NewChildDialog>(parameters => parameters
-            .Add(p => p.Model, model));
+        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+            .Add(p => p.Model, model)
+            .Add(p => p.Entry, Entry(Text("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson")))
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
-        // A single RDN previews the DN the dialog would create.
-        cut.Find(".field input").Input("uid=jane.doe");
-        Assert.Contains("creates uid=jane.doe,ou=directory,dc=example,dc=org",
-            cut.Markup, StringComparison.Ordinal);
+        // SINGLE-VALUE type: one input, not the multi-line textarea; guidance names it.
+        Assert.Contains("single-valued", cut.Find(".hint").TextContent, StringComparison.Ordinal);
+        Assert.Empty(cut.FindAll("textarea"));
+        Assert.NotEmpty(cut.FindAll(".field input.input.mono"));
+    }
 
-        // A pasted full DN composes a child under a parent that does not exist — the
-        // exact input that produced the server's mystery NoSuchObject. It must warn.
-        cut.Find(".field input").Input("uid=jane.doe,ou=directory,dc=example,dc=org");
-        Assert.Contains("not a single attribute=value RDN", cut.Markup, StringComparison.Ordinal);
+    [Fact]
+    public void NewEntryWizard_Chains_Classes_Derives_Musts_And_Previews_Ldif()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        LdapNewEntry? saved = null;
+        var model = new NewEntryModel
+        {
+            ParentDn = "ou=people,dc=example,dc=org",
+            SaveAsync = entry => { saved = entry; return Task.FromResult<string?>(null); },
+        };
+        var cut = RenderComponent<NewEntryWizard>(parameters => parameters
+            .Add(p => p.Model, model)
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
+
+        // Step 1: picking inetOrgPerson chains its whole superior line — an entry cannot
+        // be composed without top/person/organizationalPerson.
+        cut.FindAll(".picklist button")
+            .First(b => b.TextContent.Contains("inetOrgPerson", StringComparison.Ordinal))
+            .Click();
+        foreach (var chained in (string[])["top", "person", "organizationalPerson", "inetOrgPerson"])
+        {
+            Assert.Contains(cut.FindAll(".tag"), t => t.TextContent == chained);
+        }
+        cut.Find("button.btn-primary").Click(); // Continue
+
+        // Step 2: MUST fields derived from the chain (minus objectClass and the RDN
+        // attribute, which defaulted to uid); fill the RDN and cn, leave sn empty.
+        var fieldLabels = cut.FindAll(".grid2 .field label").Select(l => l.TextContent).ToList();
+        Assert.Contains(fieldLabels, l => l.Contains("cn", StringComparison.Ordinal) && l.Contains("must", StringComparison.Ordinal));
+        Assert.Contains(fieldLabels, l => l.Contains("sn", StringComparison.Ordinal));
+        // The first .frow holds the RDN pair (attribute select + value input); the second
+        // holds the optional-attribute picker.
+        cut.FindAll(".frow input").First().Input("jtest");
+        var cnField = cut.FindAll(".grid2 .field")
+            .First(f => f.QuerySelector("label")!.TextContent.Contains("cn", StringComparison.Ordinal));
+        cnField.QuerySelector("input")!.Input("J Test");
+        cut.Find("button.btn-primary").Click(); // Continue
+
+        // Step 3: the review is real LDIF; the empty MUST (sn) warns but does not block.
+        var preview = cut.Find(".pre").TextContent;
+        Assert.Contains("dn: uid=jtest,ou=people,dc=example,dc=org", preview, StringComparison.Ordinal);
+        Assert.Contains("changetype: add", preview, StringComparison.Ordinal);
+        Assert.Contains("objectClass: top", preview, StringComparison.Ordinal);
+        Assert.Contains("cn: J Test", preview, StringComparison.Ordinal);
+        Assert.Contains("sn", cut.Find(".bar").TextContent, StringComparison.Ordinal);
+
+        cut.Find("button.btn-primary").Click(); // Create entry
+        Assert.NotNull(saved);
+        Assert.Equal("uid=jtest,ou=people,dc=example,dc=org", saved!.Dn);
     }
 
     [Fact]
@@ -170,6 +221,73 @@ public sealed class ConsoleComponentTests : TestContext
         Assert.Equal("true", panel.GetAttribute("aria-modal"));
         // The design system's registration marks are load-bearing (industry-ui skill).
         Assert.Equal(4, cut.FindAll(".blueprint > .corner").Count);
+    }
+}
+
+/// <summary>
+/// A small subschema in the server's own publication format (RFC 4512 § 4.2), so the
+/// schema-aware tests exercise the same parse path a live server feeds.
+/// </summary>
+internal static class ConsoleTestSchema
+{
+    public static readonly LdifDotNet.Schema.LdapSchema Schema = LdifDotNet.Schema.LdapSchema.ParseSubschema(
+        [
+            "( 2.5.4.0 NAME 'objectClass' SYNTAX 1.3.6.1.4.1.1466.115.121.1.38 )",
+            "( 2.5.4.41 NAME 'name' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+            "( 2.5.4.3 NAME ( 'cn' 'commonName' ) SUP name )",
+            "( 2.5.4.4 NAME 'sn' SUP name )",
+            "( 0.9.2342.19200300.100.1.1 NAME 'uid' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+            "( 2.5.4.35 NAME 'userPassword' SYNTAX 1.3.6.1.4.1.1466.115.121.1.40 )",
+            "( 2.5.4.13 NAME 'description' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+            "( 1.3.6.1.1.1.1.0 NAME 'uidNumber' SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 SINGLE-VALUE )",
+            "( 2.5.18.1 NAME 'createTimestamp' SYNTAX 1.3.6.1.4.1.1466.115.121.1.24 SINGLE-VALUE NO-USER-MODIFICATION USAGE directoryOperation )",
+        ],
+        [
+            "( 2.5.6.0 NAME 'top' ABSTRACT MUST objectClass )",
+            "( 2.5.6.6 NAME 'person' SUP top STRUCTURAL MUST ( sn $ cn ) MAY ( userPassword $ description ) )",
+            "( 2.5.6.7 NAME 'organizationalPerson' SUP person STRUCTURAL )",
+            "( 2.16.840.1.113730.3.2.2 NAME 'inetOrgPerson' SUP organizationalPerson STRUCTURAL MAY ( uid $ uidNumber $ createTimestamp ) )",
+        ]);
+}
+
+/// <summary>Schema-guide composition checks (#103/#105) — the SUP walking itself is the library's.</summary>
+public sealed class SchemaGuideTests
+{
+    [Fact]
+    public void EffectiveSets_Union_Superior_Chains_And_Dedupe_May_Against_Must()
+    {
+        var (must, may) = SchemaGuide.EffectiveSets(ConsoleTestSchema.Schema, ["inetOrgPerson"]);
+        Assert.Contains("objectClass", must, StringComparer.OrdinalIgnoreCase); // from top
+        Assert.Contains("cn", must, StringComparer.OrdinalIgnoreCase);          // from person
+        Assert.Contains("sn", must, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("uid", may, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("userPassword", may, StringComparer.OrdinalIgnoreCase); // inherited MAY
+        Assert.DoesNotContain("cn", may, StringComparer.OrdinalIgnoreCase);     // MUST beats MAY
+    }
+
+    [Fact]
+    public void WithSuperiors_Chains_The_Whole_Line_Top_First()
+    {
+        var chained = SchemaGuide.WithSuperiors(ConsoleTestSchema.Schema, ["inetOrgPerson"]);
+        Assert.Equal(["top", "person", "organizationalPerson", "inetOrgPerson"], chained);
+    }
+
+    [Fact]
+    public void AddCandidates_Exclude_ObjectClass_NoUserModification_And_Present_SingleValued()
+    {
+        var candidates = SchemaGuide.AddCandidates(
+            ConsoleTestSchema.Schema,
+            ["top", "person", "organizationalPerson", "inetOrgPerson"],
+            presentAttributes: ["objectClass", "cn", "sn", "uidNumber"]);
+
+        var names = candidates.Select(static c => c.Name).ToList();
+        Assert.DoesNotContain("objectClass", names, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("createTimestamp", names, StringComparer.OrdinalIgnoreCase); // NO-USER-MODIFICATION
+        Assert.DoesNotContain("uidNumber", names, StringComparer.OrdinalIgnoreCase);       // present + SINGLE-VALUE
+        Assert.Contains("cn", names, StringComparer.OrdinalIgnoreCase);                    // present but multi-valued
+        Assert.Contains("uid", names, StringComparer.OrdinalIgnoreCase);
+        // Required-first ordering.
+        Assert.True(candidates.First().Required);
     }
 }
 
