@@ -1,104 +1,97 @@
 @*
-    Attribute grid for one entry.
+    Attribute table for one entry, in the design handoff's raw-attribute form: an Industry
+    .table with monospace LDAP literals. The DN header lives in the shell's .dh block, not
+    here.
 
     Representation comes from the service's IsBinary flag and is never re-derived here: the
     service decides it from the schema's declared syntax, the RFC 4522 ;binary transfer
     option, or — last — the bytes, and says which (Classification). When IsBinary is true
     every value is base64, so it is labelled and sized rather than printed as text.
-
-    MultiLine, and no Virtualize/ItemSize: an attribute renders one row with every value
-    stacked in the cell, so rows must size to their content. FluentDataGrid writes fixed row
-    tracks otherwise and slices the second value through the middle (docs/findings.md).
 *@
 
-<FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8"
-             VerticalAlignment="@VerticalAlignment.Center">
-    <FluentLabel Typo="@Typography.H4" Style="word-break: break-all;">@Entry.Dn</FluentLabel>
-    <FluentButton Appearance="@Appearance.Stealth" Title="Copy DN to clipboard"
-                  IconStart="@(new Icons.Regular.Size16.Copy())" OnClick="CopyDnAsync" />
-</FluentStack>
-
-<FluentDataGrid Items="@Rows" TGridItem="LdapAttributeValues" GridTemplateColumns="1fr 2fr"
-                MultiLine="true" ResizableColumns="true">
-    <TemplateColumn Title="Attribute" Sortable="false">
-        <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="6"
-                     VerticalAlignment="@VerticalAlignment.Center" Wrap="true">
-            <strong>@context.Name</strong>
-            @if (context.IsBinary)
-            {
-                <FluentBadge Appearance="@Appearance.Neutral" title="@ClassificationTitle(context.Classification)">binary</FluentBadge>
-            }
-            @if (context.Values.Count > 1)
-            {
-                @* Paired with the display cap (#98): while capped the badge itself says
-                   "N of M values", so the cap is surfaced next to the attribute name too. *@
-                <FluentBadge Appearance="@Appearance.Neutral">@CountBadge(PlanFor(context))</FluentBadge>
-            }
+<table class="table">
+    <thead>
+        <tr>
+            <th style="width: 30%;">Attribute</th>
+            <th>Value</th>
             @if (OnEdit.HasDelegate)
             {
-                <FluentButton Appearance="@Appearance.Stealth" Title="@($"Edit {context.Name}")"
-                              IconStart="@(new Icons.Regular.Size16.Edit())"
-                              OnClick="@(() => OnEdit.InvokeAsync(context))" />
+                <th style="width: 70px;"></th>
             }
-        </FluentStack>
-    </TemplateColumn>
-    <TemplateColumn Title="Value" Sortable="false">
-        @if (context.Values.Count == 0)
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var attr in Rows)
         {
-            <em>(no values)</em>
-        }
-        else
-        {
-            @* Display cap (#98, absorbed #100): a many-valued attribute renders at most the
-               AppHost-set cap of values, and the cap is always surfaced, never silent —
-               "N of M values" plus an explicit expand, paired with the count badge above. *@
-            var plan = PlanFor(context);
-            @foreach (var value in context.Values.Take(plan.Shown))
-            {
-                <div style="overflow-wrap: anywhere;">
-                    @if (context.IsBinary)
+            var plan = PlanFor(attr);
+            <tr>
+                <td class="mono">
+                    @attr.Name
+                    @if (attr.IsBinary)
                     {
-                        <em>@DescribeBinary(value)</em>
-                        <details>
-                            <summary>base64</summary>
-                            <code>@value</code>
-                        </details>
+                        <i class="tk mono" title="@ClassificationTitle(attr.Classification)" style="margin-left: 6px;">binary</i>
+                    }
+                    @if (attr.Values.Count > 1)
+                    {
+                        @* Paired with the display cap (#98): while capped the badge itself
+                           says "N of M values", so the cap is surfaced next to the name too. *@
+                        <i class="tk mono" style="margin-left: 6px;">@CountBadge(plan)</i>
+                    }
+                </td>
+                <td class="mono">
+                    @if (attr.Values.Count == 0)
+                    {
+                        <em>(no values)</em>
                     }
                     else
                     {
-                        @value
+                        @* Display cap (#98, absorbed #100): a many-valued attribute renders at
+                           most the AppHost-set cap of values, and the cap is always surfaced,
+                           never silent. *@
+                        @foreach (var value in attr.Values.Take(plan.Shown))
+                        {
+                            <div style="overflow-wrap: anywhere;">
+                                @if (attr.IsBinary)
+                                {
+                                    <em>@DescribeBinary(value)</em>
+                                    <details>
+                                        <summary>base64</summary>
+                                        <code style="overflow-wrap: anywhere;">@value</code>
+                                    </details>
+                                }
+                                else
+                                {
+                                    @value
+                                }
+                            </div>
+                        }
+                        @if (plan.Capped)
+                        {
+                            <button class="btn btn-ghost btn-sm" @onclick="@(() => { _expanded.Add(attr.Name); })">
+                                Showing @plan.Shown of @plan.Total values — show all
+                            </button>
+                        }
+                        else if (attr.Values.Count > Cap)
+                        {
+                            <button class="btn btn-ghost btn-sm" @onclick="@(() => { _expanded.Remove(attr.Name); })">
+                                Show first @Cap of @plan.Total values
+                            </button>
+                        }
                     }
-                </div>
-            }
-            @if (plan.Capped)
-            {
-                <div>
-                    <FluentButton Appearance="@Appearance.Lightweight"
-                                  OnClick="@(() => { _expanded.Add(context.Name); })">
-                        Showing @plan.Shown of @plan.Total values — show all
-                    </FluentButton>
-                </div>
-            }
-            else if (context.Values.Count > Cap)
-            {
-                <div>
-                    <FluentButton Appearance="@Appearance.Lightweight"
-                                  OnClick="@(() => { _expanded.Remove(context.Name); })">
-                        Show first @Cap of @plan.Total values
-                    </FluentButton>
-                </div>
-            }
+                </td>
+                @if (OnEdit.HasDelegate)
+                {
+                    <td>
+                        <button class="btn btn-ghost btn-sm" title="@($"Edit {attr.Name}")"
+                                @onclick="@(() => OnEdit.InvokeAsync(attr))">Edit</button>
+                    </td>
+                }
+            </tr>
         }
-    </TemplateColumn>
-</FluentDataGrid>
+    </tbody>
+</table>
 
 @code {
-    [Inject]
-    private IJSRuntime Js { get; set; } = default!;
-
-    [Inject]
-    private IToastService Toasts { get; set; } = default!;
-
     [Inject]
     private LdapAdminSettings Settings { get; set; } = default!;
 
@@ -109,8 +102,8 @@
     [Parameter]
     public EventCallback<LdapAttributeValues> OnEdit { get; set; }
 
-    private IQueryable<LdapAttributeValues> Rows =>
-        Entry.Attributes.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase).AsQueryable();
+    private IEnumerable<LdapAttributeValues> Rows =>
+        Entry.Attributes.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Attribute names the user explicitly expanded past the display cap.</summary>
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
@@ -151,12 +144,6 @@
     /// <summary>The count badge's text — it states the cap while one is in effect.</summary>
     internal static string CountBadge(ValueDisplayPlan plan) =>
         plan.Capped ? $"{plan.Shown} of {plan.Total} values" : $"{plan.Total} values";
-
-    private async Task CopyDnAsync()
-    {
-        await Js.InvokeVoidAsync("navigator.clipboard.writeText", Entry.Dn);
-        Toasts.ShowSuccess("DN copied");
-    }
 
     /// <summary>Why this attribute is shown as binary — the classification travels with the value.</summary>
     private static string ClassificationTitle(LdapValueClassification classification) => classification switch

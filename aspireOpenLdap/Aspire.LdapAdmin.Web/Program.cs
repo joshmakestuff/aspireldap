@@ -1,6 +1,5 @@
 using Aspire.LdapAdmin.Web;
 using Aspire.LdapAdmin.Web.Components;
-using Microsoft.FluentUI.AspNetCore.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,7 +24,8 @@ builder.Services.AddSingleton(settings);
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
-builder.Services.AddFluentUIComponents();
+// The console's toast slot — scoped per circuit, rendered by the shell page.
+builder.Services.AddScoped<ConsoleToastService>();
 
 var app = builder.Build();
 

@@ -22,12 +22,6 @@
     <PackageVersion Include="LdifDotNet.Schema" Version="0.8.0" />
   </ItemGroup>
 
-  <!-- Fluent UI Blazor — v4 line only (v5 is a rewrite, still RC; see docs/decisions.md) -->
-  <ItemGroup>
-    <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.4" />
-    <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.4" />
-  </ItemGroup>
-
   <!-- Microsoft.Extensions / runtime — keep on the current net10 servicing release -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.10" />
@@ -48,6 +42,7 @@
 
   <!-- Test -->
   <ItemGroup>
+    <PackageVersion Include="bunit" Version="1.40.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />

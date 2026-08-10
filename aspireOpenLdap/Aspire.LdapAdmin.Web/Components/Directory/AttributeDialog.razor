@@ -1,51 +1,51 @@
 @*
-    Add/edit attribute dialog body, hosted by FluentDialogProvider via IDialogService.
-
-    All four entry dialogs are provider-hosted rather than inline <FluentDialog> markup:
-    inline, the FAST dialog's .control keeps its stylesheet default height (480px fixed,
-    no overflow handling), so form content taller than that renders past the dialog
-    background — the #104 defect class. The provider path sizes the panel from
-    DialogParameters and gives the body its own scroll region, so fields stay inside the
-    dialog bounds whatever the content height.
+    Add/edit attribute dialog on the owned ConsoleDialog frame. The model carries the save
+    delegate the shell provides: a returned error renders inline and the dialog closes only
+    on null (success), so a failed write never dismisses the user's input.
 *@
-@implements IDialogContentComponent<AttributeDialogModel>
 
-<FluentDialogBody>
-    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-        @if (Content.IsNew)
-        {
-            <FluentTextField @bind-Value="Content.Name" Label="Attribute name"
-                             Spellcheck="false" Style="width: 100%;" />
-        }
-        <FluentTextArea @bind-Value="Content.ValuesText" Rows="6" Style="width: 100%;"
-                        Label="@(Content.IsBinary ? "Values (base64, one per line)" : "Values (one per line)")"
-                        Spellcheck="false" />
-        @if (!Content.IsNew)
-        {
-            <FluentLabel Typo="@Typography.Body">
-                Saving replaces every value of this attribute; saving with no values removes it.
-            </FluentLabel>
-        }
-        @if (_error is not null)
-        {
-            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
-        }
-    </FluentStack>
-</FluentDialogBody>
-<FluentDialogFooter>
-    <FluentButton Appearance="@Appearance.Accent" Loading="_busy" OnClick="SaveAsync">Save</FluentButton>
-    <FluentButton OnClick="@(() => Dialog.CancelAsync())">Cancel</FluentButton>
-</FluentDialogFooter>
+<ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="Close">
+    <ChildContent>
+    @if (Model.IsNew)
+    {
+        <div class="field">
+            <label>Attribute name</label>
+            <input class="input mono" @bind="Model.Name" spellcheck="false" />
+        </div>
+    }
+    <div class="field">
+        <label>@(Model.IsBinary ? "Values (base64, one per line)" : "Values (one per line)")</label>
+        <textarea class="ta" style="min-height: 120px;" @bind="Model.ValuesText" spellcheck="false"></textarea>
+    </div>
+    @if (!Model.IsNew)
+    {
+        <p class="text-muted" style="font-size: 13px; margin: 0;">
+            Saving replaces every value of this attribute; saving with no values removes it.
+        </p>
+    }
+    @if (_error is not null)
+    {
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+    }
+    </ChildContent>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Saving…" : "Save")</button>
+    </Actions>
+</ConsoleDialog>
 
 @code {
-    [Parameter]
-    public AttributeDialogModel Content { get; set; } = default!;
+    [Parameter, EditorRequired]
+    public required AttributeDialogModel Model { get; set; }
 
-    [CascadingParameter]
-    public FluentDialog Dialog { get; set; } = default!;
+    /// <summary>Raised when the dialog is done (saved or cancelled); the shell removes it.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
 
     private string? _error;
     private bool _busy;
+
+    private Task Close() => OnClose.InvokeAsync();
 
     private async Task SaveAsync()
     {
@@ -53,7 +53,7 @@
         _error = null;
         try
         {
-            _error = await Content.SaveAsync(Content);
+            _error = await Model.SaveAsync(Model);
         }
         finally
         {
@@ -62,7 +62,7 @@
 
         if (_error is null)
         {
-            await Dialog.CloseAsync(Content);
+            await Close();
         }
     }
 }

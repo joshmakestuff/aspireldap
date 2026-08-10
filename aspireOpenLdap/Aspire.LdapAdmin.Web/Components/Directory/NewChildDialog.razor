@@ -1,44 +1,48 @@
 @*
-    New child entry dialog body, hosted by FluentDialogProvider via IDialogService — see
-    AttributeDialog.razor for why inline <FluentDialog> markup is not used (#104).
+    New child entry dialog on the owned ConsoleDialog frame. The parent DN renders in body
+    markup with word-break, never in the title (docs/findings.md: a DN is one unbreakable
+    token). Save semantics as AttributeDialog: inline error, close only on success.
 *@
-@implements IDialogContentComponent<ChildDialogModel>
 
-<FluentDialogBody>
-    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-        @* The parent DN lives here, not in the dialog title: a DN is one unbreakable token
-           whose min-content width grows with tree depth; in the Fluent-rendered title it
-           forces the dialog grid past the fixed control width (#104). This label is owned
-           markup, so the wrap style is legitimate. *@
-        <FluentLabel Typo="@Typography.Body" Style="overflow-wrap: anywhere;">
-            New entry under <strong>@Content.ParentDn</strong>
-        </FluentLabel>
-        <FluentTextField @bind-Value="Content.Rdn" Label="RDN" Placeholder="cn=new-entry"
-                         Spellcheck="false" Style="width: 100%;" />
-        <FluentTextField @bind-Value="Content.ObjectClasses" Label="Object classes (comma-separated)"
-                         Placeholder="inetOrgPerson" Spellcheck="false" Style="width: 100%;" />
-        <FluentTextArea @bind-Value="Content.AttributesText" Rows="6" Style="width: 100%;"
-                        Label="Attributes (name: value, one per line)" Spellcheck="false" />
-        @if (_error is not null)
-        {
-            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
-        }
-    </FluentStack>
-</FluentDialogBody>
-<FluentDialogFooter>
-    <FluentButton Appearance="@Appearance.Accent" Loading="_busy" OnClick="SaveAsync">Create</FluentButton>
-    <FluentButton OnClick="@(() => Dialog.CancelAsync())">Cancel</FluentButton>
-</FluentDialogFooter>
+<ConsoleDialog Title="New child entry" OnCancel="Close">
+    <ChildContent>
+    <div class="dnline mono" style="margin-top: 0;">under @Model.ParentDn</div>
+    <div class="field">
+        <label>RDN <span class="mono text-muted">e.g. uid=jane.doe</span></label>
+        <input class="input mono" @bind="Model.Rdn" spellcheck="false" />
+    </div>
+    <div class="field">
+        <label>Object classes <span class="mono text-muted">comma-separated</span></label>
+        <input class="input mono" @bind="Model.ObjectClasses" spellcheck="false"
+               placeholder="inetOrgPerson, posixAccount" />
+    </div>
+    <div class="field">
+        <label>Attributes <span class="mono text-muted">name: value, one per line</span></label>
+        <textarea class="ta" style="min-height: 120px;" @bind="Model.AttributesText" spellcheck="false"
+                  placeholder="cn: Jane Doe&#10;sn: Doe"></textarea>
+    </div>
+    @if (_error is not null)
+    {
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+    }
+    </ChildContent>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Creating…" : "Create")</button>
+    </Actions>
+</ConsoleDialog>
 
 @code {
-    [Parameter]
-    public ChildDialogModel Content { get; set; } = default!;
+    [Parameter, EditorRequired]
+    public required ChildDialogModel Model { get; set; }
 
-    [CascadingParameter]
-    public FluentDialog Dialog { get; set; } = default!;
+    [Parameter]
+    public EventCallback OnClose { get; set; }
 
     private string? _error;
     private bool _busy;
+
+    private Task Close() => OnClose.InvokeAsync();
 
     private async Task SaveAsync()
     {
@@ -46,7 +50,7 @@
         _error = null;
         try
         {
-            _error = await Content.SaveAsync(Content);
+            _error = await Model.SaveAsync(Model);
         }
         finally
         {
@@ -55,7 +59,7 @@
 
         if (_error is null)
         {
-            await Dialog.CloseAsync(Content);
+            await Close();
         }
     }
 }
