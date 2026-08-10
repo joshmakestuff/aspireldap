@@ -127,6 +127,13 @@
 .ta{width:100%;min-height:220px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;padding:var(--space-3);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:0;color:inherit;scrollbar-gutter:stable}
 .frow{display:grid;grid-template-columns:minmax(120px,1.1fr) 92px minmax(120px,1.4fr) 36px;gap:var(--space-2);align-items:end;margin-bottom:var(--space-2)}
 
+/* ── Scrollbars ────────────────────────────────────────────────────────────
+   Naming scrollbar-width/-color opts Chromium out of its overlay scrollbars, which
+   flash into view on every content change (each keystroke in a textarea) and fade
+   again — reported as flicker. CSS scrollbars render steadily whenever content
+   overflows, thin and token-tinted, which also suits the wireframe language. */
+.rail,.pane,.ta,.wide,.pre{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
+
 /* ── Notices, dialogs, toast ───────────────────────────────────────────── */
 .bar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--color-accent);background:var(--color-accent-100);margin-bottom:var(--space-4);font-size:13px}
 /* Errors stay inside the mono palette: full-strength text treatment instead of a second
@@ -142,5 +149,9 @@
    rule ("never removed") applies to interactive elements; Tab moves focus onward and every
    control keeps its ring. */
 [role="dialog"]:focus-visible{outline:none}
+/* Above the sticky .railtop (z-index 2): without this the scrim dims everything except
+   that rectangle, which floats over the backdrop (#109's real reported symptom). Below
+   the toast (40) so write confirmations stay visible over an open dialog. */
+.dialog-backdrop{z-index:30}
 .cbcell{width:34px}
 .table td.mono,.table th.mono{font-size:12px}
