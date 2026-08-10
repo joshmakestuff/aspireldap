@@ -1,5 +1,8 @@
 @*
-    LDAP filter search over LdapDirectoryService, in-process.
+    LDAP filter search over LdapDirectoryService, in-process. Hosted in the contextual pane
+    of the shell page (#102) — it is a panel, not a routed page, so the browse tree stays
+    alive while the user searches. Clicking a result raises OnEntrySelected; the shell
+    selects + reveals the entry in the tree and switches the pane to the editor.
 
     The service owns filter validation and truncation reporting; an invalid filter comes back
     as a typed result and is shown as-is. Truncation is surfaced, never hidden — a silently
@@ -11,18 +14,12 @@
     form, with the full DN in the tooltip and behind the copy button. Sorting/pagination is
     #95, deliberately absent here.
 *@
-@page "/search"
 @using System.DirectoryServices.Protocols
 @using LdifDotNet
 @inject LdapDirectoryService Directory
 @inject LdapAdminSettings Settings
-@inject NavigationManager Navigation
 @inject IJSRuntime Js
 @inject IToastService Toasts
-
-<PageTitle>Search — Aspire LdapAdmin</PageTitle>
-
-<FluentLabel Typo="@Typography.H3">Search</FluentLabel>
 
 <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
     @* Wrap: without it this row overflows the viewport and the Search button lands
@@ -99,6 +96,10 @@
 
 @code {
     private static readonly SearchScope[] AllScopes = [SearchScope.Base, SearchScope.OneLevel, SearchScope.Subtree];
+
+    /// <summary>Raised with the full DN of a clicked result row; the shell owns what happens next.</summary>
+    [Parameter]
+    public EventCallback<string> OnEntrySelected { get; set; }
 
     private string _filter = "(objectClass=*)";
     private string _baseDn = string.Empty;
@@ -188,12 +189,12 @@
         }
     }
 
-    /// <summary>The whole row navigates to the entry on the browse page, which reveals it.</summary>
-    private void OnRowClick(FluentDataGridRow<LdapEntry> row)
+    /// <summary>The whole row selects the entry: the shell reveals it in the tree and opens the editor.</summary>
+    private async Task OnRowClick(FluentDataGridRow<LdapEntry> row)
     {
         if (row.Item is { } entry)
         {
-            Navigation.NavigateTo($"/?dn={Uri.EscapeDataString(entry.Dn)}");
+            await OnEntrySelected.InvokeAsync(entry.Dn);
         }
     }
 
