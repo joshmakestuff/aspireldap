@@ -481,21 +481,43 @@
             ValuesText = string.Join('\n', attribute.Values),
             SaveAsync = SaveAttributeAsync,
         };
-        await DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters($"Edit {attribute.Name}"));
+        await ShowAndRefreshAsync(
+            DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters($"Edit {attribute.Name}")));
     }
 
     private async Task OpenAddAttributeDialog()
     {
         var model = new AttributeDialogModel { IsNew = true, SaveAsync = SaveAttributeAsync };
-        await DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters("Add attribute"));
+        await ShowAndRefreshAsync(
+            DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters("Add attribute")));
+    }
+
+    /// <summary>
+    /// Awaits the dialog's close, then re-renders this page. The save delegates mutate this
+    /// page's state (entry re-fetch, tree reloads, reveal), but they run in the dialog
+    /// component's event context, so Blazor re-renders the dialog — not this page — when
+    /// they finish. Measured in the browser pass: a successful save closed the dialog while
+    /// the editor kept showing the pre-save entry until the next unrelated event.
+    /// </summary>
+    private async Task ShowAndRefreshAsync(Task<IDialogReference> showTask)
+    {
+        var dialog = await showTask;
+        await dialog.Result;
+        StateHasChanged();
     }
 
     private async Task OpenChildDialog()
     {
         if (_selectedDn is { } dn)
         {
+            // The DN goes in the body (owned markup, overflow-wrap), never the title: a DN
+            // is one unbreakable token, and its min-content width grows with tree depth —
+            // in the title it pushes the dialog grid past the fixed control width, which
+            // was the depth-dependent half of #104 (measured: title min-content 485px vs
+            // 432px track at ou=directory depth).
             var model = new ChildDialogModel { ParentDn = dn, SaveAsync = SaveChildAsync };
-            await DialogService.ShowDialogAsync<NewChildDialog>(model, EntryDialogParameters($"New entry under {dn}"));
+            await ShowAndRefreshAsync(
+                DialogService.ShowDialogAsync<NewChildDialog>(model, EntryDialogParameters("New child entry")));
         }
     }
 
@@ -503,8 +525,10 @@
     {
         if (_selectedDn is { } dn)
         {
+            // Title stays DN-free for the same min-content reason as OpenChildDialog.
             var model = new RenameDialogModel { Dn = dn, SaveAsync = SaveRenameAsync };
-            await DialogService.ShowDialogAsync<RenameDialog>(model, EntryDialogParameters($"Rename {dn}"));
+            await ShowAndRefreshAsync(
+                DialogService.ShowDialogAsync<RenameDialog>(model, EntryDialogParameters("Rename entry")));
         }
     }
 
@@ -513,7 +537,8 @@
         if (_selectedDn is { } dn)
         {
             var model = new DeleteDialogModel { Dn = dn, SaveAsync = ConfirmDeleteAsync };
-            await DialogService.ShowDialogAsync<DeleteDialog>(model, EntryDialogParameters("Delete entry"));
+            await ShowAndRefreshAsync(
+                DialogService.ShowDialogAsync<DeleteDialog>(model, EntryDialogParameters("Delete entry")));
         }
     }
 
