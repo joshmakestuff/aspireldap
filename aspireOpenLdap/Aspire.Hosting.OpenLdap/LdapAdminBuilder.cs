@@ -6,8 +6,8 @@ namespace Aspire.Hosting.OpenLdap;
 /// <summary>
 /// Construction of the LdapAdmin sidecar container: the docker build from the packaged build
 /// context, the connection-string contract the admin host reads, the TLS trust material, and the
-/// health/wait wiring. See <see cref="OpenLdapResourceBuilderExtensions.WithLdapAdmin"/> for the
-/// user-facing contract.
+/// health/wait wiring. See the <c>WithLdapAdmin</c> overloads on
+/// <see cref="OpenLdapResourceBuilderExtensions"/> for the user-facing contract.
 /// </summary>
 internal static class LdapAdminBuilder
 {
@@ -19,9 +19,11 @@ internal static class LdapAdminBuilder
 
     internal static void Add(
         IResourceBuilder<OpenLdapResource> builder,
+        LdapAdminOptions options,
         Action<IResourceBuilder<LdapAdminResource>>? configureContainer,
         string? containerName)
     {
+        Validate(options);
         EnsurePackagedPayload(LdapAdminResource.DefaultDockerContextPath);
 
         var parent = builder.Resource;
@@ -43,6 +45,16 @@ internal static class LdapAdminBuilder
                 context.EnvironmentVariables[$"ConnectionStrings__{parent.Name}"] =
                     BuildContainerConnectionString(parent);
 
+                // The options contract (#98): every member is emitted explicitly — defaults
+                // included — so the env the admin host binds always states the whole surface
+                // and a drifted default cannot hide behind an absent variable.
+                context.EnvironmentVariables["LdapAdmin__Theme"] = options.Theme.ToString();
+                context.EnvironmentVariables["LdapAdmin__DefaultSearchLimit"] =
+                    options.DefaultSearchLimit.ToString(CultureInfo.InvariantCulture);
+                context.EnvironmentVariables["LdapAdmin__DefaultSortOrder"] = options.DefaultSortOrder.ToString();
+                context.EnvironmentVariables["LdapAdmin__AttributeValueDisplayCap"] =
+                    options.AttributeValueDisplayCap.ToString(CultureInfo.InvariantCulture);
+
                 if (parent.TlsRequired)
                 {
                     // LDAPS is encrypted but the admin does NOT verify the server certificate,
@@ -60,6 +72,31 @@ internal static class LdapAdminBuilder
             .WaitFor(builder);
 
         configureContainer?.Invoke(admin);
+    }
+
+    /// <summary>
+    /// Rejects option values the admin UI itself could not honor, at the fluent call rather
+    /// than later inside the container. The bounds mirror the UI: the search page accepts a
+    /// limit of 1–1000, and a display cap below 1 would render no values at all.
+    /// </summary>
+    private static void Validate(LdapAdminOptions options)
+    {
+        if (!Enum.IsDefined(options.Theme))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.Theme, "Theme is not a defined LdapAdminTheme value.");
+        }
+        if (!Enum.IsDefined(options.DefaultSortOrder))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.DefaultSortOrder, "DefaultSortOrder is not a defined LdapAdminSortOrder value.");
+        }
+        if (options.DefaultSearchLimit is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.DefaultSearchLimit, "DefaultSearchLimit must be between 1 and 1000.");
+        }
+        if (options.AttributeValueDisplayCap < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.AttributeValueDisplayCap, "AttributeValueDisplayCap must be at least 1.");
+        }
     }
 
     /// <summary>

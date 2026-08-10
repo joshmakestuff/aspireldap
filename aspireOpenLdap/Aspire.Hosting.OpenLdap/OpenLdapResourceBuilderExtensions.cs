@@ -582,9 +582,36 @@ public static partial class OpenLdapResourceBuilderExtensions
         Action<IResourceBuilder<LdapAdminResource>>? configureContainer = null,
         string? containerName = null)
     {
+        return builder.WithLdapAdmin(configureOptions: null, configureContainer, containerName);
+    }
+
+    /// <summary>
+    /// Adds the bundled LdapAdmin web UI container, configuring its defaulted behavior through
+    /// <see cref="LdapAdminOptions"/> (theme, search limit, sort order, display caps). Every
+    /// option has a sane default, and the values flow to the admin container as
+    /// <c>LdapAdmin__*</c> environment configuration bound at startup. This options object is
+    /// the single home for defaulted admin behavior — the UI grows no settings pages, and new
+    /// knobs join it rather than becoming further method parameters. See the parameterless
+    /// documentation on
+    /// <see cref="WithLdapAdmin(IResourceBuilder{OpenLdapResource}, Action{IResourceBuilder{LdapAdminResource}}?, string?)"/>
+    /// for the delivery and credential contract.
+    /// </summary>
+    /// <param name="builder">The parent OpenLDAP builder.</param>
+    /// <param name="configureOptions">Configures the admin UI's defaulted behavior.</param>
+    /// <param name="configureContainer">Optional callback to further configure the admin container.</param>
+    /// <param name="containerName">Override the admin resource name. Defaults to <c>{parent}-ldapadmin</c>.</param>
+    /// <returns>The parent OpenLDAP builder (admin runs alongside as a sibling resource).</returns>
+    public static IResourceBuilder<OpenLdapResource> WithLdapAdmin(
+        this IResourceBuilder<OpenLdapResource> builder,
+        Action<LdapAdminOptions>? configureOptions,
+        Action<IResourceBuilder<LdapAdminResource>>? configureContainer = null,
+        string? containerName = null)
+    {
         ArgumentNullException.ThrowIfNull(builder);
 
-        LdapAdminBuilder.Add(builder, configureContainer, containerName);
+        var options = new LdapAdminOptions();
+        configureOptions?.Invoke(options);
+        LdapAdminBuilder.Add(builder, options, configureContainer, containerName);
         return builder;
     }
 

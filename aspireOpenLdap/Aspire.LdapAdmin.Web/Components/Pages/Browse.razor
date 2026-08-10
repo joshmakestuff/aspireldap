@@ -14,6 +14,7 @@
 @using Aspire.LdapAdmin.Web.Components.Directory
 @using LdifDotNet
 @inject LdapDirectoryService Directory
+@inject LdapAdminSettings Settings
 @inject NavigationManager Navigation
 @inject IToastService Toasts
 
@@ -274,8 +275,13 @@
         }
 
         var children = await Directory.GetChildrenAsync(node.Id);
+        // Display order only — the AppHost-set default (#98); truncation semantics are the
+        // server's and are not affected by how the returned children are ordered.
+        var ordered = Settings.DefaultSortOrder == LdapAdminSortOrder.Rdn
+            ? children.Children.OrderBy(static c => c.Rdn, StringComparer.OrdinalIgnoreCase)
+            : (IEnumerable<LdapChildEntry>)children.Children;
         var items = new List<ITreeViewItem>(children.Children.Count);
-        foreach (var child in children.Children)
+        foreach (var child in ordered)
         {
             var item = Node(child.Dn, child.Rdn, child.HasChildren);
             await ExpandAsync(item, depth - 1);

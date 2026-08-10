@@ -1,3 +1,4 @@
+using Aspire.LdapAdmin.Web;
 using Aspire.LdapAdmin.Web.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
 
@@ -13,6 +14,13 @@ var connectionName = builder.Configuration["LdapAdmin:ConnectionName"]
         "ConnectionStrings entry.");
 builder.AddOpenLdapClient(connectionName);
 builder.Services.AddLdapAdminCore();
+
+// Defaulted behavior (#98): bound once at startup from the LdapAdmin__* env contract that
+// WithLdapAdmin() emits. A malformed value (an unknown theme name, a non-numeric limit) fails
+// here, at the host boundary, rather than as a broken page later.
+var settings = builder.Configuration.GetSection(LdapAdminSettings.SectionName)
+    .Get<LdapAdminSettings>() ?? new();
+builder.Services.AddSingleton(settings);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()

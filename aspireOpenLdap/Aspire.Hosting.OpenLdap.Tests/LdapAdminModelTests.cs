@@ -94,6 +94,13 @@ public class LdapAdminModelTests
 
         Assert.Equal("ldap", env["LdapAdmin__ConnectionName"]);
 
+        // The options contract (#98) is always emitted, defaults included, so the env the
+        // admin binds states the whole surface even when no options were configured.
+        Assert.Equal("System", env["LdapAdmin__Theme"]);
+        Assert.Equal("100", env["LdapAdmin__DefaultSearchLimit"]);
+        Assert.Equal("ServerOrder", env["LdapAdmin__DefaultSortOrder"]);
+        Assert.Equal("20", env["LdapAdmin__AttributeValueDisplayCap"]);
+
         var settings = OpenLdapConnectionStringBuilder.Parse(env["ConnectionStrings__ldap"]);
         // Container-network address: the parent by resource name on its container target port.
         Assert.Equal(new Uri("ldap://ldap:1389"), settings.Endpoint);
@@ -138,6 +145,77 @@ public class LdapAdminModelTests
         {
             dir.Delete(recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task WithLdapAdmin_Options_Flow_As_LdapAdmin_Env_Configuration()
+    {
+        CreateFakePayload();
+        var builder = DistributedApplication.CreateBuilder();
+        builder.AddOpenLdap("ldap").WithLdapAdmin(options =>
+        {
+            options.Theme = LdapAdminTheme.Dark;
+            options.DefaultSearchLimit = 250;
+            options.DefaultSortOrder = LdapAdminSortOrder.Rdn;
+            options.AttributeValueDisplayCap = 5;
+        });
+
+        var admin = Assert.Single(builder.Resources.OfType<LdapAdminResource>());
+        var env = await EnvironmentEvaluation.EvaluateEnvironmentAsync(admin);
+
+        // The env contract the admin host binds (LdapAdmin:* section): enum values travel by
+        // name, numbers as invariant decimal strings.
+        Assert.Equal("Dark", env["LdapAdmin__Theme"]);
+        Assert.Equal("250", env["LdapAdmin__DefaultSearchLimit"]);
+        Assert.Equal("Rdn", env["LdapAdmin__DefaultSortOrder"]);
+        Assert.Equal("5", env["LdapAdmin__AttributeValueDisplayCap"]);
+    }
+
+    [Fact]
+    public void WithLdapAdmin_Options_Compose_With_The_Container_Callback_And_Name()
+    {
+        CreateFakePayload();
+        var builder = DistributedApplication.CreateBuilder();
+        IResourceBuilder<LdapAdminResource>? configured = null;
+        builder.AddOpenLdap("ldap").WithLdapAdmin(
+            options => options.Theme = LdapAdminTheme.Light,
+            configureContainer: admin => configured = admin,
+            containerName: "directory-ui");
+
+        var admin = Assert.Single(builder.Resources.OfType<LdapAdminResource>());
+        Assert.Equal("directory-ui", admin.Name);
+        Assert.NotNull(configured);
+        Assert.Same(admin, configured!.Resource);
+    }
+
+    [Theory]
+    [InlineData(0, 20)]     // below the search page's minimum
+    [InlineData(1001, 20)]  // above the search page's maximum
+    [InlineData(100, 0)]    // a cap of zero would render no values at all
+    public void WithLdapAdmin_Rejects_Options_The_Ui_Could_Not_Honor(int searchLimit, int displayCap)
+    {
+        CreateFakePayload();
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap");
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ldap.WithLdapAdmin(options =>
+        {
+            options.DefaultSearchLimit = searchLimit;
+            options.AttributeValueDisplayCap = displayCap;
+        }));
+    }
+
+    [Fact]
+    public void WithLdapAdmin_Rejects_Undefined_Enum_Options()
+    {
+        CreateFakePayload();
+        var builder = DistributedApplication.CreateBuilder();
+        var ldap = builder.AddOpenLdap("ldap");
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => ldap.WithLdapAdmin(options => options.Theme = (LdapAdminTheme)42));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => ldap.WithLdapAdmin(options => options.DefaultSortOrder = (LdapAdminSortOrder)42));
     }
 
     [Fact]

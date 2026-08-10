@@ -157,7 +157,10 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
                 .WithUser("alice", "alice-password", ou: "people")
                 .WithTls()
                 .WithRequiredTls()
-                .WithLdapAdmin();
+                // The options overload (#98) rides along at no extra cost: the packed artifact
+                // must deliver it, and the admin host must bind the LdapAdmin__* values it
+                // emits — a bad binding fails startup, which the health/home probes catch.
+                .WithLdapAdmin(admin => admin.Theme = LdapAdminTheme.Dark);
 
             var app = builder.Build();
 

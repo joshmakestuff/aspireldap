@@ -25,6 +25,19 @@ builder.AddProject<Projects.Aspire_LdapAdmin_Web>("ldapadmin")
     // Same configuration contract WithLdapAdmin() sets on the packaged container: the admin
     // host reads LdapAdmin:ConnectionName and binds with that connection string.
     .WithEnvironment("LdapAdmin__ConnectionName", "openldap")
+    // The options contract (#98), mirrored for dev runs: any LdapAdmin__* value set on the
+    // AppHost's own environment (LdapAdmin__Theme=Dark aspire start ...) passes through to
+    // the admin host; unset values fall back to the admin host's own defaults.
+    .WithEnvironment(context =>
+    {
+        foreach (var key in (string[])["Theme", "DefaultSearchLimit", "DefaultSortOrder", "AttributeValueDisplayCap"])
+        {
+            if (builder.Configuration[$"LdapAdmin:{key}"] is { Length: > 0 } value)
+            {
+                context.EnvironmentVariables[$"LdapAdmin__{key}"] = value;
+            }
+        }
+    })
     .WithReference(ldap)
     .WaitFor(ldap);
 
