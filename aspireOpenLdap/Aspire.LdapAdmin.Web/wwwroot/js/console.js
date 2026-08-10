@@ -84,7 +84,7 @@ let trapHandler = null;
 
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
-export function trapFocus(el) {
+export function trapFocus(el, dotnetRef) {
   releaseFocus();
   trapped = el;
   restoreTo = document.activeElement;
@@ -93,6 +93,13 @@ export function trapFocus(el) {
   // (#109). The panel carries tabindex="-1"; Tab moves into the first control normally.
   el.focus({ preventScroll: true });
   trapHandler = e => {
+    // Escape is handled here, not by a Blazor keydown on the backdrop: a bound key
+    // handler turns every keystroke in every field into a server round-trip.
+    if (e.key === 'Escape' && dotnetRef) {
+      dotnetRef.invokeMethodAsync('CancelFromJs');
+      e.preventDefault();
+      return;
+    }
     if (e.key !== 'Tab') return;
     const items = [...el.querySelectorAll(FOCUSABLE)].filter(i => !i.disabled && i.offsetParent !== null);
     if (items.length === 0) return;

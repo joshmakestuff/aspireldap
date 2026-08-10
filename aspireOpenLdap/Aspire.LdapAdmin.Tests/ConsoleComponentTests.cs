@@ -142,7 +142,7 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public void ConsoleDialog_Escape_And_Backdrop_Click_Cancel()
+    public async Task ConsoleDialog_Escape_And_Backdrop_Click_Cancel()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         var cancelled = 0;
@@ -150,7 +150,9 @@ public sealed class ConsoleComponentTests : TestContext
             .Add(p => p.Title, "Test dialog")
             .Add(p => p.OnCancel, () => { cancelled++; }));
 
-        cut.Find(".dialog-backdrop").KeyDown(key: "Escape");
+        // Escape arrives through the JS focus trap (a Blazor keydown on the backdrop would
+        // round-trip every keystroke), which invokes this JSInvokable.
+        await cut.InvokeAsync(() => cut.Instance.CancelFromJs());
         Assert.Equal(1, cancelled);
 
         cut.Find(".dialog-backdrop").Click();
