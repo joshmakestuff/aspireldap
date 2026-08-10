@@ -83,7 +83,6 @@
                         {
                             <i class="tw">@row.Twisty</i>
                         }
-                        <i class="tk mono">@row.Kind</i>
                         <span class="tlabel mono">@row.Label</span>
                         @if (row.Count.Length > 0)
                         {
@@ -261,21 +260,11 @@
         public int Shown { get; set; } = Page;
         public List<TreeNode>? Children { get; set; }
         public bool Capped { get; set; }
-
-        /// <summary>The kind badge: the RDN's attribute type, uppercased (DC / OU / UID / CN…).</summary>
-        public string Kind
-        {
-            get
-            {
-                var eq = Rdn.IndexOf('=', StringComparison.Ordinal);
-                return (eq > 0 ? Rdn[..eq] : Rdn).ToUpperInvariant();
-            }
-        }
     }
 
     /// <summary>One rendered rail row: a node, a "show more" row, or the cap's search handoff.</summary>
     private readonly record struct Row(
-        string Key, TreeNode? Node, string Label, string Kind, string Twisty, bool HasTwisty,
+        string Key, TreeNode? Node, string Label, string Twisty, bool HasTwisty,
         string Count, string DepthClass, string MoreClass, bool Current, bool IsMore, bool IsCap);
 
     protected override async Task OnInitializedAsync()
@@ -411,7 +400,7 @@
             : string.Empty;
 
         rows.Add(new Row(
-            Key: node.Dn, Node: node, Label: node.Rdn, Kind: node.Kind, Twisty: twisty,
+            Key: node.Dn, Node: node, Label: node.Rdn, Twisty: twisty,
             HasTwisty: isParent, Count: count, DepthClass: Depth(depth), MoreClass: string.Empty,
             Current: string.Equals(node.Dn, _selectedDn, StringComparison.OrdinalIgnoreCase),
             IsMore: false, IsCap: false));
@@ -438,7 +427,7 @@
             rows.Add(new Row(
                 Key: node.Dn + "::more", Node: node,
                 Label: $"{hidden} more of {visibleChildren.Count} — show {Math.Min(hidden, Page)}",
-                Kind: string.Empty, Twisty: "⋯", HasTwisty: false, Count: string.Empty,
+                Twisty: "⋯", HasTwisty: false, Count: string.Empty,
                 DepthClass: Depth(depth + 1), MoreClass: "more", Current: false,
                 IsMore: true, IsCap: false));
         }
@@ -449,7 +438,7 @@
             rows.Add(new Row(
                 Key: node.Dn + "::cap", Node: node,
                 Label: "more entries not shown — search this container",
-                Kind: string.Empty, Twisty: "⌕", HasTwisty: false, Count: string.Empty,
+                Twisty: "⌕", HasTwisty: false, Count: string.Empty,
                 DepthClass: Depth(depth + 1), MoreClass: "more cap", Current: false,
                 IsMore: false, IsCap: true));
         }
