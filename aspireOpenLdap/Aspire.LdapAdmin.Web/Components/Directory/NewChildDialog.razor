@@ -6,6 +6,13 @@
 
 <FluentDialogBody>
     <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+        @* The parent DN lives here, not in the dialog title: a DN is one unbreakable token
+           whose min-content width grows with tree depth; in the Fluent-rendered title it
+           forces the dialog grid past the fixed control width (#104). This label is owned
+           markup, so the wrap style is legitimate. *@
+        <FluentLabel Typo="@Typography.Body" Style="overflow-wrap: anywhere;">
+            New entry under <strong>@Content.ParentDn</strong>
+        </FluentLabel>
         <FluentTextField @bind-Value="Content.Rdn" Label="RDN" Placeholder="cn=new-entry"
                          Spellcheck="false" Style="width: 100%;" />
         <FluentTextField @bind-Value="Content.ObjectClasses" Label="Object classes (comma-separated)"

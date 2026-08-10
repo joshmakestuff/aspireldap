@@ -6,6 +6,10 @@
 
 <FluentDialogBody>
     <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+        @* DN in the body, not the title — see NewChildDialog.razor (#104 min-content). *@
+        <FluentLabel Typo="@Typography.Body" Style="overflow-wrap: anywhere;">
+            Renaming <strong>@Content.Dn</strong>
+        </FluentLabel>
         <FluentTextField @bind-Value="Content.NewRdn" Label="New RDN" Placeholder="cn=new-name"
                          Spellcheck="false" Style="width: 100%;" />
         <FluentTextField @bind-Value="Content.NewParentDn" Label="New parent DN (blank = keep current)"
