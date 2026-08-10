@@ -8,13 +8,16 @@
 *@
 
 <div class="combo">
-    <input class="input mono" value="@Value" placeholder="@Placeholder" spellcheck="false"
-           aria-label="@AriaLabel" role="combobox" aria-expanded="@(_open ? "true" : "false")"
+    @* The anchor name is per instance (inline style is positioning plumbing, not palette):
+       the list is anchor-positioned fixed in Chromium so it escapes the dialog's scroll
+       region instead of extending it — see .combo-list in console.css. *@
+    <input class="input mono" style="anchor-name: @_anchor;" value="@Value" placeholder="@Placeholder"
+           spellcheck="false" aria-label="@AriaLabel" role="combobox" aria-expanded="@(_open ? "true" : "false")"
            @oninput="OnInput" @onfocus="@(() => _open = true)" @onblur="@(() => _open = false)"
            @onkeydown="OnKeyDown" @onkeydown:stopPropagation="_open" />
     @if (_open && Filtered.Count > 0)
     {
-        <div class="combo-list" role="listbox">
+        <div class="combo-list" style="position-anchor: @_anchor;" role="listbox">
             @for (var i = 0; i < Filtered.Count; i++)
             {
                 var index = i;
@@ -58,6 +61,9 @@
 
     private bool _open;
     private int _highlight;
+
+    /// <summary>Per-instance CSS anchor name; anchor names are global, so instances must not share.</summary>
+    private readonly string _anchor = $"--combo-{Guid.NewGuid():N}";
 
     private IReadOnlyList<AttributeGuidance> Filtered =>
         string.IsNullOrWhiteSpace(Value)

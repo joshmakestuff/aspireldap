@@ -139,6 +139,15 @@
    option list. Guidance, not enforcement — free text stays valid. */
 .combo{position:relative}
 .combo-list{position:absolute;left:0;right:0;top:100%;z-index:5;max-height:220px;overflow:auto;background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:var(--shadow-md);scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
+/* In engines with CSS anchor positioning (Chromium/Edge), the list escapes the dialog's
+   scroll region entirely: absolutely positioning it inside .dbody extended the scrollable
+   content (a second scrollbar beside the list's own) and near the dialog's bottom the
+   list dropped below the visible area. Fixed + anchored, it overlays instead, flips above
+   the input when there is no room below, and hides if the input scrolls out of view.
+   Non-supporting engines keep the in-flow behavior above. */
+@supports (anchor-name: --probe) {
+  .combo-list{position:fixed;inset:auto;top:anchor(bottom);left:anchor(left);width:anchor-size(width);z-index:35;position-try-fallbacks:flip-block;position-visibility:anchors-visible}
+}
 .combo-opt{display:flex;gap:var(--space-2);align-items:center;width:100%;text-align:left;padding:4px 8px;font:inherit;font-size:12px;background:transparent;border:0;cursor:pointer;color:inherit}
 .combo-opt:hover,.combo-opt[aria-selected=true]{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
 .hint{font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
