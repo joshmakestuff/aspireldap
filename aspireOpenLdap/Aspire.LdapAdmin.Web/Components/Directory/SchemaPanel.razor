@@ -1,22 +1,19 @@
 @*
     The server's subschema, straight from LdapSchemaService — LdifDotNet.Schema types render
-    directly, no view-model mapping layer (docs/decisions.md § Architecture).
+    directly, no view-model mapping layer (docs/decisions.md § Architecture). Hosted in the
+    contextual pane of the shell page (#102) — a panel, not a routed page, so the browse
+    tree stays alive while the schema is open, and the loaded schema survives view switches.
 
     The unavailable state is shown, not inferred: an unreadable subschema and a directory
-    that defines nothing look identical as data, so the service flags it and this page says
+    that defines nothing look identical as data, so the service flags it and this panel says
     it out loud, with the reason. UnparsedDefinitions likewise: what the parser could not
     handle is listed rather than dropped.
 
     MultiLine, and no Virtualize/ItemSize: a MUST+MAY cell needs two lines, and
     FluentDataGrid writes fixed row tracks otherwise (docs/findings.md).
 *@
-@page "/schema"
 @using LdifDotNet.Schema
 @inject LdapSchemaService SchemaService
-
-<PageTitle>Schema — Aspire LdapAdmin</PageTitle>
-
-<FluentLabel Typo="@Typography.H3">Schema</FluentLabel>
 
 @if (_schema is null)
 {

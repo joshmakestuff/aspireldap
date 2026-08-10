@@ -1,6 +1,15 @@
 @*
-    Directory browser: the tree on the left, the selected entry on the right, calling
-    LdapDirectoryService in-process — no HTTP, no DTOs.
+    The app shell and directory browser in one page (layout spec aspireldap#102): header
+    with brand + view switch, a persistent tree pane, and a contextual pane (entry editor /
+    search / schema) separated by a draggable FluentMultiSplitter. The tree lives here and
+    is never re-created on a view switch, so browse context survives searching and reading
+    the schema. Search and Schema render as always-alive panels toggled by display, not
+    @if — their state (results, loaded schema) survives view switches too.
+
+    Scroll model: the page NEVER scrolls. The shell grid we own is viewport-sized
+    (100dvh, definite rows — the fluent-ui trap list forbids indefinite-height flex +
+    height:100% loops), and each pane wraps its content in its own overflow:auto region.
+    The grid container and scroll wrappers are owned markup, so their CSS is legitimate.
 
     Children are fetched on first expand, never up front: a directory holds far more entries
     than a page should pull, and ITreeViewItem.OnExpandedAsync keeps the lazy load. Two
@@ -17,58 +26,96 @@
 @inject NavigationManager Navigation
 @inject IToastService Toasts
 
-<PageTitle>Browse — Aspire LdapAdmin</PageTitle>
+<PageTitle>@ViewTitle — Aspire LdapAdmin</PageTitle>
 
-<FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="16">
-    <FluentStack Orientation="@Orientation.Vertical" Width="340px" Style="overflow: auto;">
-        <FluentLabel Typo="@Typography.H3">Browse</FluentLabel>
-        @if (_roots is null)
-        {
-            <FluentProgressRing />
-        }
-        else
-        {
-            @* No ItemTemplate, deliberately: the FAST tree-view's click handler only selects
-               when the click's event.target IS the fluent-tree-item, so any template element
-               (a span for a tooltip, say) swallows selection clicks — measured on 4.14.4.
-               The default rendering keeps the item text as a text node, which clicks
-               attribute to the tree item itself. *@
-            <FluentTreeView Items="@_roots" LazyLoadItems="true" @bind-SelectedItem="_selectedItem"
-                            @bind-SelectedItem:after="OnSelectionChangedAsync" />
-        }
-    </FluentStack>
+<div style="height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden;">
+    <FluentHeader>
+        Aspire LdapAdmin
+        <FluentSpacer />
+        @* Plain header text inherits the accent surface's own foreground token; the switch
+           buttons paint their own fills, so no neutral-on-accent contrast trap
+           (docs/findings.md § Fluent). Active view = Neutral fill (stands out on accent);
+           inactive = Accent fill (blends into the header, on-accent foreground token). *@
+        <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Width="auto"
+                     VerticalAlignment="@VerticalAlignment.Center">
+            <FluentButton Appearance="@SwitchAppearance(AdminView.Browse)" aria-pressed="@AriaPressed(AdminView.Browse)"
+                          IconStart="@(new Icons.Regular.Size16.Folder())"
+                          OnClick="@(() => SwitchView(AdminView.Browse))">Browse</FluentButton>
+            <FluentButton Appearance="@SwitchAppearance(AdminView.Search)" aria-pressed="@AriaPressed(AdminView.Search)"
+                          IconStart="@(new Icons.Regular.Size16.Search())"
+                          OnClick="@(() => SwitchView(AdminView.Search))">Search</FluentButton>
+            <FluentButton Appearance="@SwitchAppearance(AdminView.Schema)" aria-pressed="@AriaPressed(AdminView.Schema)"
+                          IconStart="@(new Icons.Regular.Size16.DocumentBulletList())"
+                          OnClick="@(() => SwitchView(AdminView.Schema))">Schema</FluentButton>
+        </FluentStack>
+    </FluentHeader>
 
-    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-        @if (_error is not null)
-        {
-            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
-        }
+    <FluentMultiSplitter Height="100%" Width="100%" BarSize="6">
+        <FluentMultiSplitterPane Size="340px" Min="220px" Max="75%">
+            <div style="height: 100%; overflow: auto; padding: 8px;">
+                @if (_roots is null)
+                {
+                    <FluentProgressRing />
+                }
+                else
+                {
+                    @* No ItemTemplate, deliberately: the FAST tree-view's click handler only selects
+                       when the click's event.target IS the fluent-tree-item, so any template element
+                       (a span for a tooltip, say) swallows selection clicks — measured on 4.14.4.
+                       The default rendering keeps the item text as a text node, which clicks
+                       attribute to the tree item itself. *@
+                    <FluentTreeView Items="@_roots" LazyLoadItems="true" @bind-SelectedItem="_selectedItem"
+                                    @bind-SelectedItem:after="OnSelectionChangedAsync" />
+                }
+            </div>
+        </FluentMultiSplitterPane>
+        <FluentMultiSplitterPane Min="320px">
+            <div style="height: 100%; overflow: auto; padding: 12px 16px;">
+                <div style="@PanelDisplay(AdminView.Browse)">
+                    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+                        @if (_error is not null)
+                        {
+                            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
+                        }
 
-        @if (_loadingEntry)
-        {
-            <FluentProgressRing />
-        }
-        else if (_entry is not null)
-        {
-            <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Wrap="true">
-                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())"
-                              OnClick="OpenAddAttributeDialog">Add attribute</FluentButton>
-                <FluentButton IconStart="@(new Icons.Regular.Size16.FolderAdd())"
-                              OnClick="OpenChildDialog">New child entry</FluentButton>
-                <FluentButton IconStart="@(new Icons.Regular.Size16.Rename())"
-                              OnClick="OpenRenameDialog">Rename</FluentButton>
-                <FluentButton IconStart="@(new Icons.Regular.Size16.Delete())"
-                              OnClick="OpenDeleteDialog">Delete</FluentButton>
-            </FluentStack>
+                        @if (_loadingEntry)
+                        {
+                            <FluentProgressRing />
+                        }
+                        else if (_entry is not null)
+                        {
+                            <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Wrap="true">
+                                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())"
+                                              OnClick="OpenAddAttributeDialog">Add attribute</FluentButton>
+                                <FluentButton IconStart="@(new Icons.Regular.Size16.FolderAdd())"
+                                              OnClick="OpenChildDialog">New child entry</FluentButton>
+                                <FluentButton IconStart="@(new Icons.Regular.Size16.Rename())"
+                                              OnClick="OpenRenameDialog">Rename</FluentButton>
+                                <FluentButton IconStart="@(new Icons.Regular.Size16.Delete())"
+                                              OnClick="OpenDeleteDialog">Delete</FluentButton>
+                            </FluentStack>
 
-            <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
-        }
-        else if (_error is null)
-        {
-            <FluentLabel Typo="@Typography.Body">Select an entry.</FluentLabel>
-        }
-    </FluentStack>
-</FluentStack>
+                            <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
+                        }
+                        else if (_error is null)
+                        {
+                            <FluentLabel Typo="@Typography.Body">Select an entry.</FluentLabel>
+                        }
+                    </FluentStack>
+                </div>
+                <div style="@PanelDisplay(AdminView.Search)">
+                    <SearchPanel OnEntrySelected="OnSearchEntrySelected" />
+                </div>
+                @if (_schemaVisited)
+                {
+                    <div style="@PanelDisplay(AdminView.Schema)">
+                        <SchemaPanel />
+                    </div>
+                }
+            </div>
+        </FluentMultiSplitterPane>
+    </FluentMultiSplitter>
+</div>
 
 @if (_attrDialog is not null)
 {
@@ -225,6 +272,66 @@
     [SupplyParameterFromQuery(Name = "dn")]
     public string? DeepLinkDn { get; set; }
 
+    /// <summary>Which view the contextual pane shows ("search"/"schema"; anything else = browse).</summary>
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? ViewParam { get; set; }
+
+    internal enum AdminView { Browse, Search, Schema }
+
+    private AdminView _view = AdminView.Browse;
+
+    /// <summary>
+    /// The schema panel renders only after its first visit (loading the whole subschema on
+    /// app start would be waste), then stays alive behind a display toggle so the loaded
+    /// schema and filter state survive later view switches.
+    /// </summary>
+    private bool _schemaVisited;
+
+    private string ViewTitle => _view switch
+    {
+        AdminView.Search => "Search",
+        AdminView.Schema => "Schema",
+        _ => "Browse",
+    };
+
+    private Appearance SwitchAppearance(AdminView view) =>
+        _view == view ? Appearance.Neutral : Appearance.Accent;
+
+    private string AriaPressed(AdminView view) => _view == view ? "true" : "false";
+
+    /// <summary>Hides an inactive panel without destroying it; the wrapper div is owned markup.</summary>
+    private string? PanelDisplay(AdminView view) => _view == view ? null : "display: none;";
+
+    /// <summary>The URL is the view state: view + selected dn, both restorable from a deep link.</summary>
+    private static string Url(AdminView view, string? dn)
+    {
+        var query = new List<string>(2);
+        if (view is AdminView.Search or AdminView.Schema)
+        {
+            query.Add($"view={view.ToString().ToLowerInvariant()}");
+        }
+        if (dn is { Length: > 0 })
+        {
+            query.Add($"dn={Uri.EscapeDataString(dn)}");
+        }
+        return query.Count == 0 ? "/" : $"/?{string.Join('&', query)}";
+    }
+
+    private void SwitchView(AdminView view)
+    {
+        if (view != _view)
+        {
+            Navigation.NavigateTo(Url(view, _selectedDn), forceLoad: false);
+        }
+    }
+
+    /// <summary>
+    /// A clicked search result becomes the selection: the URL switches to the browse view
+    /// naming the entry, and OnParametersSetAsync selects + reveals it in the tree.
+    /// </summary>
+    private void OnSearchEntrySelected(string dn) =>
+        Navigation.NavigateTo(Url(AdminView.Browse, dn), forceLoad: false);
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -245,6 +352,14 @@
     /// </summary>
     protected override async Task OnParametersSetAsync()
     {
+        _view = ViewParam?.ToLowerInvariant() switch
+        {
+            "search" => AdminView.Search,
+            "schema" => AdminView.Schema,
+            _ => AdminView.Browse,
+        };
+        _schemaVisited |= _view == AdminView.Schema;
+
         if (DeepLinkDn is { Length: > 0 } dn && !string.Equals(dn, _selectedDn, StringComparison.Ordinal))
         {
             await SelectAsync(dn, reveal: true);
@@ -327,10 +442,12 @@
     private async Task SelectAsync(string dn, bool reveal)
     {
         // Keep the address bar naming the entry on screen; replace, not push — selecting is
-        // view state, and pushing would make Back step through every entry visited.
-        if (!string.Equals(DeepLinkDn, dn, StringComparison.Ordinal))
+        // view state, and pushing would make Back step through every entry visited. The view
+        // param is dropped deliberately: selecting an entry is a browse action, so a tree
+        // click while the search or schema panel is open switches the pane to the editor.
+        if (!string.Equals(DeepLinkDn, dn, StringComparison.Ordinal) || _view != AdminView.Browse)
         {
-            Navigation.NavigateTo($"/?dn={Uri.EscapeDataString(dn)}", forceLoad: false, replace: true);
+            Navigation.NavigateTo(Url(AdminView.Browse, dn), forceLoad: false, replace: true);
         }
 
         var token = ++_selectSeq;
