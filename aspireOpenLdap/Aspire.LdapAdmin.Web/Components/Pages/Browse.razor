@@ -25,6 +25,7 @@
 @inject LdapDirectoryService Directory
 @inject NavigationManager Navigation
 @inject IToastService Toasts
+@inject IDialogService DialogService
 
 <PageTitle>@ViewTitle — Aspire LdapAdmin</PageTitle>
 
@@ -117,128 +118,6 @@
     </FluentMultiSplitter>
 </div>
 
-@if (_attrDialog is not null)
-{
-    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _attrDialog = null; } })"
-                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="Edit attribute">
-        <FluentDialogHeader ShowDismiss="true">
-            <FluentLabel Typo="@Typography.PaneHeader">
-                @(_attrDialog.IsNew ? "Add attribute" : $"Edit {_attrDialog.Name}")
-            </FluentLabel>
-        </FluentDialogHeader>
-        <FluentDialogBody>
-            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-                @if (_attrDialog.IsNew)
-                {
-                    <FluentTextField @bind-Value="_attrDialog.Name" Label="Attribute name"
-                                     Spellcheck="false" Style="width: 100%;" />
-                }
-                <FluentTextArea @bind-Value="_attrDialog.ValuesText" Rows="6" Style="width: 100%;"
-                                Label="@(_attrDialog.IsBinary ? "Values (base64, one per line)" : "Values (one per line)")"
-                                Spellcheck="false" />
-                @if (!_attrDialog.IsNew)
-                {
-                    <FluentLabel Typo="@Typography.Body">
-                        Saving replaces every value of this attribute; saving with no values removes it.
-                    </FluentLabel>
-                }
-                @if (_attrDialog.Error is not null)
-                {
-                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_attrDialog.Error</FluentMessageBar>
-                }
-            </FluentStack>
-        </FluentDialogBody>
-        <FluentDialogFooter>
-            <FluentButton Appearance="@Appearance.Accent" Loading="_attrDialog.Busy"
-                          OnClick="SaveAttributeAsync">Save</FluentButton>
-            <FluentButton OnClick="@(() => _attrDialog = null)">Cancel</FluentButton>
-        </FluentDialogFooter>
-    </FluentDialog>
-}
-
-@if (_childDialog is not null)
-{
-    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _childDialog = null; } })"
-                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="New child entry">
-        <FluentDialogHeader ShowDismiss="true">
-            <FluentLabel Typo="@Typography.PaneHeader">New entry under @_childDialog.ParentDn</FluentLabel>
-        </FluentDialogHeader>
-        <FluentDialogBody>
-            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-                <FluentTextField @bind-Value="_childDialog.Rdn" Label="RDN" Placeholder="cn=new-entry"
-                                 Spellcheck="false" Style="width: 100%;" />
-                <FluentTextField @bind-Value="_childDialog.ObjectClasses" Label="Object classes (comma-separated)"
-                                 Placeholder="inetOrgPerson" Spellcheck="false" Style="width: 100%;" />
-                <FluentTextArea @bind-Value="_childDialog.AttributesText" Rows="6" Style="width: 100%;"
-                                Label="Attributes (name: value, one per line)" Spellcheck="false" />
-                @if (_childDialog.Error is not null)
-                {
-                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_childDialog.Error</FluentMessageBar>
-                }
-            </FluentStack>
-        </FluentDialogBody>
-        <FluentDialogFooter>
-            <FluentButton Appearance="@Appearance.Accent" Loading="_childDialog.Busy"
-                          OnClick="SaveChildAsync">Create</FluentButton>
-            <FluentButton OnClick="@(() => _childDialog = null)">Cancel</FluentButton>
-        </FluentDialogFooter>
-    </FluentDialog>
-}
-
-@if (_renameDialog is not null)
-{
-    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _renameDialog = null; } })"
-                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="Rename entry">
-        <FluentDialogHeader ShowDismiss="true">
-            <FluentLabel Typo="@Typography.PaneHeader">Rename @_renameDialog.Dn</FluentLabel>
-        </FluentDialogHeader>
-        <FluentDialogBody>
-            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-                <FluentTextField @bind-Value="_renameDialog.NewRdn" Label="New RDN" Placeholder="cn=new-name"
-                                 Spellcheck="false" Style="width: 100%;" />
-                <FluentTextField @bind-Value="_renameDialog.NewParentDn" Label="New parent DN (blank = keep current)"
-                                 Spellcheck="false" Style="width: 100%;" />
-                <FluentCheckbox @bind-Value="_renameDialog.DeleteOldRdn" Label="Remove the old RDN value" />
-                @if (_renameDialog.Error is not null)
-                {
-                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_renameDialog.Error</FluentMessageBar>
-                }
-            </FluentStack>
-        </FluentDialogBody>
-        <FluentDialogFooter>
-            <FluentButton Appearance="@Appearance.Accent" Loading="_renameDialog.Busy"
-                          OnClick="SaveRenameAsync">Rename</FluentButton>
-            <FluentButton OnClick="@(() => _renameDialog = null)">Cancel</FluentButton>
-        </FluentDialogFooter>
-    </FluentDialog>
-}
-
-@if (_deleteDialog is not null)
-{
-    <FluentDialog Hidden="false" HiddenChanged="@(hidden => { if (hidden) { _deleteDialog = null; } })"
-                  Modal="true" TrapFocus="true" PreventScroll="true" AriaLabel="Delete entry">
-        <FluentDialogHeader ShowDismiss="true">
-            <FluentLabel Typo="@Typography.PaneHeader">Delete entry</FluentLabel>
-        </FluentDialogHeader>
-        <FluentDialogBody>
-            <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-                <FluentLabel Typo="@Typography.Body">
-                    Delete <strong>@_deleteDialog.Dn</strong>? An entry with children cannot be deleted.
-                </FluentLabel>
-                @if (_deleteDialog.Error is not null)
-                {
-                    <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_deleteDialog.Error</FluentMessageBar>
-                }
-            </FluentStack>
-        </FluentDialogBody>
-        <FluentDialogFooter>
-            <FluentButton Appearance="@Appearance.Accent" Loading="_deleteDialog.Busy"
-                          OnClick="ConfirmDeleteAsync">Delete</FluentButton>
-            <FluentButton OnClick="@(() => _deleteDialog = null)">Cancel</FluentButton>
-        </FluentDialogFooter>
-    </FluentDialog>
-}
-
 @code {
     private const int AutoExpandDepth = 2;
 
@@ -258,11 +137,6 @@
     /// user has moved on is discarded instead of clobbering the newer selection.
     /// </summary>
     private int _selectSeq;
-
-    private AttributeDialogModel? _attrDialog;
-    private ChildDialogModel? _childDialog;
-    private RenameDialogModel? _renameDialog;
-    private DeleteDialogModel? _deleteDialog;
 
     /// <summary>
     /// Deep link target ("/?dn=..."), used by search results and by the address bar itself.
@@ -568,89 +442,113 @@
     }
 
     // ---- Entry editing ------------------------------------------------------------------
+    //
+    // All four dialogs are provider-hosted (IDialogService + the components in
+    // Components/Directory) rather than inline <FluentDialog> markup: inline, the FAST
+    // dialog control keeps its stylesheet default fixed height (480px) with no overflow
+    // handling, so form content taller than that renders past the dialog background — the
+    // #104 defect class, one mechanism across all four. Each model carries its save
+    // delegate; the dialog shows a returned error inline and closes only on null (success).
 
-    private void OpenEditAttributeDialog(LdapAttributeValues attribute) => _attrDialog = new AttributeDialogModel
+    /// <summary>DialogParameters shared by the four entry dialogs — one hosting shape, one fix.</summary>
+    private static DialogParameters EntryDialogParameters(string title) => new()
     {
-        IsNew = false,
-        Name = attribute.Name,
-        IsBinary = attribute.IsBinary,
-        ValuesText = string.Join('\n', attribute.Values),
+        Title = title,
+        Width = "480px",
+        Modal = true,
+        TrapFocus = true,
+        PreventScroll = true,
+        ShowDismiss = true,
+        // The content components render their own footers (Save/Cancel with busy state);
+        // null hides the provider's default action buttons.
+        PrimaryAction = null,
+        SecondaryAction = null,
     };
 
-    private void OpenAddAttributeDialog() => _attrDialog = new AttributeDialogModel { IsNew = true };
+    private async Task OpenEditAttributeDialog(LdapAttributeValues attribute)
+    {
+        var model = new AttributeDialogModel
+        {
+            IsNew = false,
+            Name = attribute.Name,
+            IsBinary = attribute.IsBinary,
+            ValuesText = string.Join('\n', attribute.Values),
+            SaveAsync = SaveAttributeAsync,
+        };
+        await DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters($"Edit {attribute.Name}"));
+    }
 
-    private void OpenChildDialog()
+    private async Task OpenAddAttributeDialog()
+    {
+        var model = new AttributeDialogModel { IsNew = true, SaveAsync = SaveAttributeAsync };
+        await DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters("Add attribute"));
+    }
+
+    private async Task OpenChildDialog()
     {
         if (_selectedDn is { } dn)
         {
-            _childDialog = new ChildDialogModel { ParentDn = dn };
+            var model = new ChildDialogModel { ParentDn = dn, SaveAsync = SaveChildAsync };
+            await DialogService.ShowDialogAsync<NewChildDialog>(model, EntryDialogParameters($"New entry under {dn}"));
         }
     }
 
-    private void OpenRenameDialog()
+    private async Task OpenRenameDialog()
     {
         if (_selectedDn is { } dn)
         {
-            _renameDialog = new RenameDialogModel { Dn = dn };
+            var model = new RenameDialogModel { Dn = dn, SaveAsync = SaveRenameAsync };
+            await DialogService.ShowDialogAsync<RenameDialog>(model, EntryDialogParameters($"Rename {dn}"));
         }
     }
 
-    private void OpenDeleteDialog()
+    private async Task OpenDeleteDialog()
     {
         if (_selectedDn is { } dn)
         {
-            _deleteDialog = new DeleteDialogModel { Dn = dn };
+            var model = new DeleteDialogModel { Dn = dn, SaveAsync = ConfirmDeleteAsync };
+            await DialogService.ShowDialogAsync<DeleteDialog>(model, EntryDialogParameters("Delete entry"));
         }
     }
 
-    private async Task SaveAttributeAsync()
+    /// <summary>Save delegates: null = success (the dialog closes); a string = shown inline.</summary>
+    private async Task<string?> SaveAttributeAsync(AttributeDialogModel dialog)
     {
-        if (_attrDialog is not { } dialog || _selectedDn is not { } dn)
+        if (_selectedDn is not { } dn)
         {
-            return;
+            return "No entry is selected.";
         }
 
         var values = Lines(dialog.ValuesText);
         if (dialog.IsNew && values.Count == 0)
         {
-            dialog.Error = "Enter at least one value.";
-            return;
+            return "Enter at least one value.";
         }
 
-        dialog.Busy = true;
-        dialog.Error = null;
         var change = new LdapAttributeChange(
             dialog.IsNew ? DirectoryAttributeOperation.Add : DirectoryAttributeOperation.Replace,
             dialog.Name,
             values,
             IsBase64: dialog.IsBinary);
         var result = await GuardedAsync(() => Directory.ModifyEntryAsync(dn, [change]));
-        dialog.Busy = false;
 
         if (!result.Succeeded)
         {
-            dialog.Error = Describe(result);
-            return;
+            return Describe(result);
         }
 
-        _attrDialog = null;
         Toasts.ShowSuccess($"{dialog.Name} saved");
         await SelectAsync(dn, reveal: false);
+        return null;
     }
 
-    private async Task SaveChildAsync()
+    private async Task<string?> SaveChildAsync(ChildDialogModel dialog)
     {
-        if (_childDialog is not { } dialog)
-        {
-            return;
-        }
-
         var objectClasses = dialog.ObjectClasses
             .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (dialog.Rdn.Length == 0 || objectClasses.Length == 0)
         {
-            dialog.Error = "An RDN and at least one object class are required.";
-            return;
+            return "An RDN and at least one object class are required.";
         }
 
         string childDn;
@@ -660,8 +558,7 @@
         }
         catch (ArgumentException ex)
         {
-            dialog.Error = ex.Message;
-            return;
+            return ex.Message;
         }
 
         List<LdapNewAttribute> attributes = [new("objectClass", objectClasses)];
@@ -670,38 +567,26 @@
             var colon = line.IndexOf(':', StringComparison.Ordinal);
             if (colon <= 0)
             {
-                dialog.Error = $"'{line}' is not in 'name: value' form.";
-                return;
+                return $"'{line}' is not in 'name: value' form.";
             }
             attributes.Add(new LdapNewAttribute(line[..colon].Trim(), [line[(colon + 1)..].Trim()]));
         }
 
-        dialog.Busy = true;
-        dialog.Error = null;
         var result = await GuardedAsync(() => Directory.AddEntryAsync(new LdapNewEntry(childDn, attributes)));
-        dialog.Busy = false;
 
         if (!result.Succeeded)
         {
-            dialog.Error = Describe(result);
-            return;
+            return Describe(result);
         }
 
-        _childDialog = null;
         Toasts.ShowSuccess($"{childDn} created");
         await ReloadChildrenAsync(dialog.ParentDn);
         await SelectAsync(childDn, reveal: true);
+        return null;
     }
 
-    private async Task SaveRenameAsync()
+    private async Task<string?> SaveRenameAsync(RenameDialogModel dialog)
     {
-        if (_renameDialog is not { } dialog)
-        {
-            return;
-        }
-
-        dialog.Busy = true;
-        dialog.Error = null;
         var newParent = dialog.NewParentDn.Length > 0 ? dialog.NewParentDn : null;
         LdapRenameResult rename;
         try
@@ -712,15 +597,12 @@
         {
             rename = new LdapRenameResult(new LdapOperationResult(LdapOperationStatus.Failed, null, Describe(ex)), null);
         }
-        dialog.Busy = false;
 
         if (!rename.Outcome.Succeeded || rename.NewDn is null)
         {
-            dialog.Error = Describe(rename.Outcome);
-            return;
+            return Describe(rename.Outcome);
         }
 
-        _renameDialog = null;
         Toasts.ShowSuccess($"Renamed to {rename.NewDn}");
         await ReloadChildrenAsync(ParentOf(dialog.Dn) ?? Directory.BaseDn);
         if (newParent is not null)
@@ -728,31 +610,23 @@
             await ReloadChildrenAsync(newParent);
         }
         await SelectAsync(rename.NewDn, reveal: true);
+        return null;
     }
 
-    private async Task ConfirmDeleteAsync()
+    private async Task<string?> ConfirmDeleteAsync(DeleteDialogModel dialog)
     {
-        if (_deleteDialog is not { } dialog)
-        {
-            return;
-        }
-
-        dialog.Busy = true;
-        dialog.Error = null;
         var result = await GuardedAsync(() => Directory.DeleteEntryAsync(dialog.Dn));
-        dialog.Busy = false;
 
         if (!result.Succeeded)
         {
-            dialog.Error = Describe(result);
-            return;
+            return Describe(result);
         }
 
-        _deleteDialog = null;
         Toasts.ShowSuccess($"{dialog.Dn} deleted");
         var parent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
         await ReloadChildrenAsync(parent);
         await SelectAsync(parent, reveal: true);
+        return null;
     }
 
     /// <summary>Transport failures surface as an operation outcome, not a crash.</summary>
@@ -847,41 +721,4 @@
 
     private static string Describe(DirectoryException ex) =>
         $"The directory could not be reached ({ex.GetType().Name}): {ex.Message}";
-
-    private sealed class AttributeDialogModel
-    {
-        public bool IsNew { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string ValuesText { get; set; } = string.Empty;
-        public bool IsBinary { get; set; }
-        public string? Error { get; set; }
-        public bool Busy { get; set; }
-    }
-
-    private sealed class ChildDialogModel
-    {
-        public required string ParentDn { get; init; }
-        public string Rdn { get; set; } = string.Empty;
-        public string ObjectClasses { get; set; } = string.Empty;
-        public string AttributesText { get; set; } = string.Empty;
-        public string? Error { get; set; }
-        public bool Busy { get; set; }
-    }
-
-    private sealed class RenameDialogModel
-    {
-        public required string Dn { get; init; }
-        public string NewRdn { get; set; } = string.Empty;
-        public string NewParentDn { get; set; } = string.Empty;
-        public bool DeleteOldRdn { get; set; } = true;
-        public string? Error { get; set; }
-        public bool Busy { get; set; }
-    }
-
-    private sealed class DeleteDialogModel
-    {
-        public required string Dn { get; init; }
-        public string? Error { get; set; }
-        public bool Busy { get; set; }
-    }
 }

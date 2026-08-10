@@ -1,0 +1,54 @@
+@*
+    New child entry dialog body, hosted by FluentDialogProvider via IDialogService — see
+    AttributeDialog.razor for why inline <FluentDialog> markup is not used (#104).
+*@
+@implements IDialogContentComponent<ChildDialogModel>
+
+<FluentDialogBody>
+    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+        <FluentTextField @bind-Value="Content.Rdn" Label="RDN" Placeholder="cn=new-entry"
+                         Spellcheck="false" Style="width: 100%;" />
+        <FluentTextField @bind-Value="Content.ObjectClasses" Label="Object classes (comma-separated)"
+                         Placeholder="inetOrgPerson" Spellcheck="false" Style="width: 100%;" />
+        <FluentTextArea @bind-Value="Content.AttributesText" Rows="6" Style="width: 100%;"
+                        Label="Attributes (name: value, one per line)" Spellcheck="false" />
+        @if (_error is not null)
+        {
+            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
+        }
+    </FluentStack>
+</FluentDialogBody>
+<FluentDialogFooter>
+    <FluentButton Appearance="@Appearance.Accent" Loading="_busy" OnClick="SaveAsync">Create</FluentButton>
+    <FluentButton OnClick="@(() => Dialog.CancelAsync())">Cancel</FluentButton>
+</FluentDialogFooter>
+
+@code {
+    [Parameter]
+    public ChildDialogModel Content { get; set; } = default!;
+
+    [CascadingParameter]
+    public FluentDialog Dialog { get; set; } = default!;
+
+    private string? _error;
+    private bool _busy;
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await Content.SaveAsync(Content);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        if (_error is null)
+        {
+            await Dialog.CloseAsync(Content);
+        }
+    }
+}

@@ -1,5 +1,5 @@
 {
   "appHost": {
-    "path": "examples/AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj"
+    "path": "aspireOpenLdap/Aspire.LdapAdmin.AppHost/Aspire.LdapAdmin.AppHost.csproj"
   }
 }
