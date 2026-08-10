@@ -88,8 +88,10 @@ export function trapFocus(el) {
   releaseFocus();
   trapped = el;
   restoreTo = document.activeElement;
-  const first = el.querySelector(FOCUSABLE);
-  if (first) first.focus();
+  // Focus the panel itself, not its first field: programmatic focus on an input triggers
+  // :focus-visible in Chromium, and the ring flashing on dialog open reads as a glitch
+  // (#109). The panel carries tabindex="-1"; Tab moves into the first control normally.
+  el.focus({ preventScroll: true });
   trapHandler = e => {
     if (e.key !== 'Tab') return;
     const items = [...el.querySelectorAll(FOCUSABLE)].filter(i => !i.disabled && i.offsetParent !== null);

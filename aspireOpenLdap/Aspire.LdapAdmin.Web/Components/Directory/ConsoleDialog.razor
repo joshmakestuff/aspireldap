@@ -12,7 +12,7 @@
 
 <div class="dialog-backdrop" @onclick="Cancel" @onkeydown="OnKeyDown">
     <div class="wide blueprint" role="dialog" aria-modal="true" aria-label="@Title"
-         @ref="_panel" @onclick:stopPropagation="true">
+         tabindex="-1" @ref="_panel" @onclick:stopPropagation="true">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="dialog-title">@Title</div>
         @ChildContent

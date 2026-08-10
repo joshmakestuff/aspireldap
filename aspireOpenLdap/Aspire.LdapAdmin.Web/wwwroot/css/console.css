@@ -121,7 +121,10 @@
 .sec{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 50%,transparent);margin:var(--space-6) 0 var(--space-3);display:flex;align-items:center;gap:var(--space-3)}
 .sec::after{content:"";flex:1;height:1px;background:var(--color-divider)}
 .pre{white-space:pre;overflow:auto;font-size:12px;line-height:1.65;padding:var(--space-3);border:1px solid var(--color-divider);background:var(--color-surface)}
-.ta{width:100%;min-height:220px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;padding:var(--space-3);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:0;color:inherit}
+/* scrollbar-gutter: without it, classic Windows scrollbars oscillate while typing — the
+   bar appears, the text rewraps narrower and fits, the bar disappears, the text rewraps
+   wider and overflows again. Reserving the gutter breaks the loop. */
+.ta{width:100%;min-height:220px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;padding:var(--space-3);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:0;color:inherit;scrollbar-gutter:stable}
 .frow{display:grid;grid-template-columns:minmax(120px,1.1fr) 92px minmax(120px,1.4fr) 36px;gap:var(--space-2);align-items:end;margin-bottom:var(--space-2)}
 
 /* ── Notices, dialogs, toast ───────────────────────────────────────────── */
@@ -133,6 +136,11 @@
 .steps{display:flex;gap:var(--space-4);margin-bottom:var(--space-4);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
 .step{color:color-mix(in srgb,var(--color-text) 40%,transparent)}
 .step[aria-current=true]{color:var(--color-accent)}
-.wide{width:min(720px,100%);display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-6);border:1px solid var(--color-divider);background:var(--color-bg);box-shadow:var(--shadow-lg);max-height:88vh;overflow:auto}
+.wide{width:min(720px,100%);display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-6);border:1px solid var(--color-divider);background:var(--color-bg);box-shadow:var(--shadow-lg);max-height:88vh;overflow:auto;scrollbar-gutter:stable}
+/* The dialog panel takes initial focus (tabindex=-1) so opening a modal does not flash the
+   2px ring on its first field (#109). The panel is a container, not a control — the ring
+   rule ("never removed") applies to interactive elements; Tab moves focus onward and every
+   control keeps its ring. */
+[role="dialog"]:focus-visible{outline:none}
 .cbcell{width:34px}
 .table td.mono,.table th.mono{font-size:12px}

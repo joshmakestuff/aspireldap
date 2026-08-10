@@ -9,8 +9,24 @@
     <div class="dnline mono" style="margin-top: 0;">under @Model.ParentDn</div>
     <div class="field">
         <label>RDN <span class="mono text-muted">e.g. uid=jane.doe</span></label>
-        <input class="input mono" @bind="Model.Rdn" spellcheck="false" />
+        <input class="input mono" @bind="Model.Rdn" @bind:event="oninput" spellcheck="false" />
     </div>
+    @* The composed DN, live: a full DN pasted into the RDN box silently composes a child
+       under a parent that does not exist, and the server's NoSuchObject reads as a mystery.
+       Showing the composition as it is typed makes the mistake visible before submit. *@
+    @if (Model.Rdn.Length > 0)
+    {
+        <div class="dnline mono" style="margin-top: 0;">
+            @if (PreviewDn is { } preview)
+            {
+                <text>creates @preview</text>
+            }
+            else
+            {
+                <text>⚠ not a single attribute=value RDN — the parent is already fixed above</text>
+            }
+        </div>
+    }
     <div class="field">
         <label>Object classes <span class="mono text-muted">comma-separated</span></label>
         <input class="input mono" @bind="Model.ObjectClasses" spellcheck="false"
@@ -41,6 +57,24 @@
 
     private string? _error;
     private bool _busy;
+
+    /// <summary>The DN the dialog would create, or null while the RDN is not one valid RDN.</summary>
+    private string? PreviewDn
+    {
+        get
+        {
+            try
+            {
+                return LdifDotNet.Dn.Parse(Model.Rdn) is { Count: 1 }
+                    ? LdifDotNet.Dn.Combine(Model.Rdn, Model.ParentDn)
+                    : null;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+    }
 
     private Task Close() => OnClose.InvokeAsync();
 

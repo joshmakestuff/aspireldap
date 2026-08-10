@@ -798,6 +798,14 @@
         string childDn;
         try
         {
+            // Exactly one RDN: a full DN pasted here would compose a child under a parent
+            // that does not exist, and the server's NoSuchObject reads as a mystery
+            // ("parent doesn't exist" against a parent visibly in the tree).
+            if (Dn.Parse(dialog.Rdn).Count != 1)
+            {
+                return $"'{dialog.Rdn}' is not a single RDN (one attribute=value). " +
+                    $"The parent is already {dialog.ParentDn} — do not include it.";
+            }
             childDn = Dn.Combine(dialog.Rdn, dialog.ParentDn);
         }
         catch (ArgumentException ex)

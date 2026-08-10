@@ -119,6 +119,29 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
+    public void NewChildDialog_Previews_The_Composed_Dn_And_Warns_On_A_Pasted_Full_Dn()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var model = new ChildDialogModel
+        {
+            ParentDn = "ou=directory,dc=example,dc=org",
+            SaveAsync = _ => Task.FromResult<string?>(null),
+        };
+        var cut = RenderComponent<NewChildDialog>(parameters => parameters
+            .Add(p => p.Model, model));
+
+        // A single RDN previews the DN the dialog would create.
+        cut.Find(".field input").Input("uid=jane.doe");
+        Assert.Contains("creates uid=jane.doe,ou=directory,dc=example,dc=org",
+            cut.Markup, StringComparison.Ordinal);
+
+        // A pasted full DN composes a child under a parent that does not exist — the
+        // exact input that produced the server's mystery NoSuchObject. It must warn.
+        cut.Find(".field input").Input("uid=jane.doe,ou=directory,dc=example,dc=org");
+        Assert.Contains("not a single attribute=value RDN", cut.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConsoleDialog_Escape_And_Backdrop_Click_Cancel()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
