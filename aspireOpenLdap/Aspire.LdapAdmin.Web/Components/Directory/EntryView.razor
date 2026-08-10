@@ -30,7 +30,9 @@
             }
             @if (context.Values.Count > 1)
             {
-                <FluentBadge Appearance="@Appearance.Neutral">@context.Values.Count values</FluentBadge>
+                @* Paired with the display cap (#98): while capped the badge itself says
+                   "N of M values", so the cap is surfaced next to the attribute name too. *@
+                <FluentBadge Appearance="@Appearance.Neutral">@CountBadge(PlanFor(context))</FluentBadge>
             }
             @if (OnEdit.HasDelegate)
             {
@@ -47,7 +49,11 @@
         }
         else
         {
-            @foreach (var value in context.Values)
+            @* Display cap (#98, absorbed #100): a many-valued attribute renders at most the
+               AppHost-set cap of values, and the cap is always surfaced, never silent —
+               "N of M values" plus an explicit expand, paired with the count badge above. *@
+            var plan = PlanFor(context);
+            @foreach (var value in context.Values.Take(plan.Shown))
             {
                 <div style="overflow-wrap: anywhere;">
                     @if (context.IsBinary)
@@ -64,6 +70,24 @@
                     }
                 </div>
             }
+            @if (plan.Capped)
+            {
+                <div>
+                    <FluentButton Appearance="@Appearance.Lightweight"
+                                  OnClick="@(() => { _expanded.Add(context.Name); })">
+                        Showing @plan.Shown of @plan.Total values — show all
+                    </FluentButton>
+                </div>
+            }
+            else if (context.Values.Count > Cap)
+            {
+                <div>
+                    <FluentButton Appearance="@Appearance.Lightweight"
+                                  OnClick="@(() => { _expanded.Remove(context.Name); })">
+                        Show first @Cap of @plan.Total values
+                    </FluentButton>
+                </div>
+            }
         }
     </TemplateColumn>
 </FluentDataGrid>
@@ -75,6 +99,9 @@
     [Inject]
     private IToastService Toasts { get; set; } = default!;
 
+    [Inject]
+    private LdapAdminSettings Settings { get; set; } = default!;
+
     [Parameter, EditorRequired]
     public required LdapEntry Entry { get; set; }
 
@@ -84,6 +111,46 @@
 
     private IQueryable<LdapAttributeValues> Rows =>
         Entry.Attributes.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase).AsQueryable();
+
+    /// <summary>Attribute names the user explicitly expanded past the display cap.</summary>
+    private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
+
+    private string? _entryDn;
+
+    private int Cap => Settings.AttributeValueDisplayCap;
+
+    private ValueDisplayPlan PlanFor(LdapAttributeValues attribute) =>
+        PlanValues(attribute.Values.Count, Cap, _expanded.Contains(attribute.Name));
+
+    /// <summary>
+    /// Expansion is per attribute of the entry on screen; showing a different entry resets
+    /// it, so one entry's "show all" can never silently uncap another's.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(_entryDn, Entry.Dn, StringComparison.Ordinal))
+        {
+            _entryDn = Entry.Dn;
+            _expanded.Clear();
+        }
+    }
+
+    /// <summary>How many of an attribute's values render, and whether the cap cut any off.</summary>
+    internal readonly record struct ValueDisplayPlan(int Shown, int Total, bool Capped);
+
+    /// <summary>
+    /// The cap decision (#98): an expanded attribute — or one at/below the cap — shows every
+    /// value; anything else shows exactly the cap and says so. Never silent: Capped is true
+    /// whenever fewer than every value renders.
+    /// </summary>
+    internal static ValueDisplayPlan PlanValues(int total, int cap, bool expanded) =>
+        expanded || total <= cap
+            ? new ValueDisplayPlan(total, total, Capped: false)
+            : new ValueDisplayPlan(cap, total, Capped: true);
+
+    /// <summary>The count badge's text — it states the cap while one is in effect.</summary>
+    internal static string CountBadge(ValueDisplayPlan plan) =>
+        plan.Capped ? $"{plan.Shown} of {plan.Total} values" : $"{plan.Total} values";
 
     private async Task CopyDnAsync()
     {

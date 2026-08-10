@@ -141,3 +141,95 @@ public class BinaryValueLabelTests
         Assert.Equal(expected, EntryView.DescribeBinary(base64));
     }
 }
+
+/// <summary>
+/// The attribute value display cap (#98, absorbed #100): at most the AppHost-set cap of values
+/// renders, and a cap in effect is always surfaced — "N of M values" plus an explicit expand —
+/// never silent.
+/// </summary>
+public class AttributeValueDisplayCapTests
+{
+    [Fact]
+    public void More_values_than_the_cap_render_exactly_the_cap_and_say_so()
+    {
+        var plan = EntryView.PlanValues(total: 349, cap: 20, expanded: false);
+
+        Assert.Equal(20, plan.Shown);
+        Assert.Equal(349, plan.Total);
+        Assert.True(plan.Capped);
+        // The count badge itself states the cap, pairing with the expand affordance.
+        Assert.Equal("20 of 349 values", EntryView.CountBadge(plan));
+    }
+
+    [Fact]
+    public void An_explicit_expand_shows_every_value()
+    {
+        var plan = EntryView.PlanValues(total: 349, cap: 20, expanded: true);
+
+        Assert.Equal(349, plan.Shown);
+        Assert.False(plan.Capped);
+        Assert.Equal("349 values", EntryView.CountBadge(plan));
+    }
+
+    [Theory]
+    [InlineData(19)]
+    [InlineData(20)] // exactly the cap: nothing is cut off, so nothing may claim to be
+    public void At_or_below_the_cap_every_value_renders_uncapped(int total)
+    {
+        var plan = EntryView.PlanValues(total, cap: 20, expanded: false);
+
+        Assert.Equal(total, plan.Shown);
+        Assert.False(plan.Capped);
+        Assert.Equal($"{total} values", EntryView.CountBadge(plan));
+    }
+
+    [Fact]
+    public void The_cap_is_never_silent()
+    {
+        // Whenever fewer than every value renders, the plan says so — the invariant the
+        // "always surfaced" doctrine rests on.
+        for (var total = 0; total <= 45; total++)
+        {
+            var plan = EntryView.PlanValues(total, cap: 20, expanded: false);
+            Assert.Equal(plan.Shown < plan.Total, plan.Capped);
+        }
+    }
+}
+
+/// <summary>
+/// The web host's settings enums mirror the hosting library's options enums by name — the env
+/// contract carries enum names, so a member renamed on either side without the other is a break
+/// this test turns into words.
+/// </summary>
+public class LdapAdminSettingsContractTests
+{
+    [Fact]
+    public void Theme_names_match_the_hosting_options_enum()
+    {
+        Assert.Equal(
+            Enum.GetNames<Aspire.Hosting.ApplicationModel.LdapAdminTheme>(),
+            Enum.GetNames<Web.LdapAdminTheme>());
+    }
+
+    [Fact]
+    public void Sort_order_names_match_the_hosting_options_enum()
+    {
+        Assert.Equal(
+            Enum.GetNames<Aspire.Hosting.ApplicationModel.LdapAdminSortOrder>(),
+            Enum.GetNames<Web.LdapAdminSortOrder>());
+    }
+
+    [Fact]
+    public void Web_defaults_equal_hosting_defaults()
+    {
+        // A host that receives no LdapAdmin__* configuration must behave exactly like one
+        // handed the hosting defaults explicitly.
+        var hosting = new Aspire.Hosting.ApplicationModel.LdapAdminOptions();
+        var web = new Web.LdapAdminSettings();
+
+        Assert.Equal(hosting.Theme.ToString(), web.Theme.ToString());
+        Assert.Equal(hosting.DefaultSearchLimit, web.DefaultSearchLimit);
+        Assert.Equal(hosting.DefaultSortOrder.ToString(), web.DefaultSortOrder.ToString());
+        Assert.Equal(hosting.AttributeValueDisplayCap, web.AttributeValueDisplayCap);
+    }
+}

@@ -9,8 +9,11 @@
     docs/findings.md § Fluent UI Blazor v4).
 *@
 @inherits LayoutComponentBase
+@inject LdapAdminSettings Settings
 
-<FluentDesignTheme @bind-Mode="_mode" StorageName="ldapadmin-theme" />
+@* Theme mode comes from the AppHost's WithLdapAdmin options (#98) — no in-app chooser, no
+   browser storage; System mode follows the browser's color-scheme preference. *@
+<FluentDesignTheme Mode="@ThemeMode" />
 
 <FluentLayout>
     <FluentHeader>
@@ -29,14 +32,6 @@
                 <FluentNavLink Href="/schema"
                                Icon="@(new Icons.Regular.Size20.DocumentBulletList())">Schema</FluentNavLink>
             </FluentNavMenu>
-            @* Theme control lives on the neutral rail, not the accent header (see above). *@
-            <FluentSelect TOption="DesignThemeModes"
-                          Items="@AllModes"
-                          OptionText="@(m => m.ToString())"
-                          @bind-SelectedOption="_mode"
-                          Label="Theme"
-                          Width="176px"
-                          Style="margin-inline: 12px;" />
         </FluentStack>
 
         <FluentBodyContent>
@@ -55,7 +50,10 @@
 </div>
 
 @code {
-    private static readonly DesignThemeModes[] AllModes = Enum.GetValues<DesignThemeModes>();
-
-    private DesignThemeModes _mode = DesignThemeModes.System;
+    private DesignThemeModes ThemeMode => Settings.Theme switch
+    {
+        LdapAdminTheme.Light => DesignThemeModes.Light,
+        LdapAdminTheme.Dark => DesignThemeModes.Dark,
+        _ => DesignThemeModes.System,
+    };
 }

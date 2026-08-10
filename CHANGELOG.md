@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`WithLdapAdmin(options => ...)`** — one `LdapAdminOptions` object for the admin UI's
+  defaulted behavior ([#98](https://github.com/joshmakestuff/aspireldap/issues/98)): `Theme`
+  (`System`/`Light`/`Dark`; the in-app theme chooser is removed — the theme is AppHost-set),
+  `DefaultSearchLimit` (search page's initial size limit, default 100), `DefaultSortOrder`
+  (`ServerOrder`/`Rdn` for browse children and search results), and `AttributeValueDisplayCap`
+  (default 20, absorbed from
+  [#100](https://github.com/joshmakestuff/aspireldap/issues/100) — the entry view renders at
+  most that many values per attribute and always surfaces the cap as "N of M values" with an
+  explicit expand, paired with the count badge). Every option has a sane default and the
+  callback is optional; values flow to the admin container as `LdapAdmin__*` environment
+  configuration bound at startup. This object is the single home for future admin defaults —
+  the UI grows no settings pages, by decision.
+
 - **`WithLdapAdmin()`** — the LdapAdmin web UI as a sibling container resource wired to the
   parent OpenLDAP resource ([#78](https://github.com/joshmakestuff/aspireldap/issues/78)).
   The hosting package carries the admin app as an internal runtime payload: the web host is
