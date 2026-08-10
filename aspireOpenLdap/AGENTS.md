@@ -80,6 +80,18 @@ TLS: `WithTls()` (self-signed, cached under `obj/`), `WithTls(serverCertFile, se
 
 Misc: `WithAnonymousBinding(bool)`, `WithLogLevel(OpenLdapLogLevel)`, `WithHealthCheckProbeLogging(bool)`, `WithPhpLdapAdmin(...)` (phpLDAPadmin sidecar), `WithLdapAdmin(...)` (the bundled LdapAdmin web UI — built locally from a build context shipped inside this package, no registry pull, no login: it opens straight onto the directory with the AppHost admin credentials; requires the AppHost to consume the package as a `PackageReference`, and fails with an actionable error under a project reference). Admin password: auto-generated parameter `{name}-password`; override via `AddOpenLdap(name, adminPassword: someParameter)`.
 
+LdapAdmin defaulted behavior is configured through one options object — `WithLdapAdmin(options => ...)` with `LdapAdminOptions`. Members (each with a sane default; the callback is never required): `Theme` (`System` default / `Light` / `Dark` — the theme is AppHost-set; the UI has no theme chooser), `DefaultSearchLimit` (search page's initial size limit, default 100, range 1–1000), `DefaultSortOrder` (`ServerOrder` default / `Rdn` — browse children and search results), `AttributeValueDisplayCap` (values rendered per attribute before an always-surfaced "N of M values" + explicit expand, default 20). Values flow to the admin container as `LdapAdmin__*` environment configuration bound at startup. **This options object is the single home for future LdapAdmin defaults** — new knobs join `LdapAdminOptions` rather than becoming additional `WithLdapAdmin` parameters, and the UI never grows settings pages (defaults are dev-AppHost-set, not end-user chrome).
+
+```csharp
+builder.AddOpenLdap("ldap")
+    .WithLdapAdmin(admin =>
+    {
+        admin.Theme = LdapAdminTheme.Dark;
+        admin.DefaultSortOrder = LdapAdminSortOrder.Rdn;
+        admin.AttributeValueDisplayCap = 10;
+    });
+```
+
 ## Client API surface
 
 `AddOpenLdapClient(string connectionName, Action<OpenLdapClientSettings>? configure = null)` and `AddKeyedOpenLdapClient(...)` (service key = name, for multiple directories). Registers: `OpenLdapClientFactory` (singleton), `LdapConnection` (transient), `OpenLdapClient` (transient), health check `openldap_{name}` (root-DSE search).

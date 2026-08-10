@@ -1,0 +1,57 @@
+@*
+    Rename entry dialog body, hosted by FluentDialogProvider via IDialogService — see
+    AttributeDialog.razor for why inline <FluentDialog> markup is not used (#104).
+*@
+@implements IDialogContentComponent<RenameDialogModel>
+
+<FluentDialogBody>
+    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+        @* DN in the body, not the title — see NewChildDialog.razor (#104 min-content). *@
+        <FluentLabel Typo="@Typography.Body" Style="overflow-wrap: anywhere;">
+            Renaming <strong>@Content.Dn</strong>
+        </FluentLabel>
+        <FluentTextField @bind-Value="Content.NewRdn" Label="New RDN" Placeholder="cn=new-name"
+                         Spellcheck="false" Style="width: 100%;" />
+        <FluentTextField @bind-Value="Content.NewParentDn" Label="New parent DN (blank = keep current)"
+                         Spellcheck="false" Style="width: 100%;" />
+        <FluentCheckbox @bind-Value="Content.DeleteOldRdn" Label="Remove the old RDN value" />
+        @if (_error is not null)
+        {
+            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
+        }
+    </FluentStack>
+</FluentDialogBody>
+<FluentDialogFooter>
+    <FluentButton Appearance="@Appearance.Accent" Loading="_busy" OnClick="SaveAsync">Rename</FluentButton>
+    <FluentButton OnClick="@(() => Dialog.CancelAsync())">Cancel</FluentButton>
+</FluentDialogFooter>
+
+@code {
+    [Parameter]
+    public RenameDialogModel Content { get; set; } = default!;
+
+    [CascadingParameter]
+    public FluentDialog Dialog { get; set; } = default!;
+
+    private string? _error;
+    private bool _busy;
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await Content.SaveAsync(Content);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        if (_error is null)
+        {
+            await Dialog.CloseAsync(Content);
+        }
+    }
+}

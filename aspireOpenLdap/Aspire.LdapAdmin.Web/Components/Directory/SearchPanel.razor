@@ -1,5 +1,8 @@
 @*
-    LDAP filter search over LdapDirectoryService, in-process.
+    LDAP filter search over LdapDirectoryService, in-process. Hosted in the contextual pane
+    of the shell page (#102) — it is a panel, not a routed page, so the browse tree stays
+    alive while the user searches. Clicking a result raises OnEntrySelected; the shell
+    selects + reveals the entry in the tree and switches the pane to the editor.
 
     The service owns filter validation and truncation reporting; an invalid filter comes back
     as a typed result and is shown as-is. Truncation is surfaced, never hidden — a silently
@@ -11,17 +14,12 @@
     form, with the full DN in the tooltip and behind the copy button. Sorting/pagination is
     #95, deliberately absent here.
 *@
-@page "/search"
 @using System.DirectoryServices.Protocols
 @using LdifDotNet
 @inject LdapDirectoryService Directory
-@inject NavigationManager Navigation
+@inject LdapAdminSettings Settings
 @inject IJSRuntime Js
 @inject IToastService Toasts
-
-<PageTitle>Search — Aspire LdapAdmin</PageTitle>
-
-<FluentLabel Typo="@Typography.H3">Search</FluentLabel>
 
 <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
     @* Wrap: without it this row overflows the viewport and the Search button lands
@@ -70,7 +68,7 @@
             @* MultiLine: rows must size to their content — the copy button and a wrapped DN
                are taller than the grid's fixed row track, which clips them otherwise
                (measured 44px content in a 31px cell; docs/findings.md). *@
-            <FluentDataGrid Items="@_result.Entries.AsQueryable()" TGridItem="LdapEntry"
+            <FluentDataGrid Items="@_displayEntries.AsQueryable()" TGridItem="LdapEntry"
                             GridTemplateColumns="2fr 1.2fr 1.2fr 3rem" ResizableColumns="true"
                             MultiLine="true" ShowHover="true" OnRowClick="@OnRowClick">
                 <TemplateColumn Title="DN" Sortable="false">
@@ -99,15 +97,27 @@
 @code {
     private static readonly SearchScope[] AllScopes = [SearchScope.Base, SearchScope.OneLevel, SearchScope.Subtree];
 
+    /// <summary>Raised with the full DN of a clicked result row; the shell owns what happens next.</summary>
+    [Parameter]
+    public EventCallback<string> OnEntrySelected { get; set; }
+
     private string _filter = "(objectClass=*)";
     private string _baseDn = string.Empty;
     private SearchScope _scope = SearchScope.Subtree;
-    private int? _limit = 100;
+    private int? _limit;
 
     private LdapSearchResult? _result;
+    private List<LdapEntry> _displayEntries = [];
     private string _commonSuffix = string.Empty;
     private string? _error;
     private bool _running;
+
+    protected override void OnInitialized()
+    {
+        // The initial size limit is an AppHost-set default (#98); the field stays editable
+        // per search — a default, not a ceiling.
+        _limit = Settings.DefaultSearchLimit;
+    }
 
     /// <summary>
     /// Stale-response guard: a run that finishes after a newer run started is discarded, so
@@ -145,7 +155,7 @@
                 Filter = _filter,
                 BaseDn = string.IsNullOrWhiteSpace(_baseDn) ? null : _baseDn,
                 Scope = _scope,
-                Limit = _limit ?? 100,
+                Limit = _limit ?? Settings.DefaultSearchLimit,
             });
         }
         catch (DirectoryException ex)
@@ -166,14 +176,25 @@
         _error = error;
         _result = result;
         _commonSuffix = result is null ? string.Empty : DnDisplay.CommonSuffix([.. result.Entries.Select(static e => e.Dn)]);
+        // Display order only — the AppHost-set default (#98). Sorting happens after the
+        // (truncation-aware) fetch, so it never changes which entries came back, and it keys
+        // on the same relative form the DN column shows.
+        _displayEntries = result is null ? [] : [.. result.Entries];
+        if (Settings.DefaultSortOrder == LdapAdminSortOrder.Rdn)
+        {
+            _displayEntries.Sort((a, b) => string.Compare(
+                DnDisplay.Relative(a.Dn, _commonSuffix),
+                DnDisplay.Relative(b.Dn, _commonSuffix),
+                StringComparison.OrdinalIgnoreCase));
+        }
     }
 
-    /// <summary>The whole row navigates to the entry on the browse page, which reveals it.</summary>
-    private void OnRowClick(FluentDataGridRow<LdapEntry> row)
+    /// <summary>The whole row selects the entry: the shell reveals it in the tree and opens the editor.</summary>
+    private async Task OnRowClick(FluentDataGridRow<LdapEntry> row)
     {
         if (row.Item is { } entry)
         {
-            Navigation.NavigateTo($"/?dn={Uri.EscapeDataString(entry.Dn)}");
+            await OnEntrySelected.InvokeAsync(entry.Dn);
         }
     }
 

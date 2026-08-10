@@ -1,50 +1,22 @@
 @*
-    App shell: header, destination rail, body. There is no login gate by decision
-    (docs/decisions.md § Scope): the app binds with the AppHost-provided credentials and
-    opens straight onto the directory.
+    App shell chrome only: theme, dialog/toast providers, circuit-error banner. The visible
+    shell (header + panes) is owned by the single page (Browse) per the layout decision
+    (docs/decisions.md § Product: persistent tree + contextual pane; spec aspireldap#102).
 
-    Header content is plain text that inherits. FluentHeader fills with the accent colour
-    and sets a matching foreground token; FluentLabel/FluentButton placed on it bring
-    neutral-surface tokens onto the accent surface (measured 1.87:1 in dark theme —
-    docs/findings.md § Fluent UI Blazor v4).
+    There is no login gate by decision (docs/decisions.md § Scope): the app binds with the
+    AppHost-provided credentials and opens straight onto the directory.
+
+    Theme mode comes from the AppHost's WithLdapAdmin options (#98) — no in-app chooser, no
+    browser storage; System mode follows the browser's color-scheme preference.
 *@
 @inherits LayoutComponentBase
+@inject LdapAdminSettings Settings
 
-<FluentDesignTheme @bind-Mode="_mode" StorageName="ldapadmin-theme" />
+<FluentDesignTheme Mode="@ThemeMode" />
 
-<FluentLayout>
-    <FluentHeader>
-        Aspire LdapAdmin
-    </FluentHeader>
+@Body
 
-    <FluentStack Orientation="@Orientation.Horizontal" Width="100%">
-        <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12" Width="200px">
-            @* Not collapsible: the toggle reads as an unlabelled destination, and a rail
-               with three items has nothing worth reclaiming (old repo #51). *@
-            <FluentNavMenu Width="200" Title="Destinations">
-                <FluentNavLink Href="/" Match="@NavLinkMatch.All"
-                               Icon="@(new Icons.Regular.Size20.Folder())">Browse</FluentNavLink>
-                <FluentNavLink Href="/search"
-                               Icon="@(new Icons.Regular.Size20.Search())">Search</FluentNavLink>
-                <FluentNavLink Href="/schema"
-                               Icon="@(new Icons.Regular.Size20.DocumentBulletList())">Schema</FluentNavLink>
-            </FluentNavMenu>
-            @* Theme control lives on the neutral rail, not the accent header (see above). *@
-            <FluentSelect TOption="DesignThemeModes"
-                          Items="@AllModes"
-                          OptionText="@(m => m.ToString())"
-                          @bind-SelectedOption="_mode"
-                          Label="Theme"
-                          Width="176px"
-                          Style="margin-inline: 12px;" />
-        </FluentStack>
-
-        <FluentBodyContent>
-            @Body
-        </FluentBodyContent>
-    </FluentStack>
-</FluentLayout>
-
+<FluentDialogProvider />
 <FluentToastProvider />
 
 @* Kept from the template so an unhandled circuit error is still announced; hidden by the
@@ -55,7 +27,10 @@
 </div>
 
 @code {
-    private static readonly DesignThemeModes[] AllModes = Enum.GetValues<DesignThemeModes>();
-
-    private DesignThemeModes _mode = DesignThemeModes.System;
+    private DesignThemeModes ThemeMode => Settings.Theme switch
+    {
+        LdapAdminTheme.Light => DesignThemeModes.Light,
+        LdapAdminTheme.Dark => DesignThemeModes.Dark,
+        _ => DesignThemeModes.System,
+    };
 }

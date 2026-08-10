@@ -1,0 +1,52 @@
+@*
+    Delete entry confirmation dialog body, hosted by FluentDialogProvider via
+    IDialogService — see AttributeDialog.razor for why inline <FluentDialog> markup is not
+    used (#104). Small content, same class: all four entry dialogs share one hosting shape.
+*@
+@implements IDialogContentComponent<DeleteDialogModel>
+
+<FluentDialogBody>
+    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
+        <FluentLabel Typo="@Typography.Body" Style="overflow-wrap: anywhere;">
+            Delete <strong>@Content.Dn</strong>? An entry with children cannot be deleted.
+        </FluentLabel>
+        @if (_error is not null)
+        {
+            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
+        }
+    </FluentStack>
+</FluentDialogBody>
+<FluentDialogFooter>
+    <FluentButton Appearance="@Appearance.Accent" Loading="_busy" OnClick="DeleteAsync">Delete</FluentButton>
+    <FluentButton OnClick="@(() => Dialog.CancelAsync())">Cancel</FluentButton>
+</FluentDialogFooter>
+
+@code {
+    [Parameter]
+    public DeleteDialogModel Content { get; set; } = default!;
+
+    [CascadingParameter]
+    public FluentDialog Dialog { get; set; } = default!;
+
+    private string? _error;
+    private bool _busy;
+
+    private async Task DeleteAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await Content.SaveAsync(Content);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        if (_error is null)
+        {
+            await Dialog.CloseAsync(Content);
+        }
+    }
+}
