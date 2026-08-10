@@ -67,8 +67,9 @@
 .topbar{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)}
 .brand{font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:18px;letter-spacing:-.01em}
 .brand small{font-family:var(--font-body);font-weight:400;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 45%,transparent);margin-left:8px}
-.conn{display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 10px;border:1px solid var(--color-divider)}
-.conn:first-of-type{margin-left:auto}
+/* margin-left:auto on every chip (as in the prototype): the two autos split the free
+   space, so the server chip sits centered and the bind chip + actions sit right. */
+.conn{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:11px;padding:4px 10px;border:1px solid var(--color-divider)}
 .led{width:6px;height:6px;flex:none;border-radius:50%;background:var(--color-accent)}
 .vtabs{display:flex;align-items:flex-end;gap:2px;padding:0 var(--space-4);border-bottom:1px solid var(--color-divider)}
 .vt{padding:7px 14px;font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:14px;background:transparent;border:1px solid transparent;border-bottom:0;cursor:pointer;color:color-mix(in srgb,var(--color-text) 62%,transparent)}
