@@ -151,6 +151,9 @@
 .combo-opt{display:flex;gap:var(--space-2);align-items:center;width:100%;text-align:left;padding:4px 8px;font:inherit;font-size:12px;background:transparent;border:0;cursor:pointer;color:inherit}
 .combo-opt:hover,.combo-opt[aria-selected=true]{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
 .hint{font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+/* Field labels compose spans (name, ·must, syntax hint); Razor swallows the whitespace
+   between them, so the spacing is owned here instead of by literal spaces. */
+.field label .hint{margin-left:6px}
 .picklist{max-height:240px;overflow:auto;border:1px solid var(--color-divider);scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
 
 /* ── Notices, dialogs, toast ───────────────────────────────────────────── */
