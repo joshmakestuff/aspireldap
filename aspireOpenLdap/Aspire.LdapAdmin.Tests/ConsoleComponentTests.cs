@@ -177,4 +177,36 @@ public sealed class ConsoleDisplayLogicTests
     [InlineData("", "0 bytes")]
     public void DescribeBinary_Sizes_From_Length_Without_Decoding(string base64, string expected) =>
         Assert.Equal(expected, EntryView.DescribeBinary(base64));
+
+    [Fact]
+    public void EntryTitle_Prefers_The_Display_Name_Over_The_Rdn_Value()
+    {
+        // Design reference: the header reads "Alice Chen", not "alice.chen".
+        var entry = new LdapEntry("uid=alice.chen,ou=people,dc=aspire,dc=dev",
+        [
+            new LdapAttributeValues("uid", false, ["alice.chen"], LdapValueClassification.Schema),
+            new LdapAttributeValues("cn", false, ["Alice Chen"], LdapValueClassification.Schema),
+        ]);
+        Assert.Equal("Alice Chen", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
+    }
+
+    [Fact]
+    public void EntryTitle_Falls_Back_To_The_Rdn_Value_Without_A_Display_Name()
+    {
+        var entry = new LdapEntry("uid=svc-checkout,ou=services,dc=aspire,dc=dev",
+        [
+            new LdapAttributeValues("uid", false, ["svc-checkout"], LdapValueClassification.Schema),
+        ]);
+        Assert.Equal("svc-checkout", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
+    }
+
+    [Fact]
+    public void ConnectionInfo_Carries_Server_And_Bind_But_Never_The_Password()
+    {
+        var info = ConsoleConnectionInfo.From(
+            "Endpoint=ldap://localhost:1389;BaseDN=dc=aspire,dc=dev;BindDN=cn=admin,dc=aspire,dc=dev;BindPassword=s3cret");
+        Assert.Equal("ldap://localhost:1389", info.ServerLabel);
+        Assert.Equal("cn=admin,dc=aspire,dc=dev", info.BindDn);
+        Assert.DoesNotContain("s3cret", info.ServerLabel + info.BindDn, StringComparison.Ordinal);
+    }
 }

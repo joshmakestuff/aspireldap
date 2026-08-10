@@ -14,6 +14,13 @@ var connectionName = builder.Configuration["LdapAdmin:ConnectionName"]
 builder.AddOpenLdapClient(connectionName);
 builder.Services.AddLdapAdminCore();
 
+// The topbar's server + bind chips. A malformed connection string fails here, at the host
+// boundary, same as malformed settings below.
+builder.Services.AddSingleton(ConsoleConnectionInfo.From(
+    builder.Configuration.GetConnectionString(connectionName)
+        ?? throw new InvalidOperationException(
+            $"ConnectionStrings:{connectionName} is not set; WithLdapAdmin() (or the dev AppHost) provides it.")));
+
 // Defaulted behavior (#98): bound once at startup from the LdapAdmin__* env contract that
 // WithLdapAdmin() emits. A malformed value (an unknown theme name, a non-numeric limit) fails
 // here, at the host boundary, rather than as a broken page later.

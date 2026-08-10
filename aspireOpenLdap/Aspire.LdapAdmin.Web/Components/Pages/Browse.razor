@@ -26,6 +26,7 @@
 @implements IAsyncDisposable
 @inject LdapDirectoryService Directory
 @inject LdapAdminSettings Settings
+@inject ConsoleConnectionInfo Connection
 @inject NavigationManager Navigation
 @inject ConsoleToastService Toasts
 @inject IJSRuntime Js
@@ -35,7 +36,8 @@
 <div class="app">
     <div class="topbar">
         <div class="brand">AspireLdap<small>directory admin</small></div>
-        <div class="conn mono"><i class="led"></i>@Directory.BaseDn</div>
+        <div class="conn mono"><i class="led"></i>@Connection.ServerLabel</div>
+        <div class="conn mono">bind: @Connection.BindDn</div>
         <button class="btn btn-secondary btn-sm" @onclick="RefreshAsync">Refresh</button>
         <button class="btn btn-secondary btn-icon btn-sm" style="width: 26px; height: 26px;"
                 title="Toggle light/dark theme" aria-label="Toggle light/dark theme"
@@ -108,7 +110,7 @@
                 {
                     <div class="dh">
                         <div style="min-width: 0;">
-                            <h3 style="margin: 0;">@EntryTitle(_entry.Dn)</h3>
+                            <h3 style="margin: 0;">@EntryTitle(_entry)</h3>
                             <div class="dnline mono">
                                 @_entry.Dn
                                 <button class="btn btn-ghost btn-sm" title="Copy DN to clipboard"
@@ -280,7 +282,9 @@
     {
         try
         {
-            var root = new TreeNode { Dn = Directory.BaseDn, Rdn = Directory.BaseDn, HasChildren = true };
+            // The root row shows its first RDN like every other row (design reference:
+            // "dc=aspire", not the whole base DN); the full DN stays in the topbar's model.
+            var root = new TreeNode { Dn = Directory.BaseDn, Rdn = FirstRdn(Directory.BaseDn), HasChildren = true };
             await ExpandAsync(root, AutoExpandDepth);
             _root = root;
         }
@@ -957,10 +961,36 @@
     private static IReadOnlyList<string> Lines(string text) =>
         [.. text.Split('\n').Select(static line => line.TrimEnd('\r')).Where(static line => line.Length > 0)];
 
-    /// <summary>The entry header's human title: the RDN's value part.</summary>
-    internal static string EntryTitle(string dn)
+    private static string FirstRdn(string dn)
     {
-        var rdn = dn.Split(',')[0];
+        try
+        {
+            return Dn.Parse(dn)[0].ToString();
+        }
+        catch (ArgumentException)
+        {
+            return dn;
+        }
+    }
+
+    /// <summary>
+    /// The entry header's human title (design reference: "Alice Chen", not "alice.chen"):
+    /// the display name when the entry carries one, the RDN's value part otherwise. Binary
+    /// values are skipped — base64 is not a title.
+    /// </summary>
+    internal static string EntryTitle(LdapEntry entry)
+    {
+        foreach (var name in (string[])["cn", "ou", "o"])
+        {
+            var attribute = entry.Attributes.FirstOrDefault(
+                a => a.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !a.IsBinary);
+            if (attribute?.Values.FirstOrDefault(static v => v.Length > 0) is { } value)
+            {
+                return value;
+            }
+        }
+
+        var rdn = entry.Dn.Split(',')[0];
         var eq = rdn.IndexOf('=', StringComparison.Ordinal);
         return eq > 0 ? rdn[(eq + 1)..] : rdn;
     }
