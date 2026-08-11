@@ -344,6 +344,54 @@ public sealed class ConsoleDisplayLogicTests
     }
 
     [Fact]
+    public void EntryTitle_Unescapes_The_Rdn_Value_Instead_Of_Splitting_On_Escaped_Commas()
+    {
+        // aspireldap#122: the RFC 4514 escaped comma is part of the value, not a DN
+        // separator — the title must read "Doe, Jane", never "Doe\".
+        var entry = new LdapEntry(@"uid=Doe\, Jane,ou=people,dc=aspire,dc=dev", []);
+        Assert.Equal("Doe, Jane", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
+    }
+
+    [Fact]
+    public void EntryTitle_Joins_The_Values_Of_A_Multi_Valued_Rdn()
+    {
+        // aspireldap#122: a multi-valued RDN yields every value, plus-joined like
+        // RelativeDistinguishedName.ToString(), with the attribute types stripped.
+        var entry = new LdapEntry("uid=achen+cn=Alice Chen,ou=people,dc=aspire,dc=dev", []);
+        Assert.Equal("achen+Alice Chen", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
+    }
+
+    [Fact]
+    public void EntryTitle_Honors_DisplayName_Like_The_Search_Panel_Does()
+    {
+        // aspireldap#122: displayName belongs in the chain — SearchPanel's name column
+        // already honors it, and the two surfaces must agree on an entry's name.
+        var entry = new LdapEntry("uid=alice.chen,ou=people,dc=aspire,dc=dev",
+        [
+            new LdapAttributeValues("displayName", false, ["Alice C."], LdapValueClassification.Schema),
+        ]);
+        Assert.Equal("Alice C.", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
+    }
+
+    [Fact]
+    public void EntryTitle_Prefers_Cn_Over_DisplayName_Matching_The_Search_Panel_Order()
+    {
+        var entry = new LdapEntry("uid=alice.chen,ou=people,dc=aspire,dc=dev",
+        [
+            new LdapAttributeValues("displayName", false, ["Alice C."], LdapValueClassification.Schema),
+            new LdapAttributeValues("cn", false, ["Alice Chen"], LdapValueClassification.Schema),
+        ]);
+        Assert.Equal("Alice Chen", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
+    }
+
+    [Fact]
+    public void EntryTitle_Returns_The_Raw_Dn_When_It_Does_Not_Parse()
+    {
+        var entry = new LdapEntry("not a dn", []);
+        Assert.Equal("not a dn", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
+    }
+
+    [Fact]
     public void ConnectionInfo_Carries_Server_And_Bind_But_Never_The_Password()
     {
         var info = ConsoleConnectionInfo.From(

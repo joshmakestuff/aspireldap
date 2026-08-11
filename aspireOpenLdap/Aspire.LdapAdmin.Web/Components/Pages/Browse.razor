@@ -951,12 +951,13 @@
 
     /// <summary>
     /// The entry header's human title (design reference: "Alice Chen", not "alice.chen"):
-    /// the display name when the entry carries one, the RDN's value part otherwise. Binary
-    /// values are skipped — base64 is not a title.
+    /// the display name when the entry carries one, the RDN's value part otherwise. The
+    /// attribute order matches SearchPanel's name column (cn before displayName) so both
+    /// surfaces agree on an entry's name. Binary values are skipped — base64 is not a title.
     /// </summary>
     internal static string EntryTitle(LdapEntry entry)
     {
-        foreach (var name in (string[])["cn", "ou", "o"])
+        foreach (var name in (string[])["cn", "displayName", "ou", "o"])
         {
             var attribute = entry.Attributes.FirstOrDefault(
                 a => a.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !a.IsBinary);
@@ -966,9 +967,17 @@
             }
         }
 
-        var rdn = entry.Dn.Split(',')[0];
-        var eq = rdn.IndexOf('=', StringComparison.Ordinal);
-        return eq > 0 ? rdn[(eq + 1)..] : rdn;
+        try
+        {
+            var rdns = Dn.Parse(entry.Dn);
+            return rdns.Count == 0
+                ? entry.Dn
+                : string.Join("+", rdns[0].Attributes.Select(static a => a.Value));
+        }
+        catch (ArgumentException)
+        {
+            return entry.Dn;
+        }
     }
 
     private static int ObjectClassCount(LdapEntry entry) =>
