@@ -30,6 +30,7 @@
 @inject ConsoleConnectionInfo Connection
 @inject NavigationManager Navigation
 @inject ConsoleToastService Toasts
+@inject ConsoleClipboard Clipboard
 @inject IJSRuntime Js
 
 <PageTitle>@ViewTitle — AspireLdap</PageTitle>
@@ -684,14 +685,8 @@
         }
     }
 
-    private async Task CopyDnAsync(string dn)
-    {
-        if (_js is not null)
-        {
-            await _js.InvokeVoidAsync("copyText", dn);
-            ShowToast("DN copied");
-        }
-    }
+    private async Task CopyDnAsync(string dn) =>
+        ShowToast(await Clipboard.CopyAsync(dn) ? "DN copied" : "copy failed — clipboard unavailable");
 
     // ---- Toast --------------------------------------------------------------------------
 

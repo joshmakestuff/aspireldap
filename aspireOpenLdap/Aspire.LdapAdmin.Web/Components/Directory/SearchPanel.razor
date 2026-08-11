@@ -19,7 +19,7 @@
 @using LdifDotNet
 @inject LdapDirectoryService Directory
 @inject LdapAdminSettings Settings
-@inject IJSRuntime Js
+@inject ConsoleClipboard Clipboard
 @inject ConsoleToastService Toasts
 
 <div class="dh">
@@ -226,11 +226,8 @@
         StateHasChanged();
     }
 
-    private async Task CopyDnAsync(string dn)
-    {
-        await Js.InvokeVoidAsync("navigator.clipboard.writeText", dn);
-        Toasts.Show("DN copied");
-    }
+    private async Task CopyDnAsync(string dn) =>
+        Toasts.Show(await Clipboard.CopyAsync(dn) ? "DN copied" : "copy failed — clipboard unavailable");
 
     /// <summary>
     /// First non-empty value among <paramref name="names"/>, in preference order, so the
