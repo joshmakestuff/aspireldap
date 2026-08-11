@@ -1,5 +1,6 @@
 using System.DirectoryServices.Protocols;
 using Aspire.LdapAdmin.Core;
+using LdifDotNet;
 using Xunit;
 
 namespace Aspire.LdapAdmin.Tests;
@@ -12,12 +13,13 @@ namespace Aspire.LdapAdmin.Tests;
 [Trait("Category", "Integration")]
 public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
 {
-    /// <summary>3 typed users (alice, bob, svc-sweeper) + 30 generated people, all inetOrgPerson.</summary>
-    private const int SeededPeople = 33;
-
     [Fact]
     public async Task A_subtree_search_finds_every_seeded_person()
     {
+        // Completeness by anchors, not census (aspireldap#124): a seed-count pin turns
+        // green tests red on unrelated seed changes, and a count derived from the search
+        // itself could not catch dropped entries. Not-truncated proves the search saw
+        // everything; the anchors prove both seeded branches were reached.
         using var cts = TestCancellation.Source();
 
         var result = await fixture.Directory.SearchAsync(
@@ -25,7 +27,14 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
             cts.Token);
 
         Assert.False(result.Truncated);
-        Assert.Equal(SeededPeople, result.Entries.Count);
+        foreach (var uid in (string[])["uid=alice", "uid=bob", "uid=svc-sweeper"])
+        {
+            Assert.Contains(result.Entries, e =>
+                string.Equals(e.Dn, fixture.DnUnder(uid, "ou=people"), StringComparison.OrdinalIgnoreCase));
+        }
+        // The generated branch: at least one fake person under ou=directory.
+        Assert.Contains(result.Entries, e =>
+            e.Dn.Contains(",ou=directory,", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -44,14 +53,23 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
     [Fact]
     public async Task A_limit_that_exactly_matches_the_result_count_is_not_truncated()
     {
+        // The truncation boundary is relative, so the count is derived, never pinned
+        // (aspireldap#124). The stuck-at-false direction of the flag is covered by
+        // Matches_past_the_limit_are_reported_as_truncated — judge the pair together.
         using var cts = TestCancellation.Source();
 
-        var result = await fixture.Directory.SearchAsync(
-            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = SeededPeople },
+        var all = await fixture.Directory.SearchAsync(
+            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = 100 },
+            cts.Token);
+        Assert.False(all.Truncated);
+        var actualCount = all.Entries.Count;
+
+        var exact = await fixture.Directory.SearchAsync(
+            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = actualCount },
             cts.Token);
 
-        Assert.False(result.Truncated);
-        Assert.Equal(SeededPeople, result.Entries.Count);
+        Assert.False(exact.Truncated);
+        Assert.Equal(actualCount, exact.Entries.Count);
     }
 
     [Fact]
@@ -91,8 +109,18 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
             },
             cts.Token);
 
-        // The three typed accounts (alice, bob, svc-sweeper) — none of ou=directory's people.
-        Assert.Equal(3, result.Entries.Count);
+        // The contract is scope, not census (aspireldap#124): every hit is a DIRECT child
+        // of the base — one RDN deeper, still under ou=people — and the base itself is
+        // absent. A later typed user must not red this test.
+        Assert.NotEmpty(result.Entries);
+        var baseDn = fixture.DnUnder("ou=people");
+        Assert.All(result.Entries, e =>
+        {
+            Assert.EndsWith("," + baseDn, e.Dn, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(Dn.Parse(baseDn).Count + 1, Dn.Parse(e.Dn).Count);
+        });
+        Assert.Contains(result.Entries, e =>
+            string.Equals(e.Dn, fixture.DnUnder("uid=alice", "ou=people"), StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

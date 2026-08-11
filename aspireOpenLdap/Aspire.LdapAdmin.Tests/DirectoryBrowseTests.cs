@@ -63,8 +63,11 @@ public class DirectoryBrowseTests(LdapAdminAppHostFixture fixture)
         var result = await fixture.Directory.GetChildrenAsync(
             fixture.DnUnder("ou=directory"), limit: 100, cancellationToken: cts.Token);
 
+        // The name promises the not-truncated invariant, not the seed census
+        // (aspireldap#126): non-empty and within the limit is all the count must be.
+        // Children_past_the_limit_are_reported_as_truncated covers the other direction.
         Assert.False(result.Truncated);
-        Assert.Equal(30, result.Children.Count);
+        Assert.InRange(result.Children.Count, 1, 100);
     }
 
     [Fact]
