@@ -499,3 +499,7 @@ phpldapadmin-logged-in.png
 # Stryker.NET mutation scratch (reports go to artifacts/, but an interrupted run can
 # leave a workspace beside the project).
 StrykerOutput/
+
+# playwright-cli session artifacts
+*.webm
+.playwright-cli/
