@@ -261,7 +261,7 @@
     /// One loaded tree node. Children is null until the node's first expand; after a load it
     /// holds at most Cap entries and Capped says whether the directory had more.
     /// </summary>
-    private sealed class TreeNode
+    internal sealed class TreeNode
     {
         public required string Dn { get; init; }
         public required string Rdn { get; init; }
@@ -273,7 +273,7 @@
     }
 
     /// <summary>One rendered rail row: a node, a "show more" row, or the cap's search handoff.</summary>
-    private readonly record struct Row(
+    internal readonly record struct Row(
         string Key, TreeNode? Node, string Label, string Twisty, bool HasTwisty,
         string Count, string DepthClass, string MoreClass, bool Current, bool IsMore, bool IsCap);
 
@@ -399,12 +399,15 @@
         var rows = new List<Row>();
         if (_root is not null)
         {
-            Walk(_root, 0, _treeFilter.Trim(), rows);
+            Walk(_root, 0, _treeFilter.Trim(), _selectedDn, rows);
         }
         return rows;
     }
 
-    private void Walk(TreeNode node, int depth, string query, List<Row> rows)
+    // Static and internal so the row contract is testable without a renderer (EntryView
+    // precedent) — Browse cannot render under bUnit, and the filter/cap interplay is
+    // exactly the kind of logic that must not be witness-free (#121).
+    internal static void Walk(TreeNode node, int depth, string query, string? selectedDn, List<Row> rows)
     {
         var filtering = query.Length > 0;
         var visibleChildren = node.Children;
@@ -423,26 +426,30 @@
         rows.Add(new Row(
             Key: node.Dn, Node: node, Label: node.Rdn, Twisty: twisty,
             HasTwisty: isParent, Count: count, DepthClass: Depth(depth), MoreClass: string.Empty,
-            Current: string.Equals(node.Dn, _selectedDn, StringComparison.OrdinalIgnoreCase),
+            Current: string.Equals(node.Dn, selectedDn, StringComparison.OrdinalIgnoreCase),
             IsMore: false, IsCap: false));
 
         if (!isOpen || visibleChildren is null)
         {
+            // A capped node stays in the rail under a filter even with no loaded match (it
+            // cannot prove one is absent); it renders closed with its "N+" badge, and the cap
+            // row beneath is the escape hatch into Search (#121).
+            if (filtering && node.Capped)
+            {
+                rows.Add(CapRow(node, depth));
+            }
             return;
         }
 
         var shown = filtering ? visibleChildren.Count : Math.Min(node.Shown, visibleChildren.Count);
         foreach (var child in visibleChildren.Take(shown))
         {
-            Walk(child, depth + 1, query, rows);
+            Walk(child, depth + 1, query, selectedDn, rows);
         }
 
-        if (filtering)
-        {
-            return;
-        }
-
-        var hidden = visibleChildren.Count - shown;
+        // While filtering, shown covers every visible child, so a paging row is meaningless —
+        // but the cap row below is not: matches shown are only matches among the loaded Cap.
+        var hidden = filtering ? 0 : visibleChildren.Count - shown;
         if (hidden > 0)
         {
             rows.Add(new Row(
@@ -454,20 +461,29 @@
         }
         else if (node.Capped)
         {
-            // The directory has more children than Cap; the row hands off to Search scoped
-            // to this container, which pages properly (design handoff § Tree behavior).
-            rows.Add(new Row(
-                Key: node.Dn + "::cap", Node: node,
-                Label: "more entries not shown — search this container",
-                Twisty: "⌕", HasTwisty: false, Count: string.Empty,
-                DepthClass: Depth(depth + 1), MoreClass: "more cap", Current: false,
-                IsMore: false, IsCap: true));
+            rows.Add(CapRow(node, depth));
         }
     }
 
-    /// <summary>A node is visible under the filter when its RDN matches or a loaded descendant's does.</summary>
-    private static bool FilterVisible(TreeNode node, string query) =>
-        node.Rdn.Contains(query, StringComparison.OrdinalIgnoreCase)
+    /// <summary>
+    /// The directory has more children than Cap; the row hands off to Search scoped to this
+    /// container, which pages properly (design handoff § Tree behavior).
+    /// </summary>
+    private static Row CapRow(TreeNode node, int depth) => new(
+        Key: node.Dn + "::cap", Node: node,
+        Label: "more entries not shown — search this container",
+        Twisty: "⌕", HasTwisty: false, Count: string.Empty,
+        DepthClass: Depth(depth + 1), MoreClass: "more cap", Current: false,
+        IsMore: false, IsCap: true);
+
+    /// <summary>
+    /// A node is visible under the filter when its RDN matches or a loaded descendant's does —
+    /// or when it is capped: unloaded children may match, so a capped node can never prove a
+    /// non-match, and hiding it would read as "no such entry" (#121).
+    /// </summary>
+    internal static bool FilterVisible(TreeNode node, string query) =>
+        node.Capped
+        || node.Rdn.Contains(query, StringComparison.OrdinalIgnoreCase)
         || (node.Children?.Any(c => FilterVisible(c, query)) ?? false);
 
     private static string Depth(int depth) => "dp" + Math.Min(depth, 6);
@@ -482,8 +498,14 @@
 
         if (row.IsCap)
         {
-            // Land on real results: base = this container, one level, match-all filter.
-            Navigation.NavigateTo(Url(AdminView.Search, _selectedDn), forceLoad: false);
+            // Land on real results: base = this container, one level, match-all filter. The
+            // URL names the same container the search runs against (it used to carry the
+            // lingering selection, so the address bar named a different DN than the results).
+            // Selection comes FIRST: once DeepLinkDn equals the selection, the deep-link
+            // cascade in OnParametersSetAsync has nothing to re-select, so it cannot bounce
+            // the view back to the browser through SelectAsync's view-dropping URL rewrite.
+            await SelectAsync(row.Node!.Dn, reveal: false);
+            Navigation.NavigateTo(Url(AdminView.Search, row.Node!.Dn), forceLoad: false);
             if (_searchPanel is not null)
             {
                 await _searchPanel.PresetAndRunAsync(row.Node!.Dn, SearchScope.OneLevel, "(objectClass=*)");
