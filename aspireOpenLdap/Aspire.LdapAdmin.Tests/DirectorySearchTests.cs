@@ -12,8 +12,8 @@ namespace Aspire.LdapAdmin.Tests;
 [Trait("Category", "Integration")]
 public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
 {
-    /// <summary>2 typed users + 30 generated people, all inetOrgPerson.</summary>
-    private const int SeededPeople = 32;
+    /// <summary>3 typed users (alice, bob, svc-sweeper) + 30 generated people, all inetOrgPerson.</summary>
+    private const int SeededPeople = 33;
 
     [Fact]
     public async Task A_subtree_search_finds_every_seeded_person()
@@ -91,7 +91,8 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
             },
             cts.Token);
 
-        Assert.Equal(2, result.Entries.Count);
+        // The three typed accounts (alice, bob, svc-sweeper) — none of ou=directory's people.
+        Assert.Equal(3, result.Entries.Count);
     }
 
     [Fact]

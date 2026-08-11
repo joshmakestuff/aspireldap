@@ -37,7 +37,9 @@ public class DirectoryBrowseTests(LdapAdminAppHostFixture fixture)
         Assert.True(people.HasChildren);
 
         var leaves = await fixture.Directory.GetChildrenAsync(people.Dn, cancellationToken: cts.Token);
-        Assert.Equal(["uid=alice", "uid=bob"], leaves.Children.Select(c => c.Rdn).Order(StringComparer.Ordinal));
+        Assert.Equal(
+            ["uid=alice", "uid=bob", "uid=svc-sweeper"],
+            leaves.Children.Select(c => c.Rdn).Order(StringComparer.Ordinal));
         Assert.All(leaves.Children, child => Assert.False(child.HasChildren));
     }
 

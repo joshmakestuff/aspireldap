@@ -6,9 +6,9 @@ namespace Aspire.Hosting.OpenLdap;
 
 /// <summary>
 /// The <c>cn=config</c> side of the resource model: opt-in overlays and the mdb database's
-/// <c>olcAccess</c> rules. Both follow the same shape — accumulate declarations on the resource,
-/// bind-mount one generated LDIF, and write it from a start-time hook so the whole fluent chain
-/// is visible before generation.
+/// <c>olcAccess</c> and <c>olcLimits</c> rules. All follow the same shape — accumulate
+/// declarations on the resource, bind-mount one generated LDIF, and write it from a start-time
+/// hook so the whole fluent chain is visible before generation.
 /// </summary>
 internal static class OpenLdapOverlayConfiguration
 {
@@ -52,52 +52,93 @@ internal static class OpenLdapOverlayConfiguration
     }
 
     /// <summary>
-    /// Records the declared <c>olcAccess</c> rules, initializing the generated-access pipeline on
-    /// first use. See <see cref="OpenLdapResourceBuilderExtensions.WithAccessControl"/>.
+    /// Records the declared <c>olcAccess</c> rules, initializing the generated database-config
+    /// pipeline on first use. See <see cref="OpenLdapResourceBuilderExtensions.WithAccessControl"/>.
     /// </summary>
     internal static void AddAccessRules(
         IResourceBuilder<OpenLdapResource> builder, string[] rules, string parameterName)
     {
-        var resource = builder.Resource;
-        if (resource.AccessRules is null)
-        {
-            resource.AccessRules = [];
+        EnsureDatabaseConfigPipeline(builder);
+        var target = builder.Resource.AccessRules ??= [];
+        AppendRules(target, rules, parameterName);
+    }
 
-            var accessPath = OpenLdapMounts.PrepareGeneratedFile(
-                builder, GeneratedAccessDirectoryName, $"{resource.Name}-access.ldif");
-            resource.AccessFilePath = accessPath;
+    /// <summary>
+    /// Records the declared <c>olcLimits</c> rules, initializing the generated database-config
+    /// pipeline on first use. See <see cref="OpenLdapResourceBuilderExtensions.WithLimits"/>.
+    /// </summary>
+    internal static void AddLimitRules(
+        IResourceBuilder<OpenLdapResource> builder, string[] rules, string parameterName)
+    {
+        EnsureDatabaseConfigPipeline(builder);
+        var target = builder.Resource.LimitRules ??= [];
+        AppendRules(target, rules, parameterName);
+    }
 
-            builder.WithBindMount(accessPath, OpenLdapResource.GeneratedAccessContainerPath, isReadOnly: true);
-
-            builder.OnBeforeResourceStarted((res, _, ct) =>
-            {
-                if (res.AccessRules is not { Count: > 0 } accessRules || res.AccessFilePath is null)
-                {
-                    return Task.CompletedTask;
-                }
-                return File.WriteAllTextAsync(res.AccessFilePath, GenerateAccessLdif(accessRules), ct);
-            });
-        }
-
+    private static void AppendRules(List<string> target, string[] rules, string parameterName)
+    {
         foreach (var rule in rules)
         {
             // Name the real parameter: CallerArgumentExpression would report "rule", which is
             // not an argument the caller can see.
             ArgumentException.ThrowIfNullOrWhiteSpace(rule, parameterName);
-            resource.AccessRules.Add(rule.Trim());
+            target.Add(rule.Trim());
         }
     }
 
-    // A single olcAccess modify on the mdb database, prepending the declared rules ({0}, {1}, …).
-    // Applied online via ldapmodify inside the container.
-    internal static string GenerateAccessLdif(IReadOnlyList<string> rules)
+    /// <summary>
+    /// One mount + one start-time write for the mdb database's config LDIF (access rules and
+    /// limits share the file and its container-side ldapmodify step), registered on the first
+    /// declaration from either API.
+    /// </summary>
+    private static void EnsureDatabaseConfigPipeline(IResourceBuilder<OpenLdapResource> builder)
     {
-        var record = new LdifModifyRecord(
-            OpenLdapResource.MdbDatabaseDn,
-            new LdifModification(
+        var resource = builder.Resource;
+        if (resource.AccessFilePath is not null)
+        {
+            return;
+        }
+
+        var accessPath = OpenLdapMounts.PrepareGeneratedFile(
+            builder, GeneratedAccessDirectoryName, $"{resource.Name}-access.ldif");
+        resource.AccessFilePath = accessPath;
+
+        builder.WithBindMount(accessPath, OpenLdapResource.GeneratedAccessContainerPath, isReadOnly: true);
+
+        builder.OnBeforeResourceStarted((res, _, ct) =>
+        {
+            if (res.AccessFilePath is null
+                || (res.AccessRules is not { Count: > 0 } && res.LimitRules is not { Count: > 0 }))
+            {
+                return Task.CompletedTask;
+            }
+            return File.WriteAllTextAsync(
+                res.AccessFilePath, GenerateDatabaseConfigLdif(res.AccessRules, res.LimitRules), ct);
+        });
+    }
+
+    // A single modify on the mdb database carrying the declared olcAccess and/or olcLimits
+    // values ({0}, {1}, … per attribute). Applied online via ldapmodify inside the container.
+    internal static string GenerateDatabaseConfigLdif(
+        IReadOnlyList<string>? accessRules, IReadOnlyList<string>? limitRules)
+    {
+        List<LdifModification> modifications = [];
+        if (accessRules is { Count: > 0 })
+        {
+            modifications.Add(new LdifModification(
                 LdifModificationType.Add,
                 "olcAccess",
-                rules.Select((rule, i) => (LdifValue)$"{{{i}}}{rule}")));
+                accessRules.Select((rule, i) => (LdifValue)$"{{{i}}}{rule}")));
+        }
+        if (limitRules is { Count: > 0 })
+        {
+            modifications.Add(new LdifModification(
+                LdifModificationType.Add,
+                "olcLimits",
+                limitRules.Select((rule, i) => (LdifValue)$"{{{i}}}{rule}")));
+        }
+
+        var record = new LdifModifyRecord(OpenLdapResource.MdbDatabaseDn, modifications);
         return LdifWriter.WriteToString([record], LdapSeedLdifGenerator.WriterOptions);
     }
 
