@@ -141,7 +141,12 @@ public class LdapSeedValidatorTests
         var message = ValidateAndCaptureMessage(ldap);
 
         Assert.Contains("references undeclared organizational unit 'peple'", message, StringComparison.Ordinal);
-        Assert.Contains("Did you mean \"people\"?", message, StringComparison.Ordinal);
+        // Shape #2 (near match) and the suggested candidate are the contract; the exact
+        // hint prose is not (docs/testing.md § survivor policy, aspireldap#125). "people"
+        // appears nowhere else in this message, so the candidate assertion cannot pass by
+        // accident.
+        Assert.Contains("Did you mean", message, StringComparison.Ordinal);
+        Assert.Contains("people", message, StringComparison.Ordinal);
         Assert.Contains(".WithOrganizationalUnit(\"peple\")", message, StringComparison.Ordinal);
     }
 
@@ -186,7 +191,10 @@ public class LdapSeedValidatorTests
         var message = ValidateAndCaptureMessage(ldap);
 
         Assert.Contains("references undeclared user uid 'alic'", message, StringComparison.Ordinal);
-        Assert.Contains("Did you mean \"alice\"?", message, StringComparison.Ordinal);
+        // Shape + candidate, not prose (aspireldap#125): "alice" appears only in the
+        // suggestion — the typo'd input and the remedy both carry 'alic'.
+        Assert.Contains("Did you mean", message, StringComparison.Ordinal);
+        Assert.Contains("alice", message, StringComparison.Ordinal);
         Assert.Contains(".WithUser(\"alic\", ...)", message, StringComparison.Ordinal);
     }
 
@@ -202,6 +210,11 @@ public class LdapSeedValidatorTests
 
         var message = ValidateAndCaptureMessage(ldap);
 
-        Assert.Contains("Did you mean \"people\"?", message, StringComparison.Ordinal);
+        // The candidate choice is this test's whole point; the hint prose is not
+        // (aspireldap#125). Shape #2 carries no declared-list, so "warehouses" can only
+        // appear here if it was wrongly suggested.
+        Assert.Contains("Did you mean", message, StringComparison.Ordinal);
+        Assert.Contains("people", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("warehouses", message, StringComparison.Ordinal);
     }
 }
