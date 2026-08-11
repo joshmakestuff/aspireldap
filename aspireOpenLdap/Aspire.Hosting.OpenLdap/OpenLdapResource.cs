@@ -139,7 +139,16 @@ public sealed class OpenLdapResource : ContainerResource, IResourceWithConnectio
     /// </summary>
     internal List<string>? AccessRules { get; set; }
 
-    /// <summary>Host filesystem path of the generated access-control LDIF. Set alongside <see cref="AccessRules"/>.</summary>
+    /// <summary>
+    /// Declared <c>olcLimits</c> rules for the mdb database, in order; each entry is a full rule
+    /// body (without the <c>{N}</c> ordering prefix). Emitted alongside <see cref="AccessRules"/>
+    /// in the same generated database-config LDIF. Null until the first call.
+    /// </summary>
+    internal List<string>? LimitRules { get; set; }
+
+    /// <summary>Host filesystem path of the generated database-config LDIF (access rules and
+    /// limits). Set when either <see cref="AccessRules"/> or <see cref="LimitRules"/> initializes
+    /// the pipeline.</summary>
     internal string? AccessFilePath { get; set; }
 
     /// <summary>Reference to the plain LDAP endpoint (container port 1389).</summary>

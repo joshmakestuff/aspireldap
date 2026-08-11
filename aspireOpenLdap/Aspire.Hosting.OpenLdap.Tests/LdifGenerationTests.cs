@@ -401,7 +401,7 @@ public class ConfigLdifGenerationTests
     {
         const string rule0 = "to dn.subtree=\"ou=entity,dc=example,dc=org\" by dn.exact=\"uid=svc,ou=entity,dc=example,dc=org\" write by * break";
         const string rule1 = "to attrs=userPassword by self write by * break";
-        var ldif = OpenLdapOverlayConfiguration.GenerateAccessLdif([rule0, rule1]);
+        var ldif = OpenLdapOverlayConfiguration.GenerateDatabaseConfigLdif([rule0, rule1], limitRules: null);
 
         Assert.DoesNotContain("version:", ldif);
 
@@ -417,5 +417,45 @@ public class ConfigLdifGenerationTests
         Assert.Equal(
             [$"{{0}}{rule0}", $"{{1}}{rule1}"],
             modification.Values.Select(v => v.AsString()).ToArray());
+    }
+
+    [Fact]
+    public void Limits_Ldif_Alone_Is_A_Single_Modify_With_Ordered_Rules()
+    {
+        // aspireldap#118: per-principal olcLimits ride the same database-config LDIF.
+        const string rule0 = "dn.exact=\"uid=svc,ou=users,dc=example,dc=org\" size=10";
+        const string rule1 = "users time=30";
+        var ldif = OpenLdapOverlayConfiguration.GenerateDatabaseConfigLdif(accessRules: null, [rule0, rule1]);
+
+        var records = LdifReader.Parse(ldif);
+        var modify = Assert.IsType<LdifModifyRecord>(Assert.Single(records));
+        Assert.Equal("olcDatabase={2}mdb,cn=config", modify.Dn);
+
+        var modification = Assert.Single(modify.Modifications);
+        Assert.Equal(LdifModificationType.Add, modification.Type);
+        Assert.Equal("olcLimits", modification.AttributeName);
+        Assert.Equal(
+            [$"{{0}}{rule0}", $"{{1}}{rule1}"],
+            modification.Values.Select(v => v.AsString()).ToArray());
+    }
+
+    [Fact]
+    public void Access_And_Limits_Compose_Into_One_Modify_Record_Access_First()
+    {
+        // One record, two modifications: ldapmodify applies them as one atomic change to
+        // the database entry, and the access policy lands before the limits that assume it.
+        const string access = "to * by users read by * none";
+        const string limit = "dn.exact=\"uid=svc,ou=users,dc=example,dc=org\" size=10";
+        var ldif = OpenLdapOverlayConfiguration.GenerateDatabaseConfigLdif([access], [limit]);
+
+        var records = LdifReader.Parse(ldif);
+        var modify = Assert.IsType<LdifModifyRecord>(Assert.Single(records));
+        Assert.Equal("olcDatabase={2}mdb,cn=config", modify.Dn);
+
+        Assert.Equal(2, modify.Modifications.Count);
+        Assert.Equal("olcAccess", modify.Modifications[0].AttributeName);
+        Assert.Equal($"{{0}}{access}", Assert.Single(modify.Modifications[0].Values).AsString());
+        Assert.Equal("olcLimits", modify.Modifications[1].AttributeName);
+        Assert.Equal($"{{0}}{limit}", Assert.Single(modify.Modifications[1].Values).AsString());
     }
 }

@@ -250,9 +250,11 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
     /// With <paramref name="subtree"/>, deletes the entry's whole subtree depth-first,
     /// children before parents: the bundled OpenLDAP does not advertise the Tree Delete
     /// control (1.2.840.113556.1.4.805; root DSE measured 2026-08-10, workspace
-    /// findings.md), so the recursion is client-side, as <c>ldapdelete -r</c> does. The
-    /// walk stops at the first refusal and the result names the DN that failed — a partial
-    /// delete is never silent.
+    /// findings.md), so the recursion is client-side, as <c>ldapdelete -r</c> does. A
+    /// server sizelimit does not stop the walk: a size-limited listing's partial batch is
+    /// deleted and the walk re-lists until the container empties (#118). The walk stops at
+    /// the first refusal and the result names the DN that failed — a partial delete is
+    /// never silent.
     /// </summary>
     public Task<LdapOperationResult> DeleteEntryAsync(string dn, CancellationToken cancellationToken = default) =>
         DeleteEntryAsync(dn, subtree: false, cancellationToken);
@@ -300,6 +302,18 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
                 try
                 {
                     response = (SearchResponse)await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch (DirectoryOperationException ex) when (
+                    ex.Response is SearchResponse partial && partial.ResultCode == ResultCode.SizeLimitExceeded)
+                {
+                    // slapd's sizelimit cut the listing short; keep what it did return and
+                    // delete that batch — this outer sweep loop re-lists and converges, so
+                    // a container larger than the limit still empties sweep by sweep (#118).
+                    foreach (SearchResultEntry entry in partial.Entries)
+                    {
+                        children.Add(entry.DistinguishedName);
+                    }
+                    break; // the paging cookie is dead after the error; next sweep re-lists
                 }
                 catch (DirectoryOperationException ex) when (ex.Response is not null)
                 {

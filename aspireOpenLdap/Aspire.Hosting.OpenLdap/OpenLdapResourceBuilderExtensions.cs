@@ -437,6 +437,36 @@ public static partial class OpenLdapResourceBuilderExtensions
     }
 
     /// <summary>
+    /// Declares <c>olcLimits</c> rules for the main (mdb) database — per-principal size/time
+    /// limits, e.g. <c>dn.exact="uid=svc,ou=users,dc=example,dc=org" size=10</c>. Each
+    /// <paramref name="rules"/> entry is a full rule body <em>without</em> the <c>{N}</c>
+    /// ordering prefix; slapd uses the first rule whose selector matches the bound identity.
+    /// Applied online at start, in the same config step as <see cref="WithAccessControl"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rootdn (the resource's admin bind) is always exempt from limits; rules here only
+    /// constrain other identities. Limits alone do not grant any access — pair a constrained
+    /// service account with a <see cref="WithAccessControl"/> policy when it must also write.
+    /// </para>
+    /// <para>
+    /// Like overlays and access rules, limits are part of the seed-once bootstrap (they
+    /// configure the database, not the data): applying new rules to an already-seeded data
+    /// volume requires resetting the volume.
+    /// </para>
+    /// </remarks>
+    public static IResourceBuilder<OpenLdapResource> WithLimits(
+        this IResourceBuilder<OpenLdapResource> builder,
+        params string[] rules)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(rules);
+
+        OpenLdapOverlayConfiguration.AddLimitRules(builder, rules, nameof(rules));
+        return builder;
+    }
+
+    /// <summary>
     /// Adds a bind mount for custom LDIF files loaded during initialization.
     /// </summary>
     [Obsolete("Use WithSeedData(...) instead. This method will be removed in a future release.")]
