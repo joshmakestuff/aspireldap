@@ -162,7 +162,7 @@
 }
 @if (_renameDialog is { } renameDialog)
 {
-    <RenameDialog Model="renameDialog" OnClose="CloseDialogs" />
+    <RenameDialog Model="renameDialog" Schema="_dialogSchema" OnClose="CloseDialogs" />
 }
 @if (_deleteDialog is { } deleteDialog)
 {
@@ -777,9 +777,31 @@
 
     private void OpenRenameDialog()
     {
-        if (!DialogOpen && _selectedDn is { } dn)
+        if (!DialogOpen && _selectedDn is { } dn && _entry is { } entry)
         {
-            _renameDialog = new RenameDialogModel { Dn = dn, SaveAsync = SaveRenameAsync };
+            // Prefill with the current RDN — renaming usually edits a name, not retypes it.
+            // A multi-valued RDN prefills from its first component (#106).
+            var attribute = string.Empty;
+            var value = string.Empty;
+            try
+            {
+                var first = Dn.Parse(dn)[0].Attributes[0];
+                attribute = first.Type;
+                value = first.Value;
+            }
+            catch (ArgumentException)
+            {
+            }
+
+            _renameDialog = new RenameDialogModel
+            {
+                Dn = dn,
+                CurrentParentDn = ParentOf(dn),
+                Entry = entry,
+                RdnAttribute = attribute,
+                RdnValue = value,
+                SaveAsync = SaveRenameAsync,
+            };
         }
     }
 
@@ -844,10 +866,13 @@
     private async Task<string?> SaveRenameAsync(RenameDialogModel dialog)
     {
         var newParent = dialog.NewParentDn.Length > 0 ? dialog.NewParentDn : null;
+        // The dialog validated attribute and value; Dn.Rdn escapes, so a typed comma or
+        // plus is a value character, never DN structure (#106).
+        var newRdn = Dn.Rdn(dialog.RdnAttribute.Trim(), dialog.RdnValue.Trim());
         LdapRenameResult rename;
         try
         {
-            rename = await Directory.RenameEntryAsync(dialog.Dn, dialog.NewRdn, newParent, dialog.DeleteOldRdn);
+            rename = await Directory.RenameEntryAsync(dialog.Dn, newRdn, newParent, dialog.DeleteOldRdn);
         }
         catch (DirectoryException ex)
         {

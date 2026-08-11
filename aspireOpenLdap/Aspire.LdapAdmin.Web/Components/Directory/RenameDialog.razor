@@ -1,23 +1,71 @@
 @*
-    Rename/move dialog on the owned ConsoleDialog frame. The DN renders in body markup with
-    word-break, never in the title (docs/findings.md). Save semantics as AttributeDialog.
+    Rename/move dialog on the owned ConsoleDialog frame, schema-aware (#106). The DN renders
+    in body markup with word-break, never in the title (docs/findings.md). Save semantics as
+    AttributeDialog.
+
+    The RDN is attribute + value, prefilled with the entry's current name (renaming edits a
+    name, it does not retype one) and escaped via LdifDotNet Dn.Rdn — a typed comma is a
+    value character, never DN structure. The parent DN and RDN validate before submit, so a
+    malformed input is an inline answer, not a server round trip. When switching the RDN
+    attribute would make delete-old-RDN a guaranteed objectClassViolation (the old attribute
+    is required and holds only that value), the checkbox unchecks itself and a bar explains
+    why; the server stays authoritative for everything else.
 *@
+@using Aspire.LdapAdmin.Core
+@using LdifDotNet
+@using LdifDotNet.Schema
 
 <ConsoleDialog Title="Rename entry" OnCancel="Close" Busy="_busy">
     <ChildContent>
     <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
-    <div class="field">
-        <label>New RDN <span class="mono text-muted">e.g. uid=jane.doe</span></label>
-        <input class="input mono" @bind="Model.NewRdn" spellcheck="false" />
+    <div class="frow" style="grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); margin-bottom: 0;">
+        <div class="field">
+            <label>New RDN attribute</label>
+            @if (Schema is not null)
+            {
+                <select class="input mono" @bind="Model.RdnAttribute" @bind:after="RdnAttributeChanged">
+                    @foreach (var name in RdnChoices)
+                    {
+                        <option value="@name">@name</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <input class="input mono" @bind="Model.RdnAttribute" @bind:after="RdnAttributeChanged" spellcheck="false" />
+            }
+        </div>
+        <div class="field">
+            <label>New RDN value</label>
+            <input class="input mono" @bind="Model.RdnValue" @bind:event="oninput" spellcheck="false" />
+        </div>
     </div>
     <div class="field">
         <label>New parent DN <span class="text-muted">(leave empty to rename in place)</span></label>
-        <input class="input mono" @bind="Model.NewParentDn" spellcheck="false" />
+        <input class="input mono" @bind="Model.NewParentDn" @bind:event="oninput" spellcheck="false" />
     </div>
     <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
         <input type="checkbox" @bind="Model.DeleteOldRdn" disabled="@_busy" />
-        Remove the old RDN attribute value
+        Also remove the old name value (<span class="mono">@CurrentRdnDisplay</span>) from the entry
     </label>
+    @if (!Model.DeleteOldRdn)
+    {
+        <p class="text-muted" style="font-size: 13px; margin: 0;">
+            The old value stays on the entry as an ordinary attribute value.
+        </p>
+    }
+    @if (HazardousToDeleteOldRdn)
+    {
+        <div class="bar" role="alert">
+            <span class="mono">@_currentRdnAttribute</span> is required by this entry's object
+            classes, and <span class="mono">@CurrentRdnDisplay</span> is its only value —
+            removing it would be refused by the server.
+        </div>
+    }
+    @if (PreviewDn is { } previewDn)
+    {
+        <div class="dnline mono" style="margin-top: 0;">becomes @previewDn</div>
+    }
     @if (_error is not null)
     {
         <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
@@ -33,16 +81,181 @@
     [Parameter, EditorRequired]
     public required RenameDialogModel Model { get; set; }
 
+    /// <summary>The loaded subschema, or null when unavailable (free-text fallback).</summary>
+    [Parameter]
+    public LdapSchema? Schema { get; set; }
+
+    /// <summary>Raised when the dialog is done (saved or cancelled); the shell removes it.</summary>
     [Parameter]
     public EventCallback OnClose { get; set; }
 
     private string? _error;
     private bool _busy;
+    private string _currentRdnAttribute = string.Empty;
+    private bool _hazardActive;
+
+    private IEnumerable<string> EntryObjectClasses =>
+        Model.Entry.Attributes.FirstOrDefault(static a =>
+            a.Name.Equals("objectClass", StringComparison.OrdinalIgnoreCase))?.Values ?? [];
+
+    protected override void OnInitialized() => _currentRdnAttribute = Model.RdnAttribute;
+
+    /// <summary>RDN attribute choices: the effective set, current attribute always present,
+    /// common naming attributes first (NewEntryWizard's ordering).</summary>
+    private IReadOnlyList<string> RdnChoices
+    {
+        get
+        {
+            if (Schema is not { } schema)
+            {
+                return [];
+            }
+            var (must, may) = SchemaGuide.EffectiveSets(schema, EntryObjectClasses);
+            var all = must.Concat(may)
+                .Append(_currentRdnAttribute)
+                .Where(static n => n.Length > 0 && !n.Equals("objectClass", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            all.Sort((a, b) => Preference(a).CompareTo(Preference(b)));
+            return all;
+
+            static int Preference(string name) => name.ToLowerInvariant() switch
+            {
+                "uid" => 0,
+                "cn" => 1,
+                "ou" => 2,
+                _ => 3,
+            };
+        }
+    }
+
+    private string CurrentRdnDisplay
+    {
+        get
+        {
+            try
+            {
+                return Dn.Parse(Model.Dn)[0].ToString();
+            }
+            catch (ArgumentException)
+            {
+                return Model.Dn;
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when delete-old-RDN is a guaranteed objectClassViolation: the RDN moves to a
+    /// different attribute, the old attribute is in the entry's effective MUST set, and the
+    /// entry holds no other value of it (#106).
+    /// </summary>
+    private bool HazardousToDeleteOldRdn
+    {
+        get
+        {
+            if (Schema is not { } schema
+                || _currentRdnAttribute.Length == 0
+                || Model.RdnAttribute.Trim().Equals(_currentRdnAttribute, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            var (must, _) = SchemaGuide.EffectiveSets(schema, EntryObjectClasses);
+            if (!must.Contains(_currentRdnAttribute, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            var values = Model.Entry.Attributes.FirstOrDefault(a =>
+                a.Name.Equals(_currentRdnAttribute, StringComparison.OrdinalIgnoreCase));
+            return values is { Values.Count: 1 };
+        }
+    }
+
+    private string? PreviewDn
+    {
+        get
+        {
+            var attribute = Model.RdnAttribute.Trim();
+            var value = Model.RdnValue.Trim();
+            if (attribute.Length == 0 || value.Length == 0)
+            {
+                return null;
+            }
+            try
+            {
+                var parent = Model.NewParentDn.Trim().Length > 0
+                    ? Model.NewParentDn.Trim()
+                    : Model.CurrentParentDn ?? string.Empty;
+                var preview = Dn.Combine(Dn.Rdn(attribute, value), parent);
+                _ = Dn.Parse(preview); // Dn.Rdn does not validate the attribute type; Parse does.
+                return preview;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <summary>Unchecks delete-old-RDN when the change makes it hazardous — once per
+    /// transition, so a deliberate re-check is respected.</summary>
+    private void RdnAttributeChanged()
+    {
+        var hazardous = HazardousToDeleteOldRdn;
+        if (hazardous && !_hazardActive)
+        {
+            Model.DeleteOldRdn = false;
+        }
+        _hazardActive = hazardous;
+    }
 
     private Task Close() => OnClose.InvokeAsync();
 
     private async Task SaveAsync()
     {
+        var attribute = Model.RdnAttribute.Trim();
+        var value = Model.RdnValue.Trim();
+        var parent = Model.NewParentDn.Trim();
+
+        // Reject malformed input here, as an inline answer without a round trip; the
+        // service re-validates authoritatively (RenameEntryAsync).
+        if (attribute.Length == 0)
+        {
+            _error = "Enter an attribute type for the new RDN.";
+            return;
+        }
+        if (value.Length == 0)
+        {
+            _error = "Enter a value for the new RDN.";
+            return;
+        }
+        try
+        {
+            // Dn.Rdn escapes the value but does not validate the attribute type; parsing
+            // the composed RDN applies the same RFC 4514 check the service will.
+            _ = Dn.Parse(Dn.Rdn(attribute, value));
+        }
+        catch (ArgumentException ex)
+        {
+            _error = ex.Message;
+            return;
+        }
+        if (parent.Length > 0)
+        {
+            try
+            {
+                Dn.Parse(parent);
+            }
+            catch (ArgumentException ex)
+            {
+                _error = $"The new parent is not a valid DN: {ex.Message}";
+                return;
+            }
+        }
+
+        Model.RdnAttribute = attribute;
+        Model.RdnValue = value;
+        Model.NewParentDn = parent;
+
         _busy = true;
         _error = null;
         try
