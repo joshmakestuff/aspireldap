@@ -18,8 +18,8 @@ public sealed class ConsoleClipboard(IJSRuntime js) : IAsyncDisposable
     {
         try
         {
-            _module ??= await js.InvokeAsync<IJSObjectReference>("import", "./js/console.js");
-            return await _module.InvokeAsync<bool>("copyText", text);
+            _module ??= await js.InvokeAsync<IJSObjectReference>("import", "./js/console.js").ConfigureAwait(false);
+            return await _module.InvokeAsync<bool>("copyText", text).ConfigureAwait(false);
         }
         catch (JSException)
         {
@@ -37,7 +37,7 @@ public sealed class ConsoleClipboard(IJSRuntime js) : IAsyncDisposable
         {
             try
             {
-                await _module.DisposeAsync();
+                await _module.DisposeAsync().ConfigureAwait(false);
             }
             catch (JSDisconnectedException)
             {
