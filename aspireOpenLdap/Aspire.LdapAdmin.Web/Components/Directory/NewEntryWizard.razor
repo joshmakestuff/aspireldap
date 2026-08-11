@@ -17,7 +17,7 @@
 @using LdifDotNet
 @using LdifDotNet.Schema
 
-<ConsoleDialog Title="New entry" OnCancel="Close">
+<ConsoleDialog Title="New entry" OnCancel="Close" Busy="_busy">
     <ChildContent>
     <div class="steps">
         <span class="step" aria-current="@Current(1)">1 — object class</span>
@@ -171,10 +171,10 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
         @if (_step > 1)
         {
-            <button class="btn btn-secondary" @onclick="Back">Back</button>
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="Back">Back</button>
         }
         @if (_step < 3)
         {

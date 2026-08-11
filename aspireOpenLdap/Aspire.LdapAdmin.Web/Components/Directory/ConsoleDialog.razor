@@ -1,17 +1,20 @@
 @*
-    The owned modal frame (design handoff § New entry wizard): backdrop + a .wide .blueprint
-    panel wearing its four corner registration marks. Fluent's dialog provider is gone, so
-    the accessibility it carried is owned here: role=dialog + aria-modal, focus trapped via
-    console.js (restored on close), Escape and a backdrop click cancel.
+    The owned modal frame (design handoff § New entry wizard): a native <dialog> shown with
+    showModal(), wearing the .wide .blueprint panel and its four corner registration marks.
+    The platform owns modality (#117): top-layer rendering, background inertness (Tab can
+    never reach the page behind, no matter what the dialog re-renders), Escape as a close
+    request ("cancel" event), and the ::backdrop scrim. console.js relays close requests and
+    backdrop clicks to CancelFromJs; .NET always decides whether the dialog actually closes.
 
     Structure rule (measured, 2026-08-10): the panel must NOT be the scroll container. The
-    corner marks sit 6px outside the frame by design, so a scrolling .wide permanently
+    corner marks sit 6px outside the frame by design, so a scrolling panel permanently
     "overflows" by 6px both axes and its auto scrollbars flip on every re-render — the
-    per-keystroke scrollbar flicker. The title and actions stay pinned on the frame; only
-    .dbody scrolls, and it contains nothing absolutely positioned.
+    per-keystroke scrollbar flicker. The UA gives dialog:modal overflow:auto, so console.css
+    forces dialog.wide { overflow: visible }; only .dbody scrolls. The title and actions
+    stay pinned on the frame.
 
-    Escape lives in the JS focus trap, not a Blazor @onkeydown: a backdrop key handler
-    turns every keystroke in every field into a server round-trip and re-render.
+    Never render the `open` attribute from Razor: showModal() owns it, and a Razor-rendered
+    `open` would drop the dialog out of the top layer on the next diff.
 
     DNs never render in the title (one unbreakable token whose min-content width grows with
     tree depth — docs/findings.md); callers put them in body markup with word-break.
@@ -19,15 +22,13 @@
 @implements IAsyncDisposable
 @inject IJSRuntime Js
 
-<div class="dialog-backdrop" @onclick="Cancel">
-    <div class="wide blueprint" role="dialog" aria-modal="true" aria-label="@Title"
-         tabindex="-1" @ref="_panel" @onclick:stopPropagation="true">
-        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-        <div class="dialog-title">@Title</div>
-        <div class="dbody">@ChildContent</div>
-        <div class="dialog-actions">@Actions</div>
-    </div>
-</div>
+<dialog class="wide blueprint" aria-label="@Title" tabindex="-1"
+        data-busy="@(Busy ? "true" : "false")" closedby="@(Busy ? "none" : null)" @ref="_panel">
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="dialog-title">@Title</div>
+    <div class="dbody">@ChildContent</div>
+    <div class="dialog-actions">@Actions</div>
+</dialog>
 
 @code {
     [Parameter, EditorRequired]
@@ -43,6 +44,15 @@
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
+    /// <summary>
+    /// True while the owner's operation is in flight. A busy dialog refuses every dismissal
+    /// path (Escape, backdrop, Cancel) so a mid-flight save or subtree delete can never be
+    /// silently orphaned and its error always has a mounted dialog to land on (#117). This
+    /// server-side guard is authoritative; the JS checks on data-busy are UX only.
+    /// </summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
     private ElementReference _panel;
     private IJSObjectReference? _module;
     private DotNetObjectReference<ConsoleDialog>? _self;
@@ -53,13 +63,13 @@
         {
             _self = DotNetObjectReference.Create(this);
             _module = await Js.InvokeAsync<IJSObjectReference>("import", "./js/console.js");
-            await _module.InvokeVoidAsync("trapFocus", _panel, _self);
+            await _module.InvokeVoidAsync("openModal", _panel, _self);
         }
     }
 
-    private Task Cancel() => OnCancel.InvokeAsync();
+    private Task Cancel() => Busy ? Task.CompletedTask : OnCancel.InvokeAsync();
 
-    /// <summary>Called by the focus trap when Escape is pressed inside the dialog.</summary>
+    /// <summary>Called by console.js for a close request (Escape) or a backdrop click.</summary>
     [JSInvokable]
     public Task CancelFromJs() => Cancel();
 
@@ -69,7 +79,10 @@
         {
             try
             {
-                await _module.InvokeVoidAsync("releaseFocus");
+                // closeModal works from module state, not the element reference: on the
+                // Blazor unmount path the render batch has already removed the element
+                // before this interop call runs, and native focus restore never fires.
+                await _module.InvokeVoidAsync("closeModal");
                 await _module.DisposeAsync();
             }
             catch (JSDisconnectedException)

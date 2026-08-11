@@ -3,7 +3,7 @@
     word-break, never in the title (docs/findings.md). Save semantics as AttributeDialog.
 *@
 
-<ConsoleDialog Title="Rename entry" OnCancel="Close">
+<ConsoleDialog Title="Rename entry" OnCancel="Close" Busy="_busy">
     <ChildContent>
     <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
     <div class="field">
@@ -15,7 +15,7 @@
         <input class="input mono" @bind="Model.NewParentDn" spellcheck="false" />
     </div>
     <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-        <input type="checkbox" @bind="Model.DeleteOldRdn" />
+        <input type="checkbox" @bind="Model.DeleteOldRdn" disabled="@_busy" />
         Remove the old RDN attribute value
     </label>
     @if (_error is not null)
@@ -24,7 +24,7 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
         <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Renaming…" : "Rename")</button>
     </Actions>
 </ConsoleDialog>

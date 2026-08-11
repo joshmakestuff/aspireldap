@@ -3,8 +3,9 @@
     of schema guidance rows. Guidance, not enforcement — any typed name passes through;
     the list only offers what the schema allows for the entry's object classes.
 
-    Escape/arrow keys stop propagating only while the list is open, so the dialog's own
-    Escape (close) keeps working the moment the list is shut.
+    Escape with the list open closes only the list: the dialog's close-request handler in
+    console.js refuses the cancel while [aria-expanded=true] exists (#117) — keystrokes
+    propagate normally, so the dialog's Tab handling is never starved either.
 *@
 
 <div class="combo">
@@ -14,7 +15,7 @@
     <input class="input mono" style="anchor-name: @_anchor;" value="@Value" placeholder="@Placeholder"
            spellcheck="false" aria-label="@AriaLabel" role="combobox" aria-expanded="@(_open ? "true" : "false")"
            @oninput="OnInput" @onfocus="@(() => _open = true)" @onblur="@(() => _open = false)"
-           @onkeydown="OnKeyDown" @onkeydown:stopPropagation="_open" />
+           @onkeydown="OnKeyDown" />
     @if (_open && Filtered.Count > 0)
     {
         <div class="combo-list" style="position-anchor: @_anchor;" role="listbox">
