@@ -33,6 +33,8 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 // The console's toast slot — scoped per circuit, rendered by the shell page.
 builder.Services.AddScoped<ConsoleToastService>();
+// The one guarded copy-to-clipboard path (#119) — never throws into a handler.
+builder.Services.AddScoped<ConsoleClipboard>();
 
 var app = builder.Build();
 

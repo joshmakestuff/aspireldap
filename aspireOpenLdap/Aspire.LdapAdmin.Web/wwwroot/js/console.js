@@ -73,8 +73,18 @@ export function currentTheme() {
   return document.documentElement.dataset.theme || 'light';
 }
 
-export function copyText(text) {
-  return navigator.clipboard.writeText(text);
+// Never throws: a rejection here used to escape the Blazor event handler and kill the
+// circuit (#119). Rejections are real even on localhost (document not focused,
+// permissions policy); a missing navigator.clipboard (non-secure origins) reports the
+// same clean false — no legacy execCommand fallback by decision, callers toast it.
+export async function copyText(text) {
+  try {
+    if (!navigator.clipboard?.writeText) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // The toast is a manual popover so it joins the top layer above any open modal dialog

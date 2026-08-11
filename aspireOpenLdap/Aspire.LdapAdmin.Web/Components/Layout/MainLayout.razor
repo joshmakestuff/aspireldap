@@ -12,7 +12,18 @@
 *@
 @inherits LayoutComponentBase
 
-@Body
+@* The boundary keeps one escaped handler exception (an interop rejection was enough,
+   #119) from killing the whole circuit: the console degrades to an inline error with a
+   way back instead of the dead reload banner. Existing .bar.err treatment, tokens only. *@
+<ErrorBoundary @ref="_errors">
+    <ChildContent>@Body</ChildContent>
+    <ErrorContent>
+        <div class="bar err" role="alert" style="margin: var(--space-4);">
+            Something failed inside the console. The connection is still alive —
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="@(() => _errors?.Recover())">continue</button>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>
 
 @* Kept from the template so an unhandled circuit error is still announced; hidden by the
    inline style until blazor.web.js flips display on error, so no stylesheet is needed. *@
@@ -20,3 +31,7 @@
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
 </div>
+
+@code {
+    private ErrorBoundary? _errors;
+}
