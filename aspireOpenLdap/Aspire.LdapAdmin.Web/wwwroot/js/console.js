@@ -77,44 +77,79 @@ export function copyText(text) {
   return navigator.clipboard.writeText(text);
 }
 
-// One dialog at a time (the shell enforces that), so module-level trap state suffices.
-let trapped = null;
-let restoreTo = null;
-let trapHandler = null;
-
-const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-
-export function trapFocus(el, dotnetRef) {
-  releaseFocus();
-  trapped = el;
-  restoreTo = document.activeElement;
-  // Focus the panel itself, not its first field: programmatic focus on an input triggers
-  // :focus-visible in Chromium, and the ring flashing on dialog open reads as a glitch
-  // (#109). The panel carries tabindex="-1"; Tab moves into the first control normally.
-  el.focus({ preventScroll: true });
-  trapHandler = e => {
-    // Escape is handled here, not by a Blazor keydown on the backdrop: a bound key
-    // handler turns every keystroke in every field into a server round-trip.
-    if (e.key === 'Escape' && dotnetRef) {
-      dotnetRef.invokeMethodAsync('CancelFromJs');
-      e.preventDefault();
-      return;
-    }
-    if (e.key !== 'Tab') return;
-    const items = [...el.querySelectorAll(FOCUSABLE)].filter(i => !i.disabled && i.offsetParent !== null);
-    if (items.length === 0) return;
-    const firstItem = items[0];
-    const lastItem = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === firstItem) { lastItem.focus(); e.preventDefault(); }
-    else if (!e.shiftKey && document.activeElement === lastItem) { firstItem.focus(); e.preventDefault(); }
-  };
-  el.addEventListener('keydown', trapHandler);
+// The toast is a manual popover so it joins the top layer above any open modal dialog
+// (#117): promotion order decides stacking, and the toast is always promoted after the
+// dialog it must overlay. Idempotent — Blazor calls this on every render while a toast
+// is up, and the element re-enters the DOM on each new message.
+export function showToastPopover(el) {
+  if (el?.isConnected && !el.matches(':popover-open')) el.showPopover();
 }
 
-export function releaseFocus() {
-  if (trapped && trapHandler) trapped.removeEventListener('keydown', trapHandler);
+// ── Modal dialogs (#117) ─────────────────────────────────────────────────────
+// The <dialog> element + showModal() owns modality: top layer, background inertness,
+// Escape as a "cancel" close request, ::backdrop. This module only relays close requests
+// and backdrop clicks to .NET — the server decides whether the dialog actually closes,
+// and its Busy guard is authoritative; the data-busy checks here are UX-latency cover.
+// One dialog at a time (the shell enforces that), so module-level state suffices.
+let dialog = null;
+let restoreTo = null;
+let netRef = null;
+let downOutside = false;
+
+const busy = () => dialog?.dataset.busy === 'true';
+// An open picker list claims Escape: the picker's own Blazor handler closes the list,
+// and only the next Escape reaches the dialog.
+const comboOpen = () => !!dialog?.querySelector('[role="combobox"][aria-expanded="true"]');
+// Backdrop test by coordinates, not event target: clicks on the panel's own padding also
+// target the dialog element, and getBoundingClientRect() excludes ::backdrop.
+const outside = e => {
+  const r = dialog.getBoundingClientRect();
+  return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+};
+const relay = () => {
+  try { netRef?.invokeMethodAsync('CancelFromJs'); } catch { /* component disposed */ }
+};
+
+export function openModal(el, dotnetRef) {
+  closeModal();
+  dialog = el;
+  netRef = dotnetRef;
+  restoreTo = document.activeElement;
+  el.showModal();
+  // Focus the panel itself, not its first field: showModal's default focusing steps pick
+  // the first focusable control, and programmatic focus on an input triggers
+  // :focus-visible in Chromium — the ring flashing on dialog open reads as a glitch
+  // (#109). The panel carries tabindex="-1"; Tab moves into the first control normally.
+  el.focus({ preventScroll: true });
+  el.addEventListener('cancel', e => {
+    e.preventDefault(); // .NET owns closing; the element never closes itself
+    if (!busy() && !comboOpen()) relay();
+  });
+  // CloseWatcher anti-abuse: a second Escape without fresh user activation (Escape grants
+  // none) skips "cancel" and closes outright. Reopen while busy; relay otherwise.
+  el.addEventListener('close', () => {
+    if (busy()) requestAnimationFrame(() => { if (dialog?.isConnected) dialog.showModal(); });
+    else relay();
+  });
+  // A backdrop click cancels only when the interaction STARTED on the backdrop too:
+  // drag-selecting text in a field and releasing past the panel edge fires click at the
+  // dialog element (common ancestor) and must not discard the user's input.
+  el.addEventListener('pointerdown', e => { downOutside = outside(e); });
+  el.addEventListener('click', e => {
+    if (downOutside && outside(e) && !busy()) relay();
+    downOutside = false;
+  });
+}
+
+export function closeModal() {
+  // Works from module state: on the Blazor unmount path the element is already out of the
+  // DOM when the dispose interop runs, so native close/focus-restore never happens.
+  if (dialog?.isConnected) {
+    netRef = null; // the close event below must not relay back into a disposing component
+    dialog.close();
+  }
   if (restoreTo && typeof restoreTo.focus === 'function') restoreTo.focus();
-  trapped = null;
+  dialog = null;
   restoreTo = null;
-  trapHandler = null;
+  netRef = null;
 }

@@ -3,7 +3,7 @@
     word-break, never in the title (docs/findings.md). Save semantics as AttributeDialog.
 *@
 
-<ConsoleDialog Title="Delete entry" OnCancel="Close">
+<ConsoleDialog Title="Delete entry" OnCancel="Close" Busy="_busy">
     <ChildContent>
     <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
     <p style="font-size: 13px; margin: 0;">
@@ -11,7 +11,7 @@
         the server refuses non-leaf deletes — unless the subtree option is checked.
     </p>
     <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-        <input type="checkbox" @bind="Model.Subtree" />
+        <input type="checkbox" @bind="Model.Subtree" disabled="@_busy" />
         Also delete every entry beneath this one (subtree)
     </label>
     @if (Model.Subtree)
@@ -28,7 +28,7 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
         <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Deleting…" : "Delete")</button>
     </Actions>
 </ConsoleDialog>

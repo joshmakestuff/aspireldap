@@ -85,11 +85,11 @@ public sealed class ConsoleComponentTests : TestContext
             IsNew = true,
             Name = "mail",
             ValuesText = "alice@aspire.dev",
+            Entry = Entry(Text("objectClass", "top", "person")),
             SaveAsync = _ => Task.FromResult<string?>("Access denied — the server's ACL refused this bind."),
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
-            .Add(p => p.Entry, Entry(Text("objectClass", "top", "person")))
             .Add(p => p.OnClose, () => { closed = true; }));
 
         cut.Find("button.btn-primary").Click();
@@ -108,11 +108,11 @@ public sealed class ConsoleComponentTests : TestContext
             IsNew = true,
             Name = "mail",
             ValuesText = "alice@aspire.dev",
+            Entry = Entry(Text("objectClass", "top", "person")),
             SaveAsync = _ => Task.FromResult<string?>(null),
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
-            .Add(p => p.Entry, Entry(Text("objectClass", "top", "person")))
             .Add(p => p.OnClose, () => { closed = true; }));
 
         cut.Find("button.btn-primary").Click();
@@ -128,11 +128,11 @@ public sealed class ConsoleComponentTests : TestContext
         {
             IsNew = true,
             Name = "uidNumber",
+            Entry = Entry(Text("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson")),
             SaveAsync = _ => Task.FromResult<string?>(null),
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
-            .Add(p => p.Entry, Entry(Text("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson")))
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
         // SINGLE-VALUE type: one input, not the multi-line textarea; guidance names it.
@@ -231,7 +231,7 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public async Task ConsoleDialog_Escape_And_Backdrop_Click_Cancel()
+    public async Task ConsoleDialog_Close_Request_Relay_Cancels_When_Idle()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         var cancelled = 0;
@@ -239,24 +239,133 @@ public sealed class ConsoleComponentTests : TestContext
             .Add(p => p.Title, "Test dialog")
             .Add(p => p.OnCancel, () => { cancelled++; }));
 
-        // Escape arrives through the JS focus trap (a Blazor keydown on the backdrop would
-        // round-trip every keystroke), which invokes this JSInvokable.
+        // Escape and backdrop clicks both arrive through console.js as this relay (native
+        // close requests; a Blazor keydown would round-trip every keystroke). The real
+        // keyboard/pointer paths are browser-probe territory — JS never runs under bUnit.
         await cut.InvokeAsync(() => cut.Instance.CancelFromJs());
-        Assert.Equal(1, cancelled);
 
-        cut.Find(".dialog-backdrop").Click();
-        Assert.Equal(2, cancelled);
+        Assert.Equal(1, cancelled);
     }
 
     [Fact]
-    public void ConsoleDialog_Wears_The_Blueprint_Frame_And_Dialog_Role()
+    public async Task ConsoleDialog_Busy_Refuses_The_Cancel_Relay_And_Marks_The_Element()
     {
+        // aspireldap#117 defect 1: while an operation is in flight the relay is refused
+        // server-side (authoritative), and the element carries the attributes the JS and
+        // the platform use to refuse client-side: data-busy for console.js, closedby=none
+        // so supporting engines suppress close requests before they even fire.
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var cancelled = 0;
+        var cut = RenderComponent<ConsoleDialog>(parameters => parameters
+            .Add(p => p.Title, "Busy dialog")
+            .Add(p => p.Busy, true)
+            .Add(p => p.OnCancel, () => { cancelled++; }));
+
+        await cut.InvokeAsync(() => cut.Instance.CancelFromJs());
+
+        Assert.Equal(0, cancelled);
+        var panel = cut.Find("dialog.wide");
+        Assert.Equal("true", panel.GetAttribute("data-busy"));
+        Assert.Equal("none", panel.GetAttribute("closedby"));
+    }
+
+    [Fact]
+    public async Task AttributeDialog_InFlight_Save_Refuses_Cancel_And_Still_Lands_The_Late_Error()
+    {
+        // aspireldap#117 defect 1: the dialog must stay mounted and un-dismissable for the
+        // whole operation, so an error returned after a cancel attempt still renders
+        // instead of landing on a disposed component.
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var closed = false;
+        var pending = new TaskCompletionSource<string?>();
+        var model = new AttributeDialogModel
+        {
+            IsNew = true,
+            Name = "mail",
+            ValuesText = "alice@aspire.dev",
+            Entry = Entry(Text("objectClass", "top", "person")),
+            SaveAsync = _ => pending.Task,
+        };
+        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+            .Add(p => p.Model, model)
+            .Add(p => p.OnClose, () => { closed = true; }));
+
+        cut.Find("button.btn-primary").Click();
+
+        // In flight: Cancel is disabled and the Escape relay is refused.
+        Assert.True(cut.Find("button.btn-secondary").HasAttribute("disabled"));
+        await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
+        Assert.False(closed);
+
+        pending.SetResult("Access denied — the server's ACL refused this bind.");
+        cut.WaitForAssertion(() =>
+            Assert.Contains("Access denied", cut.Find(".bar.err").TextContent, StringComparison.Ordinal));
+        Assert.False(closed);
+    }
+
+    [Fact]
+    public void AttributeDialog_InFlight_Save_Success_Closes_Exactly_Once()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var closedCount = 0;
+        var pending = new TaskCompletionSource<string?>();
+        var model = new AttributeDialogModel
+        {
+            IsNew = true,
+            Name = "mail",
+            ValuesText = "alice@aspire.dev",
+            Entry = Entry(Text("objectClass", "top", "person")),
+            SaveAsync = _ => pending.Task,
+        };
+        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+            .Add(p => p.Model, model)
+            .Add(p => p.OnClose, () => { closedCount++; }));
+
+        cut.Find("button.btn-primary").Click();
+        pending.SetResult(null);
+
+        cut.WaitForAssertion(() => Assert.Equal(1, closedCount));
+        Assert.Equal(1, closedCount);
+    }
+
+    [Fact]
+    public void DeleteDialog_InFlight_Delete_Disables_Cancel_And_The_Subtree_Checkbox()
+    {
+        // aspireldap#117 defect 1: flipping the subtree checkbox mid-walk would lie about
+        // what the running operation is doing; it locks with the rest of the dialog.
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var pending = new TaskCompletionSource<string?>();
+        var model = new DeleteDialogModel
+        {
+            Dn = "uid=alice,ou=people,dc=aspire,dc=dev",
+            Subtree = true,
+            SaveAsync = _ => pending.Task,
+        };
+        var cut = RenderComponent<DeleteDialog>(parameters => parameters
+            .Add(p => p.Model, model));
+
+        cut.Find("button.btn-primary").Click();
+
+        Assert.True(cut.Find("button.btn-secondary").HasAttribute("disabled"));
+        Assert.True(cut.Find("input[type=checkbox]").HasAttribute("disabled"));
+
+        pending.SetResult(null);
+    }
+
+    [Fact]
+    public void ConsoleDialog_Wears_The_Blueprint_Frame_On_A_Native_Dialog()
+    {
+        // Native modal dialogs carry implicit role=dialog/aria-modal — no ARIA attributes
+        // to assert; the element itself is the claim. The open attribute must NOT render
+        // from Razor (showModal() owns it; a rendered `open` would drop the top layer on
+        // the next diff).
         JSInterop.Mode = JSRuntimeMode.Loose;
         var cut = RenderComponent<ConsoleDialog>(parameters => parameters
             .Add(p => p.Title, "Framed"));
 
-        var panel = cut.Find("[role=dialog]");
-        Assert.Equal("true", panel.GetAttribute("aria-modal"));
+        var panel = cut.Find("dialog.wide.blueprint");
+        Assert.Equal("Framed", panel.GetAttribute("aria-label"));
+        Assert.False(panel.HasAttribute("open"));
         // The design system's registration marks are load-bearing (industry-ui skill).
         Assert.Equal(4, cut.FindAll(".blueprint > .corner").Count);
     }

@@ -1,11 +1,12 @@
+using Aspire.LdapAdmin.Core;
+
 namespace Aspire.LdapAdmin.Web.Components.Directory;
 
 /// <summary>
 /// Content models for the entry-editing dialogs. Each carries its form state plus the save
 /// delegate the shell page provides: the dialog calls it while open, shows a returned error
 /// inline, and closes only on a null (success) result — so a failed write never silently
-/// dismisses the user's input. Public because they are the TContent of public
-/// IDialogContentComponent components.
+/// dismisses the user's input.
 /// </summary>
 public sealed class AttributeDialogModel
 {
@@ -13,6 +14,15 @@ public sealed class AttributeDialogModel
     public string Name { get; set; } = string.Empty;
     public string ValuesText { get; set; } = string.Empty;
     public bool IsBinary { get; set; }
+
+    /// <summary>
+    /// The entry being edited, snapshotted when the dialog opens: its object classes and
+    /// present attributes feed the picker. A snapshot, not the shell's live field — the
+    /// save delegate's own reselect nulls that field mid-save, and the dialog's lifetime
+    /// must not depend on it (#117).
+    /// </summary>
+    public required LdapEntry Entry { get; init; }
+
     public required Func<AttributeDialogModel, Task<string?>> SaveAsync { get; init; }
 }
 

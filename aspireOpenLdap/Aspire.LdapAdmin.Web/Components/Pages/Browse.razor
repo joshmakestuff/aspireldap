@@ -151,9 +151,9 @@
     </div>
 </div>
 
-@if (_attributeDialog is { } attributeDialog && _entry is { } dialogEntry)
+@if (_attributeDialog is { } attributeDialog)
 {
-    <AttributeDialog Model="attributeDialog" Entry="dialogEntry" Schema="_dialogSchema" OnClose="CloseDialogs" />
+    <AttributeDialog Model="attributeDialog" Schema="_dialogSchema" OnClose="CloseDialogs" />
 }
 @if (_newEntry is { } newEntry)
 {
@@ -168,9 +168,13 @@
     <DeleteDialog Model="deleteDialog" OnClose="CloseDialogs" />
 }
 
+@* popover=manual: dialogs are top-layer natives now (#117), and the design rule is that
+   write confirmations stay visible over an open dialog — the toast joins the top layer
+   after the dialog, so it paints above. Known limit: a toast already showing when a
+   dialog opens sits under it for its remaining ≤2.6 s. *@
 @if (_toast is { Length: > 0 })
 {
-    <div class="toast mono" role="status" aria-live="polite">@_toast</div>
+    <div class="toast mono" role="status" aria-live="polite" popover="manual" @ref="_toastElement">@_toast</div>
 }
 
 @code {
@@ -205,6 +209,7 @@
     private LdifDotNet.Schema.LdapSchema? _dialogSchema;
 
     private string? _toast;
+    private ElementReference _toastElement;
     private CancellationTokenSource? _toastCts;
 
     /// <summary>
@@ -298,6 +303,12 @@
         {
             _js = await Js.InvokeAsync<IJSObjectReference>("import", "./js/console.js");
             await _js.InvokeVoidAsync("initRail", _splitter);
+        }
+        // Every render: the toast element appears and disappears with _toast, and a manual
+        // popover must be re-shown each time it (re)enters the DOM. Idempotent in JS.
+        if (_toast is { Length: > 0 } && _js is not null)
+        {
+            await _js.InvokeVoidAsync("showToastPopover", _toastElement);
         }
     }
 
@@ -727,22 +738,43 @@
         _deleteDialog = null;
     }
 
-    private void OpenEditAttributeDialog(LdapAttributeValues attribute) =>
+    /// <summary>
+    /// One dialog at a time is a shell invariant, not a UI accident: the toolbar stays
+    /// live while a dialog is open, and a second open would orphan the first mid-save (#117).
+    /// </summary>
+    private bool DialogOpen =>
+        _attributeDialog is not null || _newEntry is not null
+        || _renameDialog is not null || _deleteDialog is not null;
+
+    private void OpenEditAttributeDialog(LdapAttributeValues attribute)
+    {
+        if (DialogOpen || _entry is not { } entry)
+        {
+            return;
+        }
         _attributeDialog = new AttributeDialogModel
         {
             IsNew = false,
             Name = attribute.Name,
             IsBinary = attribute.IsBinary,
             ValuesText = string.Join('\n', attribute.Values),
+            Entry = entry,
             SaveAsync = SaveAttributeAsync,
         };
+    }
 
-    private void OpenAddAttributeDialog() =>
-        _attributeDialog = new AttributeDialogModel { IsNew = true, SaveAsync = SaveAttributeAsync };
+    private void OpenAddAttributeDialog()
+    {
+        if (DialogOpen || _entry is not { } entry)
+        {
+            return;
+        }
+        _attributeDialog = new AttributeDialogModel { IsNew = true, Entry = entry, SaveAsync = SaveAttributeAsync };
+    }
 
     private void OpenChildDialog()
     {
-        if (_selectedDn is { } dn)
+        if (!DialogOpen && _selectedDn is { } dn)
         {
             _newEntry = new NewEntryModel { ParentDn = dn, SaveAsync = SaveNewEntryAsync };
         }
@@ -750,7 +782,7 @@
 
     private void OpenRenameDialog()
     {
-        if (_selectedDn is { } dn)
+        if (!DialogOpen && _selectedDn is { } dn)
         {
             _renameDialog = new RenameDialogModel { Dn = dn, SaveAsync = SaveRenameAsync };
         }
@@ -758,7 +790,7 @@
 
     private void OpenDeleteDialog()
     {
-        if (_selectedDn is { } dn)
+        if (!DialogOpen && _selectedDn is { } dn)
         {
             _deleteDialog = new DeleteDialogModel { Dn = dn, SaveAsync = ConfirmDeleteAsync };
         }

@@ -10,7 +10,7 @@
     user's input.
 *@
 
-<ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="Close">
+<ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="Close" Busy="_busy">
     <ChildContent>
     @if (Model.IsNew)
     {
@@ -66,7 +66,7 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
         <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Saving…" : "Save")</button>
     </Actions>
 </ConsoleDialog>
@@ -74,10 +74,6 @@
 @code {
     [Parameter, EditorRequired]
     public required AttributeDialogModel Model { get; set; }
-
-    /// <summary>The entry being edited — its object classes and present attributes feed the picker.</summary>
-    [Parameter, EditorRequired]
-    public required LdapEntry Entry { get; set; }
 
     /// <summary>The loaded subschema, or null when unavailable (free-text fallback).</summary>
     [Parameter]
@@ -92,7 +88,7 @@
     private IReadOnlyList<AttributeGuidance> _candidates = [];
 
     private IEnumerable<string> EntryObjectClasses =>
-        Entry.Attributes.FirstOrDefault(static a =>
+        Model.Entry.Attributes.FirstOrDefault(static a =>
             a.Name.Equals("objectClass", StringComparison.OrdinalIgnoreCase))?.Values ?? [];
 
     private AttributeGuidance? Guidance =>
@@ -110,7 +106,7 @@
     {
         _candidates = Schema is null
             ? []
-            : SchemaGuide.AddCandidates(Schema, EntryObjectClasses, Entry.Attributes.Select(static a => a.Name));
+            : SchemaGuide.AddCandidates(Schema, EntryObjectClasses, Model.Entry.Attributes.Select(static a => a.Name));
     }
 
     private Task Close() => OnClose.InvokeAsync();

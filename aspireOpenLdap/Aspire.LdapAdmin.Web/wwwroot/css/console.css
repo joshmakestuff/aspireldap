@@ -162,6 +162,10 @@
    accent color the design system does not have. */
 .bar.err{border-color:color-mix(in srgb,var(--color-text) 60%,transparent);background:color-mix(in srgb,var(--color-text) 7%,transparent)}
 .toast{position:fixed;left:50%;bottom:var(--space-8);transform:translateX(-50%);padding:10px 18px;font-size:13px;border:1px solid var(--color-accent);background:var(--color-bg);box-shadow:var(--shadow-md);z-index:40}
+/* As a manual popover (top layer, above modal dialogs — #117) the popover UA styles
+   (inset:0;margin:auto;border:solid;padding:0.25em;background:canvas;overflow:auto) must
+   be beaten back to the toast's own token treatment above. */
+.toast[popover]{inset:auto;left:50%;bottom:var(--space-8);margin:0;overflow:visible;padding:10px 18px;border:1px solid var(--color-accent);background:var(--color-bg);color:var(--color-text)}
 .steps{display:flex;gap:var(--space-4);margin-bottom:var(--space-4);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
 .step{color:color-mix(in srgb,var(--color-text) 40%,transparent)}
 .step[aria-current=true]{color:var(--color-accent)}
@@ -171,14 +175,19 @@
    the title and actions stay pinned on the frame. */
 .wide{width:min(720px,100%);display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-6);border:1px solid var(--color-divider);background:var(--color-bg);box-shadow:var(--shadow-lg);max-height:88vh;min-height:0}
 .dbody{display:flex;flex-direction:column;gap:var(--space-3);overflow:auto;min-height:0;flex:1 1 auto;scrollbar-gutter:stable}
+/* Native <dialog> UA overrides (#117): dialog:modal ships overflow:auto — the −6px corner
+   marks would re-trigger the measured scrollbar oscillation above, so the panel stays
+   overflow:visible and .dbody remains the only scroll container. The UA's color:CanvasText
+   would also bypass the dark-mode token layer; text color comes from the token. */
+dialog.wide{overflow:visible;color:var(--color-text)}
+/* The scrim the .dialog-backdrop div used to paint; ::backdrop inherits custom properties
+   from the dialog. neutral-900 stays the one non-mirrored dark step — a scrim must darken,
+   not fog (see the token block). Top-layer stacking replaces the old z-index ladder. */
+dialog.wide::backdrop{background:color-mix(in srgb,var(--color-neutral-900) 50%,transparent)}
 /* The dialog panel takes initial focus (tabindex=-1) so opening a modal does not flash the
    2px ring on its first field (#109). The panel is a container, not a control — the ring
    rule ("never removed") applies to interactive elements; Tab moves focus onward and every
    control keeps its ring. */
-[role="dialog"]:focus-visible{outline:none}
-/* Above the sticky .railtop (z-index 2): without this the scrim dims everything except
-   that rectangle, which floats over the backdrop (#109's real reported symptom). Below
-   the toast (40) so write confirmations stay visible over an open dialog. */
-.dialog-backdrop{z-index:30}
+dialog.wide:focus-visible{outline:none}
 .cbcell{width:34px}
 .table td.mono,.table th.mono{font-size:12px}
