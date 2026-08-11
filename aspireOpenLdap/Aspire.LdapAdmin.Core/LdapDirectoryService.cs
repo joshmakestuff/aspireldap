@@ -435,6 +435,15 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
             return dnError;
         }
 
+        // A password change aimed at the console's own bind identity is refused here, without
+        // a round trip: it would sever every connection the console makes from then on, and
+        // silently desync the AppHost's declared credentials from the directory (#94).
+        if (DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
+        {
+            return LdapOperationResult.Invalid(
+                $"'{dn}' is the console's bind identity; its password cannot be changed from here.");
+        }
+
         // PasswdModifyRequestValue ::= SEQUENCE {
         //     userIdentity [0] OCTET STRING OPTIONAL, newPasswd [2] OCTET STRING OPTIONAL }
         var value = new AsnWriter(AsnEncodingRules.BER);

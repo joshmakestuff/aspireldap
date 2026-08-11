@@ -79,6 +79,26 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
+    public async Task Setting_the_bind_identity_password_is_rejected_without_a_round_trip()
+    {
+        using var cts = TestCancellation.Source();
+
+        // A case/whitespace variant of the bind DN: surviving this mutation is what separates
+        // a real DN comparison from string.Equals (#94).
+        var variant = fixture.Settings.BindDn.ToUpperInvariant().Replace(",", ", ");
+
+        var result = await fixture.Directory.SetPasswordAsync(variant, "would-brick-the-console", cts.Token);
+
+        Assert.Equal(LdapOperationStatus.InvalidRequest, result.Status);
+        Assert.Null(result.ResultCode);
+        Assert.Contains("bind identity", result.Message);
+
+        // The declared credentials still work: the password genuinely did not change.
+        var asAdmin = fixture.DirectoryAs(fixture.Settings.BindDn, fixture.Settings.BindPassword);
+        Assert.NotNull(await asAdmin.GetEntryAsync(fixture.BaseDn, ["dc"], cts.Token));
+    }
+
+    [Fact]
     public async Task Setting_a_password_on_an_entry_that_does_not_exist_reports_a_failure()
     {
         using var cts = TestCancellation.Source();
