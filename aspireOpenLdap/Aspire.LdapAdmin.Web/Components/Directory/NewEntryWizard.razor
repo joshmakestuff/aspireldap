@@ -381,10 +381,13 @@
                 _error = "Enter at least one object class.";
                 return;
             }
-            // Default the RDN attribute once classes are known.
-            if (_rdnAttribute.Length == 0 && RdnChoices.Count > 0)
+            // Default the RDN attribute once classes are known, and re-default it when a
+            // class change removed the current one — a stale attribute would compose an
+            // RDN the select never offered (#120).
+            var choices = RdnChoices;
+            if (choices.Count > 0 && !choices.Contains(_rdnAttribute, StringComparer.OrdinalIgnoreCase))
             {
-                _rdnAttribute = RdnChoices[0];
+                _rdnAttribute = choices[0];
             }
             _step = 2;
             return;

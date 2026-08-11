@@ -193,6 +193,44 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
+    public void NewEntryWizard_Resets_A_Stale_Rdn_Attribute_After_A_Class_Swap()
+    {
+        // aspireldap#120: back-and-swap flow. inetOrgPerson defaults the RDN attribute
+        // to uid; swapping to person alone removes uid from the choices, so keeping it
+        // would compose an RDN the select never offered — a schema violation.
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var model = new NewEntryModel
+        {
+            ParentDn = "ou=people,dc=example,dc=org",
+            SaveAsync = _ => Task.FromResult<string?>(null),
+        };
+        var cut = RenderComponent<NewEntryWizard>(parameters => parameters
+            .Add(p => p.Model, model)
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
+
+        AngleSharp.Dom.IElement PickButton(string name) => cut.FindAll(".picklist button")
+            .First(b => b.TextContent.Contains(name, StringComparison.Ordinal));
+
+        PickButton("inetOrgPerson").Click();
+        cut.Find("button.btn-primary").Click(); // Continue → step 2, RDN defaults to uid
+        Assert.Equal("uid", cut.Find("select.input").GetAttribute("value"));
+
+        cut.FindAll("button.btn-secondary")
+            .First(b => b.TextContent == "Back").Click();
+        PickButton("inetOrgPerson").Click(); // unpick
+        PickButton("person").Click();
+        cut.Find("button.btn-primary").Click(); // Continue → step 2 again
+
+        // The stale uid is gone: the field holds what the select shows (cn, the first
+        // choice for person), and the composed DN uses it.
+        Assert.Equal("cn", cut.Find("select.input").GetAttribute("value"));
+        Assert.DoesNotContain(cut.FindAll("select.input option"), o => o.TextContent == "uid");
+        cut.FindAll(".frow input").First().Input("J Test");
+        Assert.Contains("creates cn=J Test,ou=people,dc=example,dc=org",
+            cut.Find(".dnline").TextContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ConsoleDialog_Escape_And_Backdrop_Click_Cancel()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
