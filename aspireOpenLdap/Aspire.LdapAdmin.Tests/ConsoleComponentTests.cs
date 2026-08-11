@@ -369,6 +369,175 @@ public sealed class ConsoleComponentTests : TestContext
         // The design system's registration marks are load-bearing (industry-ui skill).
         Assert.Equal(4, cut.FindAll(".blueprint > .corner").Count);
     }
+
+    // ---- Rename dialog (#106): guided RDN, validation before submit, hazard prediction ----
+
+    /// <summary>A person entry named by cn, as the shell's OpenRenameDialog would hand over:
+    /// RDN prefilled, parent computed, entry snapshotted.</summary>
+    private static RenameDialogModel RenameModel(
+        Func<RenameDialogModel, Task<string?>>? save = null,
+        params LdapAttributeValues[] attributes)
+    {
+        const string dn = "cn=Alice Chen,ou=people,dc=aspire,dc=dev";
+        var entryAttributes = attributes.Length > 0
+            ? attributes
+            : new[]
+            {
+                Text("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson"),
+                Text("cn", "Alice Chen"),
+                Text("sn", "Chen"),
+            };
+        return new RenameDialogModel
+        {
+            Dn = dn,
+            CurrentParentDn = "ou=people,dc=aspire,dc=dev",
+            Entry = new LdapEntry(dn, entryAttributes),
+            RdnAttribute = "cn",
+            RdnValue = "Alice Chen",
+            SaveAsync = save ?? (_ => Task.FromResult<string?>(null)),
+        };
+    }
+
+    [Fact]
+    public void RenameDialog_Prefills_The_Current_Rdn_Attribute_And_Value()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var cut = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, RenameModel())
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
+
+        Assert.Equal("cn", cut.Find("select.input").GetAttribute("value"));
+        Assert.Equal("Alice Chen", cut.Find(".frow input.input").GetAttribute("value"));
+    }
+
+    [Fact]
+    public void RenameDialog_Offers_Schema_Attributes_And_Free_Text_Without_A_Schema()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var withSchema = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, RenameModel())
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
+
+        var options = withSchema.FindAll("select.input option").Select(o => o.TextContent).ToList();
+        Assert.Contains("uid", options);   // MAY via inetOrgPerson
+        Assert.Contains("cn", options);    // MUST via person — and the current attribute
+        Assert.Contains("sn", options);
+        Assert.DoesNotContain("objectClass", options);
+
+        var withoutSchema = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, RenameModel()));
+        Assert.Empty(withoutSchema.FindAll("select"));
+        // Free text degradation: attribute, value and parent are all plain inputs.
+        Assert.Equal(3, withoutSchema.FindAll("input.input.mono").Count);
+    }
+
+    [Fact]
+    public void RenameDialog_Previews_The_Resulting_Dn_For_Rename_In_Place_And_For_A_Move()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var cut = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, RenameModel())
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
+
+        string Preview() => cut.FindAll(".dnline")
+            .Single(d => d.TextContent.Contains("becomes", StringComparison.Ordinal)).TextContent;
+
+        // In place: the current parent completes the DN; the value is escaped by Dn.Rdn.
+        cut.Find(".frow input.input").Input(@"Chen, Alice");
+        Assert.Contains(@"becomes cn=Chen\, Alice,ou=people,dc=aspire,dc=dev", Preview(), StringComparison.Ordinal);
+
+        // Move: a filled parent replaces the current one in the preview.
+        var parentInput = cut.FindAll("input.input.mono").ElementAt(1);
+        parentInput.Input("ou=staff,dc=aspire,dc=dev");
+        Assert.Contains(@"becomes cn=Chen\, Alice,ou=staff,dc=aspire,dc=dev", Preview(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenameDialog_Rejects_A_Malformed_Parent_Dn_Before_Submit()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var saves = 0;
+        var cut = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, RenameModel(_ => { saves++; return Task.FromResult<string?>(null); }))
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
+
+        cut.FindAll("input.input.mono").ElementAt(1).Input("not a dn");
+        cut.Find("button.btn-primary").Click();
+
+        Assert.Contains("not a valid DN", cut.Find(".bar.err").TextContent, StringComparison.Ordinal);
+        Assert.Equal(0, saves); // the rejection is client-side: no delegate, no round trip
+    }
+
+    [Fact]
+    public void RenameDialog_Rejects_An_Invalid_Rdn_Attribute_Or_Empty_Value_Before_Submit()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var saves = 0;
+        // No schema: the attribute is free text, so an invalid type can be typed at all.
+        var cut = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, RenameModel(_ => { saves++; return Task.FromResult<string?>(null); })));
+
+        cut.FindAll("input.input.mono").First().Change("1bad"); // RFC 4512 descr must start with a letter
+        cut.Find("button.btn-primary").Click();
+        Assert.Contains("invalid attribute type", cut.Find(".bar.err").TextContent, StringComparison.Ordinal);
+
+        cut.FindAll("input.input.mono").First().Change("cn");
+        cut.FindAll("input.input.mono").ElementAt(1).Input("   ");
+        cut.Find("button.btn-primary").Click();
+        Assert.Contains("Enter a value", cut.Find(".bar.err").TextContent, StringComparison.Ordinal);
+
+        Assert.Equal(0, saves);
+    }
+
+    [Fact]
+    public void RenameDialog_Unchecks_Delete_Old_Rdn_With_A_Warning_When_It_Would_Violate_Schema()
+    {
+        // cn is MUST on person and the entry's only cn value is its name: switching the RDN
+        // to sn with delete-old-RDN on is a guaranteed objectClassViolation (#106).
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var cut = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, RenameModel())
+            .Add(p => p.Schema, ConsoleTestSchema.Schema));
+
+        Assert.True(cut.Instance.Model.DeleteOldRdn); // sane default: delete is the common case
+        Assert.Empty(cut.FindAll(".bar:not(.err)"));
+
+        cut.Find("select.input").Change("sn");
+
+        Assert.False(cut.Instance.Model.DeleteOldRdn);
+        var warning = cut.FindAll(".bar").Single(b => !b.ClassList.Contains("err"));
+        Assert.Contains("cn", warning.TextContent, StringComparison.Ordinal);
+        Assert.Contains("refused", warning.TextContent, StringComparison.Ordinal);
+
+        // A deliberate re-check is respected: the uncheck fires once per transition.
+        cut.Find("input[type=checkbox]").Change(true);
+        cut.Find("select.input").Change("uid"); // still hazardous for cn — no new transition
+        Assert.True(cut.Instance.Model.DeleteOldRdn);
+    }
+
+    [Fact]
+    public void RenameDialog_Hands_The_Trimmed_Inputs_To_The_Save_Delegate_And_Closes()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        RenameDialogModel? saved = null;
+        var closed = false;
+        var model = RenameModel(m => { saved = m; return Task.FromResult<string?>(null); });
+        var cut = RenderComponent<RenameDialog>(parameters => parameters
+            .Add(p => p.Model, model)
+            .Add(p => p.Schema, ConsoleTestSchema.Schema)
+            .Add(p => p.OnClose, () => { closed = true; }));
+
+        cut.Find(".frow input.input").Input("  Alice Chen-Reyes  ");
+        cut.FindAll("input.input.mono").ElementAt(1).Input(" ou=staff,dc=aspire,dc=dev ");
+        cut.Find("button.btn-primary").Click();
+
+        Assert.NotNull(saved);
+        Assert.Equal("cn", saved!.RdnAttribute);
+        Assert.Equal("Alice Chen-Reyes", saved.RdnValue);
+        Assert.Equal("ou=staff,dc=aspire,dc=dev", saved.NewParentDn);
+        Assert.True(saved.DeleteOldRdn);
+        Assert.True(closed);
+    }
 }
 
 /// <summary>

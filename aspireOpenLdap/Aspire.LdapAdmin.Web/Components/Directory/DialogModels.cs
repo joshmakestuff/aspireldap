@@ -37,10 +37,30 @@ public sealed class NewEntryModel
     public required Func<Aspire.LdapAdmin.Core.LdapNewEntry, Task<string?>> SaveAsync { get; init; }
 }
 
+/// <summary>
+/// The rename/move dialog's contract (#106): guided RDN attribute + value inputs (prefilled
+/// with the entry's current RDN by the shell) instead of a raw RDN string — the dialog
+/// composes the escaped RDN via <c>Dn.Rdn</c>, so a typed comma is a value, never structure.
+/// Multi-valued current RDNs prefill from their first component; composing one is not
+/// possible here (accepted trade-off).
+/// </summary>
 public sealed class RenameDialogModel
 {
     public required string Dn { get; init; }
-    public string NewRdn { get; set; } = string.Empty;
+
+    /// <summary>The DN's tail, for the resulting-DN preview when renaming in place.
+    /// Null when the entry is a directory root.</summary>
+    public required string? CurrentParentDn { get; init; }
+
+    /// <summary>
+    /// The entry being renamed, snapshotted when the dialog opens: its object classes and
+    /// value counts feed the delete-old-RDN hazard prediction. A snapshot for the same
+    /// reason as <see cref="AttributeDialogModel.Entry"/> (#117).
+    /// </summary>
+    public required LdapEntry Entry { get; init; }
+
+    public string RdnAttribute { get; set; } = string.Empty;
+    public string RdnValue { get; set; } = string.Empty;
     public string NewParentDn { get; set; } = string.Empty;
     public bool DeleteOldRdn { get; set; } = true;
     public required Func<RenameDialogModel, Task<string?>> SaveAsync { get; init; }
