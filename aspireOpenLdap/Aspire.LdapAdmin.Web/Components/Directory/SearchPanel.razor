@@ -1,102 +1,128 @@
 @*
-    LDAP filter search over LdapDirectoryService, in-process. Hosted in the contextual pane
-    of the shell page (#102) — it is a panel, not a routed page, so the browse tree stays
-    alive while the user searches. Clicking a result raises OnEntrySelected; the shell
-    selects + reveals the entry in the tree and switches the pane to the editor.
+    LDAP filter search over LdapDirectoryService, in-process, in the design handoff's
+    Search layout: the raw RFC 4515 filter first and full-width, the scope controls in a
+    grid beneath it, results as an Industry .table. Hosted in the contextual pane of the
+    shell page (#102) — a panel, not a routed page, so the browse tree stays alive while
+    the user searches. Clicking a result raises OnEntrySelected; the shell selects +
+    reveals the entry in the tree and switches the pane to the editor.
 
-    The service owns filter validation and truncation reporting; an invalid filter comes back
-    as a typed result and is shown as-is. Truncation is surfaced, never hidden — a silently
-    short result set reads as "no such entry", the one wrong answer a directory browser must
-    not give.
+    The service owns filter validation and truncation reporting; an invalid filter comes
+    back as a typed result and is shown as-is. Truncation is surfaced, never hidden — a
+    silently short result set reads as "no such entry", the one wrong answer a directory
+    browser must not give.
 
-    Rows: the whole row is clickable (OnRowClick), not only the DN cell. The shared DN
-    suffix every row repeats is stated once above the grid; each row shows the relative
-    form, with the full DN in the tooltip and behind the copy button. Sorting/pagination is
-    #95, deliberately absent here.
+    The tree's capped "search this container" row lands here via PresetAndRunAsync
+    (design handoff § Tree behavior): base = the capped container, scope = one level,
+    filter reset to (objectClass=*), run immediately so it arrives on real results.
 *@
 @using System.DirectoryServices.Protocols
 @using LdifDotNet
 @inject LdapDirectoryService Directory
 @inject LdapAdminSettings Settings
 @inject IJSRuntime Js
-@inject IToastService Toasts
+@inject ConsoleToastService Toasts
 
-<FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-    @* Wrap: without it this row overflows the viewport and the Search button lands
-       off-screen at 1280px; the widths are minimums so the row reflows instead. *@
-    <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Wrap="true"
-                 VerticalAlignment="@VerticalAlignment.Bottom">
-        <FluentTextField @bind-Value="_filter" @onkeydown="OnFilterKeyDown" Label="Filter"
-                         Style="min-width: 20rem;" Placeholder="(objectClass=inetOrgPerson)"
-                         Spellcheck="false" />
-        <FluentTextField @bind-Value="_baseDn" @onkeydown="OnFilterKeyDown" Label="Base DN (optional)"
-                         Style="min-width: 16rem;" Placeholder="@Directory.BaseDn" Spellcheck="false" />
-        <FluentSelect TOption="SearchScope" Label="Scope" Items="@AllScopes"
-                      OptionText="@(s => s.ToString())" @bind-SelectedOption="_scope" />
-        <FluentNumberField @bind-Value="_limit" Label="Limit" Min="1" Max="1000" Style="width: 7rem;" />
-        <FluentButton Appearance="@Appearance.Accent" OnClick="RunAsync" Loading="_running"
-                      IconStart="@(new Icons.Regular.Size16.Search())">Search</FluentButton>
-    </FluentStack>
+<div class="dh">
+    <div style="min-width: 0;">
+        <h3 style="margin: 0;">Search</h3>
+        <div class="dnline">RFC 4515 filter over the directory; Enter runs it.</div>
+    </div>
+</div>
 
-    @if (_error is not null)
+<div class="sec">Raw filter — RFC 4515</div>
+<input class="input mono" @bind="_filter" @bind:event="oninput" @onkeydown="OnFilterKeyDown"
+       placeholder="(objectClass=inetOrgPerson)" spellcheck="false" aria-label="LDAP filter" />
+
+<div class="grid2" style="margin-top: var(--space-3);">
+    <div class="field">
+        <label>Search base <span class="text-muted">(empty = @Directory.BaseDn)</span></label>
+        <input class="input mono" @bind="_baseDn" @onkeydown="OnFilterKeyDown" spellcheck="false" />
+    </div>
+    <div class="field">
+        <label>Scope</label>
+        <select class="input mono" @bind="_scope">
+            <option value="@SearchScope.Subtree">subtree</option>
+            <option value="@SearchScope.OneLevel">onelevel</option>
+            <option value="@SearchScope.Base">base</option>
+        </select>
+    </div>
+    <div class="field">
+        <label>Limit</label>
+        <input class="input mono" type="number" min="1" max="1000" @bind="_limit" />
+    </div>
+    <div class="field">
+        <label>&nbsp;</label>
+        <button class="btn btn-primary" disabled="@_running" @onclick="RunAsync">
+            @(_running ? "Searching…" : "Search")
+        </button>
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <div class="bar err" role="alert" style="margin-top: var(--space-4);">@_error</div>
+}
+
+@if (_result is not null)
+{
+    <div class="sec">
+        @(_result.Entries.Count == 1 ? "1 entry returned" : $"{_result.Entries.Count} entries returned")
+        @* The stripped suffix is stated, not implied: relative DNs with no stated base
+           are ambiguous, which is the one failure mode stripping must not introduce. *@
+        @if (_commonSuffix.Length > 0)
+        {
+            <span class="mono" style="text-transform: none; letter-spacing: 0;">— all under @_commonSuffix</span>
+        }
+    </div>
+
+    @if (_result.Truncated)
     {
-        <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
+        <div class="bar">
+            Showing the first @_result.Entries.Count entries — the directory has more. Raise
+            the limit or narrow the filter.
+        </div>
     }
 
-    @if (_result is not null)
+    @if (_result.Entries.Count > 0)
     {
-        @if (_result.Truncated)
-        {
-            <FluentMessageBar Intent="@MessageIntent.Warning" AllowDismiss="false">
-                Showing the first @_result.Entries.Count entries — the directory has more. Raise the
-                limit or narrow the filter.
-            </FluentMessageBar>
-        }
-
-        <FluentLabel Typo="@Typography.Body">
-            @(_result.Entries.Count == 1 ? "1 entry" : $"{_result.Entries.Count} entries")
-            @* The stripped suffix is stated, not implied: relative DNs with no stated base
-               are ambiguous, which is the one failure mode stripping must not introduce. *@
-            @if (_commonSuffix.Length > 0)
-            {
-                <text> — all under </text><code>@_commonSuffix</code>
-            }
-        </FluentLabel>
-
-        @if (_result.Entries.Count > 0)
-        {
-            @* MultiLine: rows must size to their content — the copy button and a wrapped DN
-               are taller than the grid's fixed row track, which clips them otherwise
-               (measured 44px content in a 31px cell; docs/findings.md). *@
-            <FluentDataGrid Items="@_displayEntries.AsQueryable()" TGridItem="LdapEntry"
-                            GridTemplateColumns="2fr 1.2fr 1.2fr 3rem" ResizableColumns="true"
-                            MultiLine="true" ShowHover="true" OnRowClick="@OnRowClick">
-                <TemplateColumn Title="DN" Sortable="false">
-                    <span title="@context.Dn"><code>@DnDisplay.Relative(context.Dn, _commonSuffix)</code></span>
-                </TemplateColumn>
-                <TemplateColumn Title="Name" Sortable="false">
-                    @First(context, "cn", "displayName", "ou", "o")
-                </TemplateColumn>
-                <TemplateColumn Title="Mail" Sortable="false">
-                    @First(context, "mail")
-                </TemplateColumn>
-                <TemplateColumn Title="" Sortable="false">
-                    @* stopPropagation: the copy button sits on a clickable row, and copying
-                       a DN must not also navigate to it. *@
-                    <div @onclick:stopPropagation="true">
-                        <FluentButton Appearance="@Appearance.Stealth" Title="Copy full DN to clipboard"
-                                      IconStart="@(new Icons.Regular.Size16.Copy())"
-                                      OnClick="@(() => CopyDnAsync(context.Dn))" />
-                    </div>
-                </TemplateColumn>
-            </FluentDataGrid>
-        }
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>DN</th>
+                    <th style="width: 22%;">Name</th>
+                    <th style="width: 22%;">Mail</th>
+                    <th style="width: 60px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in _displayEntries)
+                {
+                    <tr>
+                        <td class="mono">
+                            @* The whole meaning of the row is "open this entry", so the DN is
+                               the link; the full DN rides the title and the copy button. *@
+                            <a href="#" title="@entry.Dn"
+                               @onclick="@(() => OnEntrySelected.InvokeAsync(entry.Dn))"
+                               @onclick:preventDefault="true">@DnDisplay.Relative(entry.Dn, _commonSuffix)</a>
+                        </td>
+                        <td>@First(entry, "cn", "displayName", "ou", "o")</td>
+                        <td class="mono">@First(entry, "mail")</td>
+                        <td>
+                            <button class="btn btn-ghost btn-sm" title="Copy full DN to clipboard"
+                                    @onclick="@(() => CopyDnAsync(entry.Dn))">Copy</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
     }
-</FluentStack>
+    else
+    {
+        <p class="text-muted" style="font-size: 13px;">No entry matched. <span class="mono">@_filter</span></p>
+    }
+}
 
 @code {
-    private static readonly SearchScope[] AllScopes = [SearchScope.Base, SearchScope.OneLevel, SearchScope.Subtree];
-
     /// <summary>Raised with the full DN of a clicked result row; the shell owns what happens next.</summary>
     [Parameter]
     public EventCallback<string> OnEntrySelected { get; set; }
@@ -124,6 +150,15 @@
     /// an old result set can never replace the one the user asked for last.
     /// </summary>
     private int _runSeq;
+
+    /// <summary>The tree's capped-container handoff: preset the query and run it now.</summary>
+    public Task PresetAndRunAsync(string baseDn, SearchScope scope, string filter)
+    {
+        _baseDn = baseDn;
+        _scope = scope;
+        _filter = filter;
+        return RunAsync();
+    }
 
     private async Task OnFilterKeyDown(KeyboardEventArgs args)
     {
@@ -187,21 +222,14 @@
                 DnDisplay.Relative(b.Dn, _commonSuffix),
                 StringComparison.OrdinalIgnoreCase));
         }
-    }
 
-    /// <summary>The whole row selects the entry: the shell reveals it in the tree and opens the editor.</summary>
-    private async Task OnRowClick(FluentDataGridRow<LdapEntry> row)
-    {
-        if (row.Item is { } entry)
-        {
-            await OnEntrySelected.InvokeAsync(entry.Dn);
-        }
+        StateHasChanged();
     }
 
     private async Task CopyDnAsync(string dn)
     {
         await Js.InvokeVoidAsync("navigator.clipboard.writeText", dn);
-        Toasts.ShowSuccess("DN copied");
+        Toasts.Show("DN copied");
     }
 
     /// <summary>

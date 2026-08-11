@@ -252,6 +252,38 @@ public class EntryWriteTests(LdapAdminAppHostFixture fixture)
         Assert.Equal(LdapOperationStatus.InvalidRequest, result.Status);
     }
 
+    [Fact]
+    public async Task Subtree_delete_removes_the_branch_where_a_plain_delete_refuses()
+    {
+        using var cts = TestCancellation.Source();
+        var parent = fixture.DnUnder(Dn.Rdn("ou", "subtree-del"), "ou=people");
+        var inner = Dn.Combine(Dn.Rdn("ou", "inner"), parent);
+        var leaf = Dn.Combine(Dn.Rdn("uid", "subtree-leaf"), inner);
+
+        foreach (var (dn, name) in ((string Dn, string Name)[])[(parent, "subtree-del"), (inner, "inner")])
+        {
+            var addedOu = await fixture.Directory.AddEntryAsync(
+                new LdapNewEntry(dn, [new("objectClass", ["organizationalUnit"]), new("ou", [name])]),
+                cts.Token);
+            Assert.True(addedOu.Succeeded, addedOu.Message);
+        }
+        var addedLeaf = await fixture.Directory.AddEntryAsync(Person(leaf, "subtree-leaf", "Subtree Leaf"), cts.Token);
+        Assert.True(addedLeaf.Succeeded, addedLeaf.Message);
+
+        // A plain delete of the non-leaf is the server's refusal, unchanged.
+        var refused = await fixture.Directory.DeleteEntryAsync(parent, cts.Token);
+        Assert.Equal(LdapOperationStatus.NotAllowedOnNonLeaf, refused.Status);
+
+        // The subtree delete recurses children-first (the server has no Tree Delete
+        // control — workspace findings.md 2026-08-10) and takes the whole branch.
+        var deleted = await fixture.Directory.DeleteEntryAsync(parent, subtree: true, cts.Token);
+        Assert.True(deleted.Succeeded, deleted.Message);
+
+        Assert.Null(await fixture.Directory.GetEntryAsync(leaf, cancellationToken: cts.Token));
+        Assert.Null(await fixture.Directory.GetEntryAsync(inner, cancellationToken: cts.Token));
+        Assert.Null(await fixture.Directory.GetEntryAsync(parent, cancellationToken: cts.Token));
+    }
+
     private static LdapNewEntry Person(string dn, string uid, string cn, string? extraMail = null)
     {
         List<LdapNewAttribute> attributes =

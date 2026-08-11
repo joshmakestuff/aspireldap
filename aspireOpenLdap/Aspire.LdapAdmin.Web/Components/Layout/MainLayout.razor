@@ -1,23 +1,18 @@
 @*
-    App shell chrome only: theme, dialog/toast providers, circuit-error banner. The visible
-    shell (header + panes) is owned by the single page (Browse) per the layout decision
-    (docs/decisions.md § Product: persistent tree + contextual pane; spec aspireldap#102).
+    App shell chrome only. The visible shell (topbar + view tabs + panes) is owned by the
+    single page (Browse) per the layout decision (docs/decisions.md § Product: persistent
+    tree + contextual pane; spec aspireldap#102).
 
     There is no login gate by decision (docs/decisions.md § Scope): the app binds with the
     AppHost-provided credentials and opens straight onto the directory.
 
-    Theme mode comes from the AppHost's WithLdapAdmin options (#98) — no in-app chooser, no
-    browser storage; System mode follows the browser's color-scheme preference.
+    Theming is the data-theme attribute App.razor's boot script stamps on <html> (persisted
+    choice, AppHost default, prefers-color-scheme fallback); dark is a token-override layer
+    in console.css, so no theme component renders here.
 *@
 @inherits LayoutComponentBase
-@inject LdapAdminSettings Settings
-
-<FluentDesignTheme Mode="@ThemeMode" />
 
 @Body
-
-<FluentDialogProvider />
-<FluentToastProvider />
 
 @* Kept from the template so an unhandled circuit error is still announced; hidden by the
    inline style until blazor.web.js flips display on error, so no stylesheet is needed. *@
@@ -25,12 +20,3 @@
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
 </div>
-
-@code {
-    private DesignThemeModes ThemeMode => Settings.Theme switch
-    {
-        LdapAdminTheme.Light => DesignThemeModes.Light,
-        LdapAdminTheme.Dark => DesignThemeModes.Dark,
-        _ => DesignThemeModes.System,
-    };
-}

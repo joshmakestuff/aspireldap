@@ -16,13 +16,15 @@ public sealed class AttributeDialogModel
     public required Func<AttributeDialogModel, Task<string?>> SaveAsync { get; init; }
 }
 
-public sealed class ChildDialogModel
+/// <summary>
+/// The new-entry wizard's contract (#105): the wizard composes the whole
+/// <see cref="Aspire.LdapAdmin.Core.LdapNewEntry"/> (chained object classes, RDN, fields)
+/// and hands it to the shell's save delegate.
+/// </summary>
+public sealed class NewEntryModel
 {
     public required string ParentDn { get; init; }
-    public string Rdn { get; set; } = string.Empty;
-    public string ObjectClasses { get; set; } = string.Empty;
-    public string AttributesText { get; set; } = string.Empty;
-    public required Func<ChildDialogModel, Task<string?>> SaveAsync { get; init; }
+    public required Func<Aspire.LdapAdmin.Core.LdapNewEntry, Task<string?>> SaveAsync { get; init; }
 }
 
 public sealed class RenameDialogModel
@@ -37,5 +39,11 @@ public sealed class RenameDialogModel
 public sealed class DeleteDialogModel
 {
     public required string Dn { get; init; }
+
+    /// <summary>Delete the whole subtree, children first (client-side recursion — the
+    /// bundled server has no Tree Delete control). Off by default: a plain delete of a
+    /// non-leaf is refused by the server, never silently widened.</summary>
+    public bool Subtree { get; set; }
+
     public required Func<DeleteDialogModel, Task<string?>> SaveAsync { get; init; }
 }

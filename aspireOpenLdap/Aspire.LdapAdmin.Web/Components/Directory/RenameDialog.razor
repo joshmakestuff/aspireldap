@@ -1,40 +1,45 @@
 @*
-    Rename entry dialog body, hosted by FluentDialogProvider via IDialogService — see
-    AttributeDialog.razor for why inline <FluentDialog> markup is not used (#104).
+    Rename/move dialog on the owned ConsoleDialog frame. The DN renders in body markup with
+    word-break, never in the title (docs/findings.md). Save semantics as AttributeDialog.
 *@
-@implements IDialogContentComponent<RenameDialogModel>
 
-<FluentDialogBody>
-    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-        @* DN in the body, not the title — see NewChildDialog.razor (#104 min-content). *@
-        <FluentLabel Typo="@Typography.Body" Style="overflow-wrap: anywhere;">
-            Renaming <strong>@Content.Dn</strong>
-        </FluentLabel>
-        <FluentTextField @bind-Value="Content.NewRdn" Label="New RDN" Placeholder="cn=new-name"
-                         Spellcheck="false" Style="width: 100%;" />
-        <FluentTextField @bind-Value="Content.NewParentDn" Label="New parent DN (blank = keep current)"
-                         Spellcheck="false" Style="width: 100%;" />
-        <FluentCheckbox @bind-Value="Content.DeleteOldRdn" Label="Remove the old RDN value" />
-        @if (_error is not null)
-        {
-            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
-        }
-    </FluentStack>
-</FluentDialogBody>
-<FluentDialogFooter>
-    <FluentButton Appearance="@Appearance.Accent" Loading="_busy" OnClick="SaveAsync">Rename</FluentButton>
-    <FluentButton OnClick="@(() => Dialog.CancelAsync())">Cancel</FluentButton>
-</FluentDialogFooter>
+<ConsoleDialog Title="Rename entry" OnCancel="Close">
+    <ChildContent>
+    <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
+    <div class="field">
+        <label>New RDN <span class="mono text-muted">e.g. uid=jane.doe</span></label>
+        <input class="input mono" @bind="Model.NewRdn" spellcheck="false" />
+    </div>
+    <div class="field">
+        <label>New parent DN <span class="text-muted">(leave empty to rename in place)</span></label>
+        <input class="input mono" @bind="Model.NewParentDn" spellcheck="false" />
+    </div>
+    <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+        <input type="checkbox" @bind="Model.DeleteOldRdn" />
+        Remove the old RDN attribute value
+    </label>
+    @if (_error is not null)
+    {
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+    }
+    </ChildContent>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Renaming…" : "Rename")</button>
+    </Actions>
+</ConsoleDialog>
 
 @code {
-    [Parameter]
-    public RenameDialogModel Content { get; set; } = default!;
+    [Parameter, EditorRequired]
+    public required RenameDialogModel Model { get; set; }
 
-    [CascadingParameter]
-    public FluentDialog Dialog { get; set; } = default!;
+    [Parameter]
+    public EventCallback OnClose { get; set; }
 
     private string? _error;
     private bool _busy;
+
+    private Task Close() => OnClose.InvokeAsync();
 
     private async Task SaveAsync()
     {
@@ -42,7 +47,7 @@
         _error = null;
         try
         {
-            _error = await Content.SaveAsync(Content);
+            _error = await Model.SaveAsync(Model);
         }
         finally
         {
@@ -51,7 +56,7 @@
 
         if (_error is null)
         {
-            await Dialog.CloseAsync(Content);
+            await Close();
         }
     }
 }

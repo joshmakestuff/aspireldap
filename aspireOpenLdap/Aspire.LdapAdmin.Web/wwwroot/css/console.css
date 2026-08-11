@@ -1,0 +1,184 @@
+/* LdapAdmin console styles — the app-shell and screen classes from the design handoff
+   (design_handoff_ldap_admin/reference/LdapAdmin.dc.html), ported as written. Every color,
+   font, spacing, radius and shadow resolves through the industry-styles.css tokens; this
+   file adds no literals the tokens already carry (industry-ui skill).
+
+   Shared across components on purpose (rail, pane, dialogs, toast), so it is global CSS,
+   not a scoped .razor.css. */
+
+:root { --rail-w: 292px; }
+
+/* ── Dark theme — a token-override layer, never per-component rules (docs/decisions.md
+      § Product, 2026-08-10). The tonal ramps are redefined dark-for-light (100 ↔ 900), so
+      every usage flip the design needs happens by token resolution alone: hover/pressed
+      land on the old 400, tinted fills on the old 800/900, text-on-tint on the old
+      100/200, body-size accent text on the old 300. The divider re-derives from
+      --color-text and inverts for free; the shadows become a hairline light edge plus
+      ambient darkness, as the token sheet's own comment specifies for a dark ground.
+      neutral-900 is the one non-mirrored step: only the dialog backdrop consumes it, and
+      a scrim must darken, not fog. */
+[data-theme="dark"] {
+  --color-bg: #17191a;
+  --color-surface: #1f2123;
+  --color-text: #f2f2f3;
+  --color-divider: color-mix(in srgb, var(--color-text) 16%, transparent);
+
+  --color-neutral-100: #2b2b2d;
+  --color-neutral-200: #424244;
+  --color-neutral-300: #5d5d60;
+  --color-neutral-400: #7a7a7d;
+  --color-neutral-500: #98989b;
+  --color-neutral-600: #b7b7ba;
+  --color-neutral-700: #d4d4d7;
+  --color-neutral-800: #e7e7ea;
+  --color-neutral-900: #060707;
+
+  --color-accent-100: #1d2d3d;
+  --color-accent-200: #2c455d;
+  --color-accent-300: #416180;
+  --color-accent-400: #597ea3;
+  --color-accent-500: #749dc4;
+  --color-accent-600: #94bce3;
+  --color-accent-700: #b5d9fd;
+  --color-accent-800: #d6ebff;
+  --color-accent-900: #eef6ff;
+
+  --color-accent-2-100: #1f2d3a;
+  --color-accent-2-200: #314457;
+  --color-accent-2-300: #486077;
+  --color-accent-2-400: #627d98;
+  --color-accent-2-500: #7e9cb8;
+  --color-accent-2-600: #9ebbd8;
+  --color-accent-2-700: #bdd8f2;
+  --color-accent-2-800: #d6ebff;
+  --color-accent-2-900: #eef6ff;
+
+  --shadow-sm: 0 0 0 1px color-mix(in srgb, var(--color-text) 8%, transparent),
+               0 1px 2px rgb(0 0 0 / 0.55);
+  --shadow-md: 0 0 0 1px color-mix(in srgb, var(--color-text) 9%, transparent),
+               0 3px 10px rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 0 0 1px color-mix(in srgb, var(--color-text) 10%, transparent),
+               0 12px 32px rgb(0 0 0 / 0.65);
+}
+
+/* ── App shell ─────────────────────────────────────────────────────────── */
+.app{display:grid;grid-template-rows:auto auto 1fr;height:100vh;min-height:620px;font-family:var(--font-body);background:var(--color-bg);color:var(--color-text);text-wrap:pretty}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-ligatures:none}
+.topbar{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)}
+.brand{font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:18px;letter-spacing:-.01em}
+.brand small{font-family:var(--font-body);font-weight:400;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 45%,transparent);margin-left:8px}
+/* margin-left:auto on every chip (as in the prototype): the two autos split the free
+   space, so the server chip sits centered and the bind chip + actions sit right. */
+.conn{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:11px;padding:4px 10px;border:1px solid var(--color-divider)}
+.led{width:6px;height:6px;flex:none;border-radius:50%;background:var(--color-accent)}
+.vtabs{display:flex;align-items:flex-end;gap:2px;padding:0 var(--space-4);border-bottom:1px solid var(--color-divider)}
+.vt{padding:7px 14px;font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:14px;background:transparent;border:1px solid transparent;border-bottom:0;cursor:pointer;color:color-mix(in srgb,var(--color-text) 62%,transparent)}
+.vt:hover{color:var(--color-text);background:color-mix(in srgb,var(--color-text) 5%,transparent)}
+.vt[aria-selected=true]{border-color:var(--color-divider);background:var(--color-bg);color:var(--color-accent);margin-bottom:-1px}
+.work{display:grid;grid-template-columns:var(--rail-w,292px) 5px minmax(0,1fr);min-height:0}
+.split{cursor:col-resize;background:var(--color-divider);border:0;padding:0;position:relative}
+.split::after{content:"";position:absolute;inset:0 -3px}
+.split:hover,.split[aria-pressed=true]{background:var(--color-accent)}
+.split:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+
+/* ── Tree rail ─────────────────────────────────────────────────────────── */
+.rail{border-right:1px solid var(--color-divider);overflow:auto;padding:var(--space-3) var(--space-2) var(--space-8)}
+.railtop{position:sticky;top:calc(var(--space-3) * -1);z-index:2;display:flex;flex-direction:column;gap:var(--space-2);background:var(--color-bg);padding:var(--space-3) 0 var(--space-2);margin-top:calc(var(--space-3) * -1);border-bottom:1px solid var(--color-divider)}
+.railrow{display:flex;align-items:center;gap:var(--space-2)}
+.railtop .railhead{padding-bottom:0;flex:1;min-width:0}
+.railfilter{height:26px;min-height:26px;padding:0 6px;font-size:12px}
+.btn-sm{padding:2px 8px;font-size:11px;white-space:nowrap}
+.railhead{display:flex;align-items:center;gap:6px;padding:0 var(--space-2) var(--space-2);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+.pane{overflow:auto;padding:var(--space-4) var(--space-6) var(--space-8);min-width:0}
+.trow{display:flex;align-items:center;gap:6px;width:100%;text-align:left;padding:3px 6px;border:0;background:transparent;font:inherit;font-size:13px;cursor:pointer;color:inherit}
+.trow:hover{background:color-mix(in srgb,var(--color-text) 6%,transparent)}
+.dp0{padding-left:6px}.dp1{padding-left:21px}.dp2{padding-left:36px}.dp3{padding-left:51px}.dp4{padding-left:66px}.dp5{padding-left:81px}.dp6{padding-left:96px}
+.trow[aria-current=true]{background:var(--color-accent-100);color:var(--color-accent-900);box-shadow:inset 2px 0 0 var(--color-accent)}
+.tw{width:14px;height:16px;line-height:16px;flex:none;text-align:center;font-size:9px;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+.tw-on{cursor:pointer;font-size:10px;color:var(--color-text)}
+.tw-on:hover{background:color-mix(in srgb,var(--color-text) 12%,transparent)}
+.tcount{margin-left:auto;flex:none;font-size:9px;font-style:normal;padding:0 4px;color:color-mix(in srgb,var(--color-text) 55%,transparent);background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.trow.more{color:color-mix(in srgb,var(--color-text) 55%,transparent);font-size:12px;font-style:italic}
+.trow.more.cap{color:var(--color-accent);font-style:normal}
+/* .tk badges no longer render in the tree (removed by decision — the RDN already names its
+   attribute type); the class remains for the entry/schema tables' small badges. */
+.tk{font-size:9px;letter-spacing:.06em;padding:0 4px;flex:none;border:1px solid var(--color-divider);color:color-mix(in srgb,var(--color-text) 60%,transparent)}
+.tlabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Detail pane ───────────────────────────────────────────────────────── */
+.dh{display:flex;align-items:flex-start;gap:var(--space-6);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)}
+.dhact{display:flex;gap:var(--space-2);margin-left:auto;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.dnline{font-size:12px;word-break:break-all;color:color-mix(in srgb,var(--color-text) 62%,transparent);margin-top:4px}
+.dtabs{display:flex;gap:var(--space-6);border-bottom:1px solid var(--color-divider);margin:var(--space-4) 0}
+.dt{padding:6px 0;background:transparent;border:0;border-bottom:2px solid transparent;font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:14px;cursor:pointer;color:color-mix(in srgb,var(--color-text) 60%,transparent)}
+.dt:hover{color:var(--color-text)}
+.dt[aria-selected=true]{border-bottom-color:var(--color-accent);color:var(--color-accent)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:var(--space-4)}
+.strip{display:flex;flex-wrap:wrap;gap:var(--space-6);padding:var(--space-3);border:1px solid var(--color-divider);margin-bottom:var(--space-4)}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat b{font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:17px}
+.stat span{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+.sec{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 50%,transparent);margin:var(--space-6) 0 var(--space-3);display:flex;align-items:center;gap:var(--space-3)}
+.sec::after{content:"";flex:1;height:1px;background:var(--color-divider)}
+.pre{white-space:pre;overflow:auto;font-size:12px;line-height:1.65;padding:var(--space-3);border:1px solid var(--color-divider);background:var(--color-surface)}
+/* scrollbar-gutter: without it, classic Windows scrollbars oscillate while typing — the
+   bar appears, the text rewraps narrower and fits, the bar disappears, the text rewraps
+   wider and overflows again. Reserving the gutter breaks the loop. */
+.ta{width:100%;min-height:220px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;padding:var(--space-3);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:0;color:inherit;scrollbar-gutter:stable}
+.frow{display:grid;grid-template-columns:minmax(120px,1.1fr) 92px minmax(120px,1.4fr) 36px;gap:var(--space-2);align-items:end;margin-bottom:var(--space-2)}
+
+/* ── Scrollbars ────────────────────────────────────────────────────────────
+   Naming scrollbar-width/-color opts Chromium out of its overlay scrollbars, which
+   flash into view on every content change (each keystroke in a textarea) and fade
+   again — reported as flicker. CSS scrollbars render steadily whenever content
+   overflows, thin and token-tinted, which also suits the wireframe language. */
+.rail,.pane,.ta,.dbody,.pre{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
+
+/* ── Owned picker (schema-aware dialogs, #103/#105) ────────────────────────
+   A filterable dropdown on native elements: .input above an absolutely positioned
+   option list. Guidance, not enforcement — free text stays valid. */
+.combo{position:relative}
+.combo-list{position:absolute;left:0;right:0;top:100%;z-index:5;max-height:220px;overflow:auto;background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:var(--shadow-md);scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
+/* In engines with CSS anchor positioning (Chromium/Edge), the list escapes the dialog's
+   scroll region entirely: absolutely positioning it inside .dbody extended the scrollable
+   content (a second scrollbar beside the list's own) and near the dialog's bottom the
+   list dropped below the visible area. Fixed + anchored, it overlays instead, flips above
+   the input when there is no room below, and hides if the input scrolls out of view.
+   Non-supporting engines keep the in-flow behavior above. */
+@supports (anchor-name: --probe) {
+  .combo-list{position:fixed;inset:auto;top:anchor(bottom);left:anchor(left);width:anchor-size(width);z-index:35;position-try-fallbacks:flip-block;position-visibility:anchors-visible}
+}
+.combo-opt{display:flex;gap:var(--space-2);align-items:center;width:100%;text-align:left;padding:4px 8px;font:inherit;font-size:12px;background:transparent;border:0;cursor:pointer;color:inherit}
+.combo-opt:hover,.combo-opt[aria-selected=true]{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.hint{font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+/* Field labels compose spans (name, ·must, syntax hint); Razor swallows the whitespace
+   between them, so the spacing is owned here instead of by literal spaces. */
+.field label .hint{margin-left:6px}
+.picklist{max-height:240px;overflow:auto;border:1px solid var(--color-divider);scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
+
+/* ── Notices, dialogs, toast ───────────────────────────────────────────── */
+.bar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--color-accent);background:var(--color-accent-100);margin-bottom:var(--space-4);font-size:13px}
+/* Errors stay inside the mono palette: full-strength text treatment instead of a second
+   accent color the design system does not have. */
+.bar.err{border-color:color-mix(in srgb,var(--color-text) 60%,transparent);background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.toast{position:fixed;left:50%;bottom:var(--space-8);transform:translateX(-50%);padding:10px 18px;font-size:13px;border:1px solid var(--color-accent);background:var(--color-bg);box-shadow:var(--shadow-md);z-index:40}
+.steps{display:flex;gap:var(--space-4);margin-bottom:var(--space-4);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.step{color:color-mix(in srgb,var(--color-text) 40%,transparent)}
+.step[aria-current=true]{color:var(--color-accent)}
+/* The panel never scrolls itself: its corner registration marks sit 6px outside the frame
+   by design, so a scrolling .wide permanently "overflows" by 6px and its auto scrollbars
+   flip on every re-render (measured — the per-keystroke flicker). Only .dbody scrolls;
+   the title and actions stay pinned on the frame. */
+.wide{width:min(720px,100%);display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-6);border:1px solid var(--color-divider);background:var(--color-bg);box-shadow:var(--shadow-lg);max-height:88vh;min-height:0}
+.dbody{display:flex;flex-direction:column;gap:var(--space-3);overflow:auto;min-height:0;flex:1 1 auto;scrollbar-gutter:stable}
+/* The dialog panel takes initial focus (tabindex=-1) so opening a modal does not flash the
+   2px ring on its first field (#109). The panel is a container, not a control — the ring
+   rule ("never removed") applies to interactive elements; Tab moves focus onward and every
+   control keeps its ring. */
+[role="dialog"]:focus-visible{outline:none}
+/* Above the sticky .railtop (z-index 2): without this the scrim dims everything except
+   that rectangle, which floats over the backdrop (#109's real reported symptom). Below
+   the toast (40) so write confirmations stay visible over an open dialog. */
+.dialog-backdrop{z-index:30}
+.cbcell{width:34px}
+.table td.mono,.table th.mono{font-size:12px}

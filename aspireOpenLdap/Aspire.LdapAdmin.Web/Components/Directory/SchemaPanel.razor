@@ -4,140 +4,169 @@
     contextual pane of the shell page (#102) — a panel, not a routed page, so the browse
     tree stays alive while the schema is open, and the loaded schema survives view switches.
 
+    Layout per the design handoff § Schema: stacked .sec-headed Industry tables (object
+    classes, attribute types, syntaxes) filtered by one client-side query.
+
     The unavailable state is shown, not inferred: an unreadable subschema and a directory
     that defines nothing look identical as data, so the service flags it and this panel says
     it out loud, with the reason. UnparsedDefinitions likewise: what the parser could not
     handle is listed rather than dropped.
-
-    MultiLine, and no Virtualize/ItemSize: a MUST+MAY cell needs two lines, and
-    FluentDataGrid writes fixed row tracks otherwise (docs/findings.md).
 *@
 @using LdifDotNet.Schema
 @inject LdapSchemaService SchemaService
 
+<div class="dh">
+    <div style="min-width: 0;">
+        <h3 style="margin: 0;">Schema</h3>
+        <div class="dnline mono">cn=subschema</div>
+    </div>
+</div>
+
 @if (_schema is null)
 {
-    <FluentProgressRing />
-    <FluentLabel Typo="@Typography.Body">Loading schema…</FluentLabel>
+    <p class="text-muted" style="font-size: 13px; margin-top: var(--space-4);">Loading schema…</p>
 }
 else if (!_schema.Available)
 {
-    <FluentMessageBar Intent="@MessageIntent.Warning" AllowDismiss="false" Title="Schema unavailable">
+    <div class="bar err" role="alert" style="margin-top: var(--space-4);">
         The server's schema could not be read: @_schema.UnavailableReason
         Attribute values are classified by UTF-8 validity alone until it becomes readable.
-    </FluentMessageBar>
-    <FluentButton IconStart="@(new Icons.Regular.Size16.ArrowClockwise())" OnClick="LoadAsync">Retry</FluentButton>
+    </div>
+    <button class="btn btn-secondary" @onclick="LoadAsync">Retry</button>
 }
 else
 {
-    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-        @* Immediate: the filter is client-side over an already-loaded schema, so it narrows
-           as you type; bound on 'change' it only applies on blur, which reads as broken. *@
-        <FluentSearch @bind-Value="_query" @bind-Value:after="StateHasChanged"
-                      Immediate="true" ImmediateDelay="200"
-                      Placeholder="Filter by name, OID, or description" Style="max-width: 30rem;"
-                      Spellcheck="false" />
+    @* The filter is client-side over an already-loaded schema, so it narrows as you type;
+       bound on 'change' it would only apply on blur, which reads as broken. *@
+    <div style="margin-top: var(--space-4);">
+        <input class="input mono" style="max-width: 30rem;" @bind="_query" @bind:event="oninput"
+               placeholder="Filter by name, OID, or description" spellcheck="false"
+               aria-label="Filter the schema" />
+    </div>
 
-        <FluentTabs @bind-ActiveTabId="_activeTab">
-            <FluentTab Id="objectclasses" Label="@($"Object classes ({FilteredClasses.Count})")">
-                <FluentDataGrid Items="@FilteredClasses.AsQueryable()" TGridItem="LdapObjectClass"
-                                GridTemplateColumns="2fr 1fr 3fr 2fr" ResizableColumns="true"
-                                MultiLine="true">
-                    <TemplateColumn Title="Name" Sortable="false">
-                        <strong>@PrimaryName(context.Names, context.Oid)</strong>
-                        @if (context.Obsolete)
-                        {
-                            <FluentBadge Appearance="@Appearance.Neutral">obsolete</FluentBadge>
-                        }
-                    </TemplateColumn>
-                    <PropertyColumn Property="@(c => c.Kind)" Title="Kind" Sortable="false" />
-                    <TemplateColumn Title="MUST / MAY" Sortable="false">
-                        @if (context.Must.Count > 0)
-                        {
-                            <div><strong>MUST</strong> @string.Join(", ", context.Must)</div>
-                        }
-                        @if (context.May.Count > 0)
-                        {
-                            <div title="@string.Join(", ", context.May)">MAY @Summarize(context.May)</div>
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn Title="SUP" Sortable="false">
-                        @string.Join(", ", context.SuperiorNames)
-                    </TemplateColumn>
-                </FluentDataGrid>
-            </FluentTab>
-
-            <FluentTab Id="attributetypes" Label="@($"Attribute types ({FilteredAttributes.Count})")">
-                <FluentDataGrid Items="@FilteredAttributes.AsQueryable()" TGridItem="LdapAttributeType"
-                                GridTemplateColumns="2fr 3fr 1fr 1fr" ResizableColumns="true"
-                                MultiLine="true">
-                    <TemplateColumn Title="Name" Sortable="false">
-                        <strong>@PrimaryName(context.Names, context.Oid)</strong>
-                        @if (context.SingleValue)
-                        {
-                            <FluentBadge Appearance="@Appearance.Neutral">single</FluentBadge>
-                        }
-                        @if (context.NoUserModification)
-                        {
-                            <FluentBadge Appearance="@Appearance.Neutral">read-only</FluentBadge>
-                        }
-                        @if (context.Obsolete)
-                        {
-                            <FluentBadge Appearance="@Appearance.Neutral">obsolete</FluentBadge>
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn Title="Description" Sortable="false">
-                        @context.Description
-                    </TemplateColumn>
-                    <TemplateColumn Title="Syntax" Sortable="false">
-                        <span title="@context.Syntax">@SyntaxLabel(context.Syntax)</span>
-                    </TemplateColumn>
-                    <PropertyColumn Property="@(a => a.SuperiorName)" Title="SUP" Sortable="false" />
-                </FluentDataGrid>
-            </FluentTab>
-
-            <FluentTab Id="syntaxes" Label="@($"Syntaxes ({FilteredSyntaxes.Count})")">
-                <FluentDataGrid Items="@FilteredSyntaxes.AsQueryable()" TGridItem="LdapSyntax"
-                                GridTemplateColumns="2fr 3fr 2fr" ResizableColumns="true">
-                    <PropertyColumn Property="@(s => s.Oid)" Title="OID" Sortable="false" />
-                    <PropertyColumn Property="@(s => s.Description)" Title="Description" Sortable="false" />
-                    <TemplateColumn Title="Transfer" Sortable="false">
-                        @if (context.NotHumanReadable)
-                        {
-                            <FluentBadge Appearance="@Appearance.Accent">binary</FluentBadge>
-                        }
-                        @if (context.BinaryTransferRequired)
-                        {
-                            <FluentBadge Appearance="@Appearance.Neutral">;binary required</FluentBadge>
-                        }
-                    </TemplateColumn>
-                </FluentDataGrid>
-            </FluentTab>
-
-            @if (_schema.Schema.UnparsedDefinitions.Count > 0)
+    <div class="sec">Object classes — @FilteredClasses.Count</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 22%;">Name</th>
+                <th style="width: 12%;">Kind</th>
+                <th>MUST / MAY</th>
+                <th style="width: 18%;">SUP</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var objectClass in FilteredClasses)
             {
-                <FluentTab Id="unparsed" Label="@($"Unparsed ({_schema.Schema.UnparsedDefinitions.Count})")">
-                    <FluentMessageBar Intent="@MessageIntent.Info" AllowDismiss="false">
-                        Definitions the parser could not interpret. They are listed rather than dropped,
-                        so nothing in the server's schema is invisible here.
-                    </FluentMessageBar>
-                    @foreach (var unparsed in _schema.Schema.UnparsedDefinitions)
-                    {
-                        <div>
-                            <FluentLabel Typo="@Typography.Body">@unparsed.Kind — @unparsed.Error</FluentLabel>
-                            <pre style="overflow-x: auto;"><code>@unparsed.Definition</code></pre>
-                        </div>
-                    }
-                </FluentTab>
+                <tr>
+                    <td class="mono">
+                        @PrimaryName(objectClass.Names, objectClass.Oid)
+                        @if (objectClass.Obsolete)
+                        {
+                            <i class="tk mono" style="margin-left: 6px;">obsolete</i>
+                        }
+                    </td>
+                    <td class="mono text-muted">@objectClass.Kind</td>
+                    <td class="mono" style="font-size: 12px;">
+                        @if (objectClass.Must.Count > 0)
+                        {
+                            <div><b>MUST</b> @string.Join(", ", objectClass.Must)</div>
+                        }
+                        @if (objectClass.May.Count > 0)
+                        {
+                            <div class="text-muted" title="@string.Join(", ", objectClass.May)">MAY @Summarize(objectClass.May)</div>
+                        }
+                    </td>
+                    <td class="mono text-muted">@string.Join(", ", objectClass.SuperiorNames)</td>
+                </tr>
             }
-        </FluentTabs>
-    </FluentStack>
+        </tbody>
+    </table>
+
+    <div class="sec">Attribute types — @FilteredAttributes.Count</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 22%;">Name</th>
+                <th>Description</th>
+                <th style="width: 20%;">Syntax</th>
+                <th style="width: 14%;">SUP</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var attributeType in FilteredAttributes)
+            {
+                <tr>
+                    <td class="mono">
+                        @PrimaryName(attributeType.Names, attributeType.Oid)
+                        @if (attributeType.SingleValue)
+                        {
+                            <i class="tk mono" style="margin-left: 6px;">single</i>
+                        }
+                        @if (attributeType.NoUserModification)
+                        {
+                            <i class="tk mono" style="margin-left: 6px;">read-only</i>
+                        }
+                        @if (attributeType.Obsolete)
+                        {
+                            <i class="tk mono" style="margin-left: 6px;">obsolete</i>
+                        }
+                    </td>
+                    <td style="font-size: 13px;">@attributeType.Description</td>
+                    <td class="mono text-muted"><span title="@attributeType.Syntax">@SyntaxLabel(attributeType.Syntax)</span></td>
+                    <td class="mono text-muted">@attributeType.SuperiorName</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="sec">Syntaxes — @FilteredSyntaxes.Count</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 28%;">OID</th>
+                <th>Description</th>
+                <th style="width: 22%;">Transfer</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var syntax in FilteredSyntaxes)
+            {
+                <tr>
+                    <td class="mono">@syntax.Oid</td>
+                    <td style="font-size: 13px;">@syntax.Description</td>
+                    <td>
+                        @if (syntax.NotHumanReadable)
+                        {
+                            <i class="tk mono">binary</i>
+                        }
+                        @if (syntax.BinaryTransferRequired)
+                        {
+                            <i class="tk mono" style="margin-left: 6px;">;binary required</i>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @if (_schema.Schema.UnparsedDefinitions.Count > 0)
+    {
+        <div class="sec">Unparsed — @_schema.Schema.UnparsedDefinitions.Count</div>
+        <p class="text-muted" style="font-size: 13px;">
+            Definitions the parser could not interpret. They are listed rather than dropped,
+            so nothing in the server's schema is invisible here.
+        </p>
+        @foreach (var unparsed in _schema.Schema.UnparsedDefinitions)
+        {
+            <p style="font-size: 13px; margin-bottom: var(--space-1);">@unparsed.Kind — @unparsed.Error</p>
+            <div class="pre mono">@unparsed.Definition</div>
+        }
+    }
 }
 
 @code {
     private LdapSchemaResult? _schema;
     private string _query = string.Empty;
-    private string _activeTab = "objectclasses";
 
     protected override Task OnInitializedAsync() => LoadAsync();
 

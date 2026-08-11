@@ -1,0 +1,110 @@
+@*
+    Filterable attribute-name picker (#103) on owned markup: an .input over a .combo-list
+    of schema guidance rows. Guidance, not enforcement — any typed name passes through;
+    the list only offers what the schema allows for the entry's object classes.
+
+    Escape/arrow keys stop propagating only while the list is open, so the dialog's own
+    Escape (close) keeps working the moment the list is shut.
+*@
+
+<div class="combo">
+    @* The anchor name is per instance (inline style is positioning plumbing, not palette):
+       the list is anchor-positioned fixed in Chromium so it escapes the dialog's scroll
+       region instead of extending it — see .combo-list in console.css. *@
+    <input class="input mono" style="anchor-name: @_anchor;" value="@Value" placeholder="@Placeholder"
+           spellcheck="false" aria-label="@AriaLabel" role="combobox" aria-expanded="@(_open ? "true" : "false")"
+           @oninput="OnInput" @onfocus="@(() => _open = true)" @onblur="@(() => _open = false)"
+           @onkeydown="OnKeyDown" @onkeydown:stopPropagation="_open" />
+    @if (_open && Filtered.Count > 0)
+    {
+        <div class="combo-list" style="position-anchor: @_anchor;" role="listbox">
+            @for (var i = 0; i < Filtered.Count; i++)
+            {
+                var index = i;
+                var candidate = Filtered[i];
+                @* mousedown (not click) with preventDefault: picking must beat the input's
+                   blur, which closes the list before a click could land. *@
+                <button type="button" class="combo-opt" role="option"
+                        aria-selected="@(index == _highlight ? "true" : "false")"
+                        @onmousedown="@(() => Pick(candidate))" @onmousedown:preventDefault="true">
+                    <span class="mono">@candidate.Name</span>
+                    @if (candidate.Required)
+                    {
+                        <i class="tk mono">must</i>
+                    }
+                    @if (candidate.SingleValued)
+                    {
+                        <i class="tk mono">single</i>
+                    }
+                    <span class="hint" style="margin-left: auto;">@candidate.SyntaxLabel</span>
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public required IReadOnlyList<AttributeGuidance> Candidates { get; set; }
+
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter]
+    public string Placeholder { get; set; } = "attribute";
+
+    [Parameter]
+    public string AriaLabel { get; set; } = "Attribute name";
+
+    private bool _open;
+    private int _highlight;
+
+    /// <summary>Per-instance CSS anchor name; anchor names are global, so instances must not share.</summary>
+    private readonly string _anchor = $"--combo-{Guid.NewGuid():N}";
+
+    private IReadOnlyList<AttributeGuidance> Filtered =>
+        string.IsNullOrWhiteSpace(Value)
+            ? Candidates
+            : [.. Candidates.Where(c =>
+                c.Name.Contains(Value, StringComparison.OrdinalIgnoreCase)
+                || c.Type.Names.Any(n => n.Contains(Value, StringComparison.OrdinalIgnoreCase)))];
+
+    private async Task OnInput(ChangeEventArgs args)
+    {
+        _open = true;
+        _highlight = 0;
+        await ValueChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+
+    private async Task Pick(AttributeGuidance candidate)
+    {
+        _open = false;
+        await ValueChanged.InvokeAsync(candidate.Name);
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (!_open)
+        {
+            return;
+        }
+        switch (args.Key)
+        {
+            case "ArrowDown":
+                _highlight = Math.Min(_highlight + 1, Filtered.Count - 1);
+                break;
+            case "ArrowUp":
+                _highlight = Math.Max(_highlight - 1, 0);
+                break;
+            case "Enter" when _highlight >= 0 && _highlight < Filtered.Count:
+                await Pick(Filtered[_highlight]);
+                break;
+            case "Escape":
+                _open = false;
+                break;
+        }
+    }
+}

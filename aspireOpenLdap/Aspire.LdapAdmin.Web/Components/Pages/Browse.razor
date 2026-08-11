@@ -1,19 +1,20 @@
 @*
-    The app shell and directory browser in one page (layout spec aspireldap#102): header
-    with brand + view switch, a persistent tree pane, and a contextual pane (entry editor /
-    search / schema) separated by a draggable FluentMultiSplitter. The tree lives here and
-    is never re-created on a view switch, so browse context survives searching and reading
-    the schema. Search and Schema render as always-alive panels toggled by display, not
-    @if — their state (results, loaded schema) survives view switches too.
+    The app shell and directory browser in one page, in the Industry design handoff's
+    layout: top bar (brand + connection chip + refresh + theme), view tabs (Directory /
+    Search / Schema), then the work grid — tree rail, drag-handle separator, contextual
+    pane. The tree lives here and is never re-created on a view switch, so browse context
+    survives searching and reading the schema. Search and Schema render as always-alive
+    panels toggled by display, not @if — their state survives view switches too.
 
-    Scroll model: the page NEVER scrolls. The shell grid we own is viewport-sized
-    (100dvh, definite rows — the fluent-ui trap list forbids indefinite-height flex +
-    height:100% loops), and each pane wraps its content in its own overflow:auto region.
-    The grid container and scroll wrappers are owned markup, so their CSS is legitimate.
+    Scroll model: the page NEVER scrolls. The .app grid is viewport-sized with definite
+    rows; .rail and .pane are the two scroll regions (console.css).
 
-    Children are fetched on first expand, never up front: a directory holds far more entries
-    than a page should pull, and ITreeViewItem.OnExpandedAsync keeps the lazy load. Two
-    levels open during initialisation — a single collapsed root line shows nothing.
+    Tree behavior (design handoff § Tree, deliberate substitute for virtualization):
+    children load on first expand via one-level searches with SizeLimit = CAP + 1; an
+    expanded node renders at most PAGE children at a time behind a "show more" row; at CAP
+    the row becomes "search this container", which lands on the Search view preset to that
+    DN at one level. A directory can hold thousands of children per node — the cap keeps
+    both the DOM and the LDAP query bounded.
 
     Stale responses never clobber the current selection: every selection takes a sequence
     token, and a response whose token is no longer current is discarded (see SelectAsync).
@@ -22,115 +23,189 @@
 @using System.DirectoryServices.Protocols
 @using Aspire.LdapAdmin.Web.Components.Directory
 @using LdifDotNet
+@implements IAsyncDisposable
 @inject LdapDirectoryService Directory
+@inject LdapSchemaService SchemaService
 @inject LdapAdminSettings Settings
+@inject ConsoleConnectionInfo Connection
 @inject NavigationManager Navigation
-@inject IToastService Toasts
-@inject IDialogService DialogService
+@inject ConsoleToastService Toasts
+@inject IJSRuntime Js
 
-<PageTitle>@ViewTitle — Aspire LdapAdmin</PageTitle>
+<PageTitle>@ViewTitle — AspireLdap</PageTitle>
 
-<div style="height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden;">
-    <FluentHeader>
-        Aspire LdapAdmin
-        <FluentSpacer />
-        @* Plain header text inherits the accent surface's own foreground token; the switch
-           buttons paint their own fills, so no neutral-on-accent contrast trap
-           (docs/findings.md § Fluent). Active view = Neutral fill (stands out on accent);
-           inactive = Accent fill (blends into the header, on-accent foreground token). *@
-        <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Width="auto"
-                     VerticalAlignment="@VerticalAlignment.Center">
-            <FluentButton Appearance="@SwitchAppearance(AdminView.Browse)" aria-pressed="@AriaPressed(AdminView.Browse)"
-                          IconStart="@(new Icons.Regular.Size16.Folder())"
-                          OnClick="@(() => SwitchView(AdminView.Browse))">Browse</FluentButton>
-            <FluentButton Appearance="@SwitchAppearance(AdminView.Search)" aria-pressed="@AriaPressed(AdminView.Search)"
-                          IconStart="@(new Icons.Regular.Size16.Search())"
-                          OnClick="@(() => SwitchView(AdminView.Search))">Search</FluentButton>
-            <FluentButton Appearance="@SwitchAppearance(AdminView.Schema)" aria-pressed="@AriaPressed(AdminView.Schema)"
-                          IconStart="@(new Icons.Regular.Size16.DocumentBulletList())"
-                          OnClick="@(() => SwitchView(AdminView.Schema))">Schema</FluentButton>
-        </FluentStack>
-    </FluentHeader>
+<div class="app">
+    <div class="topbar">
+        <div class="brand">AspireLdap<small>directory admin</small></div>
+        <div class="conn mono"><i class="led"></i>@Connection.ServerLabel</div>
+        <div class="conn mono">bind: @Connection.BindDn</div>
+        <button class="btn btn-secondary btn-sm" @onclick="RefreshAsync">Refresh</button>
+        <button class="btn btn-secondary btn-icon btn-sm" style="width: 26px; height: 26px;"
+                title="Toggle light/dark theme" aria-label="Toggle light/dark theme"
+                @onclick="ToggleThemeAsync">◐</button>
+    </div>
 
-    <FluentMultiSplitter Height="100%" Width="100%" BarSize="6">
-        <FluentMultiSplitterPane Size="340px" Min="220px" Max="75%">
-            <div style="height: 100%; overflow: auto; padding: 8px;">
-                @if (_roots is null)
-                {
-                    <FluentProgressRing />
-                }
-                else
-                {
-                    @* No ItemTemplate, deliberately: the FAST tree-view's click handler only selects
-                       when the click's event.target IS the fluent-tree-item, so any template element
-                       (a span for a tooltip, say) swallows selection clicks — measured on 4.14.4.
-                       The default rendering keeps the item text as a text node, which clicks
-                       attribute to the tree item itself. *@
-                    <FluentTreeView Items="@_roots" LazyLoadItems="true" @bind-SelectedItem="_selectedItem"
-                                    @bind-SelectedItem:after="OnSelectionChangedAsync" />
-                }
+    <div class="vtabs" role="tablist" aria-label="Console views">
+        <button class="vt" role="tab" aria-selected="@Selected(AdminView.Browse)"
+                @onclick="@(() => SwitchView(AdminView.Browse))">Directory</button>
+        <button class="vt" role="tab" aria-selected="@Selected(AdminView.Search)"
+                @onclick="@(() => SwitchView(AdminView.Search))">Search</button>
+        <button class="vt" role="tab" aria-selected="@Selected(AdminView.Schema)"
+                @onclick="@(() => SwitchView(AdminView.Schema))">Schema</button>
+    </div>
+
+    <div class="work">
+        <div class="rail">
+            <div class="railtop">
+                <div class="railrow">
+                    <div class="railhead">Directory information tree</div>
+                    <button class="btn btn-secondary btn-sm" @onclick="OpenChildDialog"
+                            disabled="@(_selectedDn is null)">New entry…</button>
+                </div>
+                <input class="input mono railfilter" placeholder="filter RDN…" spellcheck="false"
+                       aria-label="Filter tree rows by RDN" @bind="_treeFilter" @bind:event="oninput" />
             </div>
-        </FluentMultiSplitterPane>
-        <FluentMultiSplitterPane Min="320px">
-            <div style="height: 100%; overflow: auto; padding: 12px 16px;">
-                <div style="@PanelDisplay(AdminView.Browse)">
-                    <FluentStack Orientation="@Orientation.Vertical" VerticalGap="12">
-                        @if (_error is not null)
-                        {
-                            <FluentMessageBar Intent="@MessageIntent.Error" AllowDismiss="false">@_error</FluentMessageBar>
-                        }
-
-                        @if (_loadingEntry)
-                        {
-                            <FluentProgressRing />
-                        }
-                        else if (_entry is not null)
-                        {
-                            <FluentStack Orientation="@Orientation.Horizontal" HorizontalGap="8" Wrap="true">
-                                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())"
-                                              OnClick="OpenAddAttributeDialog">Add attribute</FluentButton>
-                                <FluentButton IconStart="@(new Icons.Regular.Size16.FolderAdd())"
-                                              OnClick="OpenChildDialog">New child entry</FluentButton>
-                                <FluentButton IconStart="@(new Icons.Regular.Size16.Rename())"
-                                              OnClick="OpenRenameDialog">Rename</FluentButton>
-                                <FluentButton IconStart="@(new Icons.Regular.Size16.Delete())"
-                                              OnClick="OpenDeleteDialog">Delete</FluentButton>
-                            </FluentStack>
-
-                            <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
-                        }
-                        else if (_error is null)
-                        {
-                            <FluentLabel Typo="@Typography.Body">Select an entry.</FluentLabel>
-                        }
-                    </FluentStack>
-                </div>
-                <div style="@PanelDisplay(AdminView.Search)">
-                    <SearchPanel OnEntrySelected="OnSearchEntrySelected" />
-                </div>
-                @if (_schemaVisited)
+            @if (_root is null)
+            {
+                <p class="text-muted" style="font-size: 13px; padding: var(--space-2);">Loading…</p>
+            }
+            else
+            {
+                @foreach (var row in BuildRows())
                 {
-                    <div style="@PanelDisplay(AdminView.Schema)">
-                        <SchemaPanel />
+                    <button class="trow @row.DepthClass @row.MoreClass" aria-current="@(row.Current ? "true" : null)"
+                            @key="row.Key" @onclick="@(() => OnRowClickAsync(row))">
+                        @if (row.HasTwisty)
+                        {
+                            <i class="tw tw-on" @onclick="@(() => ToggleAsync(row.Node!))"
+                               @onclick:stopPropagation="true">@row.Twisty</i>
+                        }
+                        else
+                        {
+                            <i class="tw">@row.Twisty</i>
+                        }
+                        <span class="tlabel mono">@row.Label</span>
+                        @if (row.Count.Length > 0)
+                        {
+                            <i class="tcount mono">@row.Count</i>
+                        }
+                    </button>
+                }
+            }
+        </div>
+        <button class="split" role="separator" aria-orientation="vertical"
+                aria-label="Resize the directory tree" @ref="_splitter"></button>
+        <div class="pane">
+            <div style="@PanelDisplay(AdminView.Browse)">
+                @if (_error is not null)
+                {
+                    <div class="bar err" role="alert">@_error</div>
+                }
+
+                @if (_loadingEntry)
+                {
+                    <p class="text-muted" style="font-size: 13px;">Loading…</p>
+                }
+                else if (_entry is not null)
+                {
+                    <div class="dh">
+                        <div style="min-width: 0;">
+                            <h3 style="margin: 0;">@EntryTitle(_entry)</h3>
+                            <div class="dnline mono">
+                                @_entry.Dn
+                                <button class="btn btn-ghost btn-sm" title="Copy DN to clipboard"
+                                        @onclick="@(() => CopyDnAsync(_entry.Dn))">Copy</button>
+                            </div>
+                        </div>
+                        <div class="dhact">
+                            <button class="btn btn-secondary btn-sm" @onclick="OpenAddAttributeDialog">Add attribute</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="OpenChildDialog">New child</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="OpenRenameDialog">Rename</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="OpenDeleteDialog">Delete</button>
+                        </div>
                     </div>
+
+                    <div class="strip" style="margin-top: var(--space-4);">
+                        <div class="stat"><b class="mono">@_entry.Attributes.Count</b><span>attributes</span></div>
+                        <div class="stat"><b class="mono">@_entry.Attributes.Sum(static a => a.Values.Count)</b><span>values</span></div>
+                        <div class="stat"><b class="mono">@ObjectClassCount(_entry)</b><span>object classes</span></div>
+                    </div>
+
+                    <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
+                }
+                else if (_error is null)
+                {
+                    <p class="text-muted" style="font-size: 13px;">Select an entry.</p>
                 }
             </div>
-        </FluentMultiSplitterPane>
-    </FluentMultiSplitter>
+            <div style="@PanelDisplay(AdminView.Search)">
+                <SearchPanel @ref="_searchPanel" OnEntrySelected="OnSearchEntrySelected" />
+            </div>
+            @if (_schemaVisited)
+            {
+                <div style="@PanelDisplay(AdminView.Schema)">
+                    <SchemaPanel />
+                </div>
+            }
+        </div>
+    </div>
 </div>
 
+@if (_attributeDialog is { } attributeDialog && _entry is { } dialogEntry)
+{
+    <AttributeDialog Model="attributeDialog" Entry="dialogEntry" Schema="_dialogSchema" OnClose="CloseDialogs" />
+}
+@if (_newEntry is { } newEntry)
+{
+    <NewEntryWizard Model="newEntry" Schema="_dialogSchema" OnClose="CloseDialogs" />
+}
+@if (_renameDialog is { } renameDialog)
+{
+    <RenameDialog Model="renameDialog" OnClose="CloseDialogs" />
+}
+@if (_deleteDialog is { } deleteDialog)
+{
+    <DeleteDialog Model="deleteDialog" OnClose="CloseDialogs" />
+}
+
+@if (_toast is { Length: > 0 })
+{
+    <div class="toast mono" role="status" aria-live="polite">@_toast</div>
+}
+
 @code {
+    /// <summary>Children an expanded node reveals per "show more" click (design handoff).</summary>
+    internal const int Page = 12;
+
+    /// <summary>
+    /// The most children a node ever renders (design handoff): past it, the row hands off to
+    /// the Search view. Child fetches use Cap + 1 so "more than Cap exist" is knowable.
+    /// </summary>
+    internal const int Cap = 48;
+
     private const int AutoExpandDepth = 2;
 
-    /// <summary>Marks the placeholder row that stands in for children past the limit.</summary>
-    private const string TruncatedIdPrefix = "truncated:";
-
-    private List<ITreeViewItem>? _roots;
-    private ITreeViewItem? _selectedItem;
+    private TreeNode? _root;
+    private string _treeFilter = string.Empty;
     private string? _selectedDn;
     private LdapEntry? _entry;
     private string? _error;
     private bool _loadingEntry;
+
+    private SearchPanel? _searchPanel;
+    private ElementReference _splitter;
+    private IJSObjectReference? _js;
+
+    private AttributeDialogModel? _attributeDialog;
+    private NewEntryModel? _newEntry;
+    private RenameDialogModel? _renameDialog;
+    private DeleteDialogModel? _deleteDialog;
+
+    /// <summary>The subschema for the schema-aware dialogs; null degrades them to free text.</summary>
+    private LdifDotNet.Schema.LdapSchema? _dialogSchema;
+
+    private string? _toast;
+    private CancellationTokenSource? _toastCts;
 
     /// <summary>
     /// The stale-response guard: each selection takes the next token, and every await in
@@ -166,16 +241,253 @@
     {
         AdminView.Search => "Search",
         AdminView.Schema => "Schema",
-        _ => "Browse",
+        _ => "Directory",
     };
 
-    private Appearance SwitchAppearance(AdminView view) =>
-        _view == view ? Appearance.Neutral : Appearance.Accent;
-
-    private string AriaPressed(AdminView view) => _view == view ? "true" : "false";
+    private string Selected(AdminView view) => _view == view ? "true" : "false";
 
     /// <summary>Hides an inactive panel without destroying it; the wrapper div is owned markup.</summary>
     private string? PanelDisplay(AdminView view) => _view == view ? null : "display: none;";
+
+    // ---- Tree ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// One loaded tree node. Children is null until the node's first expand; after a load it
+    /// holds at most Cap entries and Capped says whether the directory had more.
+    /// </summary>
+    private sealed class TreeNode
+    {
+        public required string Dn { get; init; }
+        public required string Rdn { get; init; }
+        public bool HasChildren { get; set; }
+        public bool Open { get; set; }
+        public int Shown { get; set; } = Page;
+        public List<TreeNode>? Children { get; set; }
+        public bool Capped { get; set; }
+    }
+
+    /// <summary>One rendered rail row: a node, a "show more" row, or the cap's search handoff.</summary>
+    private readonly record struct Row(
+        string Key, TreeNode? Node, string Label, string Twisty, bool HasTwisty,
+        string Count, string DepthClass, string MoreClass, bool Current, bool IsMore, bool IsCap);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // The root row shows its first RDN like every other row (design reference:
+            // "dc=aspire", not the whole base DN); the full DN stays in the topbar's model.
+            var root = new TreeNode { Dn = Directory.BaseDn, Rdn = FirstRdn(Directory.BaseDn), HasChildren = true };
+            await ExpandAsync(root, AutoExpandDepth);
+            _root = root;
+        }
+        catch (DirectoryException ex)
+        {
+            _error = Describe(ex);
+        }
+
+        // For the schema-aware dialogs (#103/#105). Process-lifetime cached in the service;
+        // an unreadable subschema comes back as data (Available = false), never a throw.
+        var schema = await SchemaService.GetSchemaAsync();
+        _dialogSchema = schema.Available ? schema.Schema : null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _js = await Js.InvokeAsync<IJSObjectReference>("import", "./js/console.js");
+            await _js.InvokeVoidAsync("initRail", _splitter);
+        }
+    }
+
+    /// <summary>
+    /// Runs on first render and on every later query-string change, so clicking a second
+    /// search result while already on this page still moves the selection.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        _view = ViewParam?.ToLowerInvariant() switch
+        {
+            "search" => AdminView.Search,
+            "schema" => AdminView.Schema,
+            _ => AdminView.Browse,
+        };
+        _schemaVisited |= _view == AdminView.Schema;
+
+        if (DeepLinkDn is { Length: > 0 } dn && !string.Equals(dn, _selectedDn, StringComparison.Ordinal))
+        {
+            await SelectAsync(dn, reveal: true);
+        }
+    }
+
+    /// <summary>
+    /// Loads one node's children (SizeLimit = Cap + 1, so "more than Cap" is knowable) and,
+    /// while <paramref name="depth"/> allows, theirs too. The node is left expanded.
+    /// </summary>
+    private async Task ExpandAsync(TreeNode node, int depth)
+    {
+        if (depth <= 0)
+        {
+            return;
+        }
+
+        if (node.Children is null)
+        {
+            var children = await Directory.GetChildrenAsync(node.Dn, limit: Cap + 1);
+            // Display order only — the AppHost-set default (#98); truncation semantics are
+            // the server's and are not affected by how the returned children are ordered.
+            var ordered = Settings.DefaultSortOrder == LdapAdminSortOrder.Rdn
+                ? children.Children.OrderBy(static c => c.Rdn, StringComparer.OrdinalIgnoreCase)
+                : (IEnumerable<LdapChildEntry>)children.Children;
+            var loaded = ordered
+                .Select(static c => new TreeNode { Dn = c.Dn, Rdn = c.Rdn, HasChildren = c.HasChildren })
+                .ToList();
+            node.Capped = children.Truncated || loaded.Count > Cap;
+            if (loaded.Count > Cap)
+            {
+                loaded.RemoveRange(Cap, loaded.Count - Cap);
+            }
+            node.Children = loaded;
+        }
+
+        node.Open = true;
+
+        foreach (var child in node.Children.Where(static c => c.HasChildren))
+        {
+            await ExpandAsync(child, depth - 1);
+        }
+    }
+
+    private async Task ToggleAsync(TreeNode node)
+    {
+        if (node.Open)
+        {
+            node.Open = false;
+            return;
+        }
+
+        try
+        {
+            await ExpandAsync(node, depth: 1);
+        }
+        catch (DirectoryException ex)
+        {
+            _error = Describe(ex);
+        }
+    }
+
+    /// <summary>
+    /// Flattens the loaded tree into rail rows: paging rows past PAGE, the search handoff at
+    /// CAP, and — while the RDN filter is non-empty — only matches and their ancestors, with
+    /// ancestors force-open so clearing the filter restores the prior open state.
+    /// </summary>
+    private List<Row> BuildRows()
+    {
+        var rows = new List<Row>();
+        if (_root is not null)
+        {
+            Walk(_root, 0, _treeFilter.Trim(), rows);
+        }
+        return rows;
+    }
+
+    private void Walk(TreeNode node, int depth, string query, List<Row> rows)
+    {
+        var filtering = query.Length > 0;
+        var visibleChildren = node.Children;
+        if (filtering && visibleChildren is not null)
+        {
+            visibleChildren = [.. visibleChildren.Where(c => FilterVisible(c, query))];
+        }
+
+        var isParent = node.HasChildren;
+        var isOpen = filtering ? visibleChildren is { Count: > 0 } : node.Open;
+        var twisty = isParent ? (isOpen ? "▾" : "▸") : "·";
+        var count = isParent && !isOpen && node.Children is { } loaded
+            ? loaded.Count + (node.Capped ? "+" : string.Empty)
+            : string.Empty;
+
+        rows.Add(new Row(
+            Key: node.Dn, Node: node, Label: node.Rdn, Twisty: twisty,
+            HasTwisty: isParent, Count: count, DepthClass: Depth(depth), MoreClass: string.Empty,
+            Current: string.Equals(node.Dn, _selectedDn, StringComparison.OrdinalIgnoreCase),
+            IsMore: false, IsCap: false));
+
+        if (!isOpen || visibleChildren is null)
+        {
+            return;
+        }
+
+        var shown = filtering ? visibleChildren.Count : Math.Min(node.Shown, visibleChildren.Count);
+        foreach (var child in visibleChildren.Take(shown))
+        {
+            Walk(child, depth + 1, query, rows);
+        }
+
+        if (filtering)
+        {
+            return;
+        }
+
+        var hidden = visibleChildren.Count - shown;
+        if (hidden > 0)
+        {
+            rows.Add(new Row(
+                Key: node.Dn + "::more", Node: node,
+                Label: $"{hidden} more of {visibleChildren.Count} — show {Math.Min(hidden, Page)}",
+                Twisty: "⋯", HasTwisty: false, Count: string.Empty,
+                DepthClass: Depth(depth + 1), MoreClass: "more", Current: false,
+                IsMore: true, IsCap: false));
+        }
+        else if (node.Capped)
+        {
+            // The directory has more children than Cap; the row hands off to Search scoped
+            // to this container, which pages properly (design handoff § Tree behavior).
+            rows.Add(new Row(
+                Key: node.Dn + "::cap", Node: node,
+                Label: "more entries not shown — search this container",
+                Twisty: "⌕", HasTwisty: false, Count: string.Empty,
+                DepthClass: Depth(depth + 1), MoreClass: "more cap", Current: false,
+                IsMore: false, IsCap: true));
+        }
+    }
+
+    /// <summary>A node is visible under the filter when its RDN matches or a loaded descendant's does.</summary>
+    private static bool FilterVisible(TreeNode node, string query) =>
+        node.Rdn.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || (node.Children?.Any(c => FilterVisible(c, query)) ?? false);
+
+    private static string Depth(int depth) => "dp" + Math.Min(depth, 6);
+
+    private async Task OnRowClickAsync(Row row)
+    {
+        if (row.IsMore)
+        {
+            row.Node!.Shown += Page;
+            return;
+        }
+
+        if (row.IsCap)
+        {
+            // Land on real results: base = this container, one level, match-all filter.
+            Navigation.NavigateTo(Url(AdminView.Search, _selectedDn), forceLoad: false);
+            if (_searchPanel is not null)
+            {
+                await _searchPanel.PresetAndRunAsync(row.Node!.Dn, SearchScope.OneLevel, "(objectClass=*)");
+            }
+            return;
+        }
+
+        var node = row.Node!;
+        if (node.HasChildren && !node.Open)
+        {
+            await ToggleAsync(node);
+        }
+        await SelectAsync(node.Dn, reveal: false);
+    }
+
+    // ---- Selection ----------------------------------------------------------------------
 
     /// <summary>The URL is the view state: view + selected dn, both restorable from a deep link.</summary>
     private static string Url(AdminView view, string? dn)
@@ -206,118 +518,6 @@
     /// </summary>
     private void OnSearchEntrySelected(string dn) =>
         Navigation.NavigateTo(Url(AdminView.Browse, dn), forceLoad: false);
-
-    protected override async Task OnInitializedAsync()
-    {
-        try
-        {
-            var root = Node(Directory.BaseDn, Directory.BaseDn, hasChildren: true);
-            await ExpandAsync(root, AutoExpandDepth);
-            _roots = [root];
-        }
-        catch (DirectoryException ex)
-        {
-            _error = Describe(ex);
-        }
-    }
-
-    /// <summary>
-    /// Runs on first render and on every later query-string change, so clicking a second
-    /// search result while already on this page still moves the selection.
-    /// </summary>
-    protected override async Task OnParametersSetAsync()
-    {
-        _view = ViewParam?.ToLowerInvariant() switch
-        {
-            "search" => AdminView.Search,
-            "schema" => AdminView.Schema,
-            _ => AdminView.Browse,
-        };
-        _schemaVisited |= _view == AdminView.Schema;
-
-        if (DeepLinkDn is { Length: > 0 } dn && !string.Equals(dn, _selectedDn, StringComparison.Ordinal))
-        {
-            await SelectAsync(dn, reveal: true);
-        }
-    }
-
-    private TreeViewItem Node(string dn, string rdn, bool hasChildren) => new()
-    {
-        Id = dn,
-        Text = rdn,
-        // A non-null child collection marks a node expandable before anything is loaded;
-        // leaves get null, so they render without an expander.
-        Items = hasChildren ? [] : null,
-        OnExpandedAsync = hasChildren ? LoadOnExpandAsync : null,
-    };
-
-    /// <summary>
-    /// Loads one node's children and, while <paramref name="depth"/> allows, theirs too.
-    /// Truncation gets a visible, disabled marker row — a tree that just stops looks
-    /// complete, which is the one wrong impression a directory browser must not give.
-    /// </summary>
-    private async Task ExpandAsync(TreeViewItem node, int depth)
-    {
-        if (depth <= 0 || node.Items is null || node.Id is null)
-        {
-            return;
-        }
-
-        var children = await Directory.GetChildrenAsync(node.Id);
-        // Display order only — the AppHost-set default (#98); truncation semantics are the
-        // server's and are not affected by how the returned children are ordered.
-        var ordered = Settings.DefaultSortOrder == LdapAdminSortOrder.Rdn
-            ? children.Children.OrderBy(static c => c.Rdn, StringComparer.OrdinalIgnoreCase)
-            : (IEnumerable<LdapChildEntry>)children.Children;
-        var items = new List<ITreeViewItem>(children.Children.Count);
-        foreach (var child in ordered)
-        {
-            var item = Node(child.Dn, child.Rdn, child.HasChildren);
-            await ExpandAsync(item, depth - 1);
-            items.Add(item);
-        }
-
-        if (children.Truncated)
-        {
-            items.Add(new TreeViewItem
-            {
-                Id = TruncatedIdPrefix + node.Id,
-                Text = "More children exist than were returned",
-                Disabled = true,
-            });
-        }
-
-        node.Items = items;
-        node.Expanded = true;
-    }
-
-    /// <summary>Fetches children the first time a node is opened.</summary>
-    private async Task LoadOnExpandAsync(TreeViewItemExpandedEventArgs args)
-    {
-        // Fires on collapse too; only a first open should query.
-        if (!args.Expanded || args.CurrentItem is not TreeViewItem node || node.Items?.Any() == true)
-        {
-            return;
-        }
-
-        try
-        {
-            await ExpandAsync(node, depth: 1);
-        }
-        catch (DirectoryException ex)
-        {
-            _error = Describe(ex);
-        }
-    }
-
-    private async Task OnSelectionChangedAsync()
-    {
-        // The truncation notice is a marker, not an entry; selecting it must not query.
-        if (_selectedItem?.Id is { Length: > 0 } id && !id.StartsWith(TruncatedIdPrefix, StringComparison.Ordinal))
-        {
-            await SelectAsync(id, reveal: false);
-        }
-    }
 
     private async Task SelectAsync(string dn, bool reveal)
     {
@@ -367,12 +567,13 @@
     }
 
     /// <summary>
-    /// Expands the tree along the ancestor chain of <paramref name="dn"/> and selects its
-    /// row, so a deep link lands on a visible, selected node rather than a collapsed root.
+    /// Expands the tree along the ancestor chain of <paramref name="dn"/> so a deep link
+    /// lands on a visible row rather than a collapsed root. Paged-out rows are paged in;
+    /// a row past the cap stays unrevealed — the entry pane already shows the entry.
     /// </summary>
     private async Task RevealAsync(string dn, int token)
     {
-        if (_roots is not [TreeViewItem root, ..])
+        if (_root is not { } root)
         {
             return;
         }
@@ -399,7 +600,7 @@
         for (var take = baseRdns.Count + 1; take <= target.Count; take++)
         {
             var ancestor = Norm(target.Skip(target.Count - take));
-            if (current.Items?.Any() != true && current.OnExpandedAsync is not null)
+            if (current.Children is null)
             {
                 try
                 {
@@ -415,21 +616,22 @@
                 }
             }
 
-            var next = current.Items?
-                .OfType<TreeViewItem>()
-                .FirstOrDefault(item => item.Id is { } id
-                    && !id.StartsWith(TruncatedIdPrefix, StringComparison.Ordinal)
-                    && string.Equals(NormOrNull(id), ancestor, StringComparison.OrdinalIgnoreCase));
-            if (next is null)
+            current.Open = true;
+            var index = current.Children!.FindIndex(child =>
+                NormOrNull(child.Dn) is { } norm && string.Equals(norm, ancestor, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
             {
-                return; // Truncated out of the child list; the entry pane still shows it.
+                return; // Capped out of the child list; the entry pane still shows it.
             }
 
-            current.Expanded = true;
-            current = next;
-        }
+            // Page the ancestor in if the PAGE window has it hidden.
+            if (index >= current.Shown)
+            {
+                current.Shown = ((index / Page) + 1) * Page;
+            }
 
-        _selectedItem = current;
+            current = current.Children[index];
+        }
     }
 
     private static string Norm(IEnumerable<RelativeDistinguishedName> rdns) =>
@@ -447,33 +649,86 @@
         }
     }
 
+    // ---- Top bar ------------------------------------------------------------------------
+
+    /// <summary>Reloads the tree from the root and re-fetches the selected entry.</summary>
+    private async Task RefreshAsync()
+    {
+        _root = null;
+        _error = null;
+        StateHasChanged();
+        await OnInitializedAsync();
+        if (_selectedDn is { } dn)
+        {
+            await SelectAsync(dn, reveal: true);
+        }
+        ShowToast("directory reloaded");
+    }
+
+    private async Task ToggleThemeAsync()
+    {
+        if (_js is not null)
+        {
+            await _js.InvokeVoidAsync("toggleTheme");
+        }
+    }
+
+    private async Task CopyDnAsync(string dn)
+    {
+        if (_js is not null)
+        {
+            await _js.InvokeVoidAsync("copyText", dn);
+            ShowToast("DN copied");
+        }
+    }
+
+    // ---- Toast --------------------------------------------------------------------------
+
+    protected override void OnInitialized() => Toasts.Shown += OnToast;
+
+    private void OnToast(object? sender, ToastEventArgs args)
+    {
+        _ = InvokeAsync(() => ShowToast(args.Message));
+    }
+
+    /// <summary>One toast at a time, bottom center, auto-cleared (design handoff § Toast).</summary>
+    private void ShowToast(string message)
+    {
+        _toastCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _toastCts = cts;
+        _toast = message;
+        StateHasChanged();
+        _ = Task.Delay(TimeSpan.FromSeconds(2.6), cts.Token).ContinueWith(t =>
+        {
+            if (!t.IsCanceled)
+            {
+                _ = InvokeAsync(() =>
+                {
+                    _toast = null;
+                    StateHasChanged();
+                });
+            }
+        }, TaskScheduler.Default);
+    }
+
     // ---- Entry editing ------------------------------------------------------------------
     //
-    // All four dialogs are provider-hosted (IDialogService + the components in
-    // Components/Directory) rather than inline <FluentDialog> markup: inline, the FAST
-    // dialog control keeps its stylesheet default fixed height (480px) with no overflow
-    // handling, so form content taller than that renders past the dialog background — the
-    // #104 defect class, one mechanism across all four. Each model carries its save
-    // delegate; the dialog shows a returned error inline and closes only on null (success).
+    // The four dialogs render inline on the owned ConsoleDialog frame (one at a time). Each
+    // model carries its save delegate; the dialog shows a returned error inline and closes
+    // only on null (success). Closing raises OnClose here, which re-renders this page — so
+    // the editor always shows post-save state.
 
-    /// <summary>DialogParameters shared by the four entry dialogs — one hosting shape, one fix.</summary>
-    private static DialogParameters EntryDialogParameters(string title) => new()
+    private void CloseDialogs()
     {
-        Title = title,
-        Width = "480px",
-        Modal = true,
-        TrapFocus = true,
-        PreventScroll = true,
-        ShowDismiss = true,
-        // The content components render their own footers (Save/Cancel with busy state);
-        // null hides the provider's default action buttons.
-        PrimaryAction = null,
-        SecondaryAction = null,
-    };
+        _attributeDialog = null;
+        _newEntry = null;
+        _renameDialog = null;
+        _deleteDialog = null;
+    }
 
-    private async Task OpenEditAttributeDialog(LdapAttributeValues attribute)
-    {
-        var model = new AttributeDialogModel
+    private void OpenEditAttributeDialog(LdapAttributeValues attribute) =>
+        _attributeDialog = new AttributeDialogModel
         {
             IsNew = false,
             Name = attribute.Name,
@@ -481,64 +736,31 @@
             ValuesText = string.Join('\n', attribute.Values),
             SaveAsync = SaveAttributeAsync,
         };
-        await ShowAndRefreshAsync(
-            DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters($"Edit {attribute.Name}")));
-    }
 
-    private async Task OpenAddAttributeDialog()
-    {
-        var model = new AttributeDialogModel { IsNew = true, SaveAsync = SaveAttributeAsync };
-        await ShowAndRefreshAsync(
-            DialogService.ShowDialogAsync<AttributeDialog>(model, EntryDialogParameters("Add attribute")));
-    }
+    private void OpenAddAttributeDialog() =>
+        _attributeDialog = new AttributeDialogModel { IsNew = true, SaveAsync = SaveAttributeAsync };
 
-    /// <summary>
-    /// Awaits the dialog's close, then re-renders this page. The save delegates mutate this
-    /// page's state (entry re-fetch, tree reloads, reveal), but they run in the dialog
-    /// component's event context, so Blazor re-renders the dialog — not this page — when
-    /// they finish. Measured in the browser pass: a successful save closed the dialog while
-    /// the editor kept showing the pre-save entry until the next unrelated event.
-    /// </summary>
-    private async Task ShowAndRefreshAsync(Task<IDialogReference> showTask)
-    {
-        var dialog = await showTask;
-        await dialog.Result;
-        StateHasChanged();
-    }
-
-    private async Task OpenChildDialog()
+    private void OpenChildDialog()
     {
         if (_selectedDn is { } dn)
         {
-            // The DN goes in the body (owned markup, overflow-wrap), never the title: a DN
-            // is one unbreakable token, and its min-content width grows with tree depth —
-            // in the title it pushes the dialog grid past the fixed control width, which
-            // was the depth-dependent half of #104 (measured: title min-content 485px vs
-            // 432px track at ou=directory depth).
-            var model = new ChildDialogModel { ParentDn = dn, SaveAsync = SaveChildAsync };
-            await ShowAndRefreshAsync(
-                DialogService.ShowDialogAsync<NewChildDialog>(model, EntryDialogParameters("New child entry")));
+            _newEntry = new NewEntryModel { ParentDn = dn, SaveAsync = SaveNewEntryAsync };
         }
     }
 
-    private async Task OpenRenameDialog()
+    private void OpenRenameDialog()
     {
         if (_selectedDn is { } dn)
         {
-            // Title stays DN-free for the same min-content reason as OpenChildDialog.
-            var model = new RenameDialogModel { Dn = dn, SaveAsync = SaveRenameAsync };
-            await ShowAndRefreshAsync(
-                DialogService.ShowDialogAsync<RenameDialog>(model, EntryDialogParameters("Rename entry")));
+            _renameDialog = new RenameDialogModel { Dn = dn, SaveAsync = SaveRenameAsync };
         }
     }
 
-    private async Task OpenDeleteDialog()
+    private void OpenDeleteDialog()
     {
         if (_selectedDn is { } dn)
         {
-            var model = new DeleteDialogModel { Dn = dn, SaveAsync = ConfirmDeleteAsync };
-            await ShowAndRefreshAsync(
-                DialogService.ShowDialogAsync<DeleteDialog>(model, EntryDialogParameters("Delete entry")));
+            _deleteDialog = new DeleteDialogModel { Dn = dn, SaveAsync = ConfirmDeleteAsync };
         }
     }
 
@@ -568,51 +790,27 @@
             return Describe(result);
         }
 
-        Toasts.ShowSuccess($"{dialog.Name} saved");
+        ShowToast($"modify {dn} — {dialog.Name} saved");
         await SelectAsync(dn, reveal: false);
         return null;
     }
 
-    private async Task<string?> SaveChildAsync(ChildDialogModel dialog)
+    /// <summary>
+    /// The wizard composes the entry (chained classes, escaped RDN — a pasted full DN is
+    /// structurally impossible there); this applies it and lands on the new entry.
+    /// </summary>
+    private async Task<string?> SaveNewEntryAsync(LdapNewEntry entry)
     {
-        var objectClasses = dialog.ObjectClasses
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (dialog.Rdn.Length == 0 || objectClasses.Length == 0)
-        {
-            return "An RDN and at least one object class are required.";
-        }
-
-        string childDn;
-        try
-        {
-            childDn = Dn.Combine(dialog.Rdn, dialog.ParentDn);
-        }
-        catch (ArgumentException ex)
-        {
-            return ex.Message;
-        }
-
-        List<LdapNewAttribute> attributes = [new("objectClass", objectClasses)];
-        foreach (var line in Lines(dialog.AttributesText))
-        {
-            var colon = line.IndexOf(':', StringComparison.Ordinal);
-            if (colon <= 0)
-            {
-                return $"'{line}' is not in 'name: value' form.";
-            }
-            attributes.Add(new LdapNewAttribute(line[..colon].Trim(), [line[(colon + 1)..].Trim()]));
-        }
-
-        var result = await GuardedAsync(() => Directory.AddEntryAsync(new LdapNewEntry(childDn, attributes)));
+        var result = await GuardedAsync(() => Directory.AddEntryAsync(entry));
 
         if (!result.Succeeded)
         {
             return Describe(result);
         }
 
-        Toasts.ShowSuccess($"{childDn} created");
-        await ReloadChildrenAsync(dialog.ParentDn);
-        await SelectAsync(childDn, reveal: true);
+        ShowToast($"ldapadd — {entry.Dn} created");
+        await ReloadChildrenAsync(ParentOf(entry.Dn) ?? Directory.BaseDn);
+        await SelectAsync(entry.Dn, reveal: true);
         return null;
     }
 
@@ -634,7 +832,7 @@
             return Describe(rename.Outcome);
         }
 
-        Toasts.ShowSuccess($"Renamed to {rename.NewDn}");
+        ShowToast($"modrdn — renamed to {rename.NewDn}");
         await ReloadChildrenAsync(ParentOf(dialog.Dn) ?? Directory.BaseDn);
         if (newParent is not null)
         {
@@ -646,14 +844,16 @@
 
     private async Task<string?> ConfirmDeleteAsync(DeleteDialogModel dialog)
     {
-        var result = await GuardedAsync(() => Directory.DeleteEntryAsync(dialog.Dn));
+        var result = await GuardedAsync(() => Directory.DeleteEntryAsync(dialog.Dn, dialog.Subtree));
 
         if (!result.Succeeded)
         {
             return Describe(result);
         }
 
-        Toasts.ShowSuccess($"{dialog.Dn} deleted");
+        ShowToast(dialog.Subtree
+            ? $"ldapdelete -r — {dialog.Dn} and its subtree deleted"
+            : $"ldapdelete — {dialog.Dn} deleted");
         var parent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
         await ReloadChildrenAsync(parent);
         await SelectAsync(parent, reveal: true);
@@ -681,33 +881,39 @@
             return;
         }
 
-        if (node.Items is not null)
+        if (node.Children is not null)
         {
-            node.Items = [];
-            try
+            node.Children = null;
+            if (node.Open)
             {
-                await ExpandAsync(node, depth: 1);
-            }
-            catch (DirectoryException ex)
-            {
-                _error = Describe(ex);
+                try
+                {
+                    await ExpandAsync(node, depth: 1);
+                }
+                catch (DirectoryException ex)
+                {
+                    _error = Describe(ex);
+                }
             }
         }
     }
 
-    private TreeViewItem? FindNode(string normDn)
+    private TreeNode? FindNode(string normDn)
     {
-        var pending = new Stack<TreeViewItem>((_roots ?? []).OfType<TreeViewItem>());
+        if (_root is null)
+        {
+            return null;
+        }
+
+        var pending = new Stack<TreeNode>([_root]);
         while (pending.Count > 0)
         {
             var node = pending.Pop();
-            if (node.Id is { } id
-                && !id.StartsWith(TruncatedIdPrefix, StringComparison.Ordinal)
-                && string.Equals(NormOrNull(id), normDn, StringComparison.OrdinalIgnoreCase))
+            if (NormOrNull(node.Dn) is { } norm && string.Equals(norm, normDn, StringComparison.OrdinalIgnoreCase))
             {
                 return node;
             }
-            foreach (var child in (node.Items ?? []).OfType<TreeViewItem>())
+            foreach (var child in node.Children ?? [])
             {
                 pending.Push(child);
             }
@@ -731,6 +937,53 @@
     private static IReadOnlyList<string> Lines(string text) =>
         [.. text.Split('\n').Select(static line => line.TrimEnd('\r')).Where(static line => line.Length > 0)];
 
+    private static string FirstRdn(string dn)
+    {
+        try
+        {
+            return Dn.Parse(dn)[0].ToString();
+        }
+        catch (ArgumentException)
+        {
+            return dn;
+        }
+    }
+
+    /// <summary>
+    /// The entry header's human title (design reference: "Alice Chen", not "alice.chen"):
+    /// the display name when the entry carries one, the RDN's value part otherwise. The
+    /// attribute order matches SearchPanel's name column (cn before displayName) so both
+    /// surfaces agree on an entry's name. Binary values are skipped — base64 is not a title.
+    /// </summary>
+    internal static string EntryTitle(LdapEntry entry)
+    {
+        foreach (var name in (string[])["cn", "displayName", "ou", "o"])
+        {
+            var attribute = entry.Attributes.FirstOrDefault(
+                a => a.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !a.IsBinary);
+            if (attribute?.Values.FirstOrDefault(static v => v.Length > 0) is { } value)
+            {
+                return value;
+            }
+        }
+
+        try
+        {
+            var rdns = Dn.Parse(entry.Dn);
+            return rdns.Count == 0
+                ? entry.Dn
+                : string.Join("+", rdns[0].Attributes.Select(static a => a.Value));
+        }
+        catch (ArgumentException)
+        {
+            return entry.Dn;
+        }
+    }
+
+    private static int ObjectClassCount(LdapEntry entry) =>
+        entry.Attributes.FirstOrDefault(static a =>
+            a.Name.Equals("objectClass", StringComparison.OrdinalIgnoreCase))?.Values.Count ?? 0;
+
     /// <summary>The outcome classes a UI renders differently, in words.</summary>
     internal static string Describe(LdapOperationResult result)
     {
@@ -752,4 +1005,21 @@
 
     private static string Describe(DirectoryException ex) =>
         $"The directory could not be reached ({ex.GetType().Name}): {ex.Message}";
+
+    public async ValueTask DisposeAsync()
+    {
+        Toasts.Shown -= OnToast;
+        _toastCts?.Cancel();
+        if (_js is not null)
+        {
+            try
+            {
+                await _js.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit gone; nothing to dispose against.
+            }
+        }
+    }
 }
