@@ -25,6 +25,8 @@ internal static class OpenLdapMounts
     /// placeholder file. The path is stable under the AppHost's obj directory so the bind mount
     /// target survives rebuilds, and the placeholder exists because a bind mount needs a file at
     /// start time — the real content is written by the caller's <c>OnBeforeResourceStarted</c> hook.
+    /// The deterministic path means parallel builders can prepare the same file (test threads,
+    /// concurrent test processes), so creation must be atomic and must never truncate (#128).
     /// </summary>
     internal static string PrepareGeneratedFile(
         IResourceBuilder<OpenLdapResource> builder, string directoryName, string fileName)
@@ -32,10 +34,15 @@ internal static class OpenLdapMounts
         var directory = Path.Combine(builder.ApplicationBuilder.AppHostDirectory, "obj", directoryName);
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, fileName);
-        if (!File.Exists(path))
+
+        // Atomic create-if-missing: OpenOrCreate never truncates existing content, and mutual
+        // Write sharing lets every concurrent open succeed instead of throwing a Windows
+        // sharing violation the way a check-then-WriteAllText pair could.
+        using (new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write,
+            FileShare.ReadWrite | FileShare.Delete))
         {
-            File.WriteAllText(path, string.Empty);
         }
+
         return path;
     }
 
