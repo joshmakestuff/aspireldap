@@ -26,6 +26,10 @@ var ldap = builder.AddOpenLdap("openldap")
     // Fake people under their own auto-declared ou=directory: a node with more children than
     // the truncation tests' limits, seeded so the count is the same on every run.
     .WithFakePeople(30, ou: "directory", seed: 81)
+    // The handoff-scale large container (#115): far past the tree's Cap of 48, so the rail's
+    // "search this container" row renders against a real directory (#121's live witness).
+    // Seeded for run-to-run determinism like ou=directory.
+    .WithFakePeople(2000, ou: "hosts", seed: 82)
     // The COMPLETE access policy (the moment any olcAccess rule exists, slapd's implicit
     // final rule is "to * by * none" — see WithAccessControl docs). It must reproduce the
     // semantics AccessAndPasswordTests witnessed under the built-in default: binds work

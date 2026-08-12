@@ -22,7 +22,7 @@ public class DirectoryBrowseTests(LdapAdminAppHostFixture fixture)
 
         Assert.False(result.Truncated);
         Assert.Equal(
-            ["ou=directory", "ou=groups", "ou=people"],
+            ["ou=directory", "ou=groups", "ou=hosts", "ou=people"],
             result.Children.Select(c => c.Rdn).Order(StringComparer.Ordinal));
         Assert.All(result.Children, child => Assert.Contains("organizationalUnit", child.ObjectClasses));
     }
