@@ -22,8 +22,10 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
         // everything; the anchors prove both seeded branches were reached.
         using var cts = TestCancellation.Source();
 
+        // Limit sits above any seed size (ou=hosts alone holds 2,000), not at a census pin:
+        // it only has to be big enough that Truncated=false still means "saw everything".
         var result = await fixture.Directory.SearchAsync(
-            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = 100 },
+            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = 5000 },
             cts.Token);
 
         Assert.False(result.Truncated);
@@ -32,9 +34,11 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
             Assert.Contains(result.Entries, e =>
                 string.Equals(e.Dn, fixture.DnUnder(uid, "ou=people"), StringComparison.OrdinalIgnoreCase));
         }
-        // The generated branch: at least one fake person under ou=directory.
-        Assert.Contains(result.Entries, e =>
-            e.Dn.Contains(",ou=directory,", StringComparison.OrdinalIgnoreCase));
+        // The generated branches: at least one fake person under each.
+        foreach (var ou in (string[])[",ou=directory,", ",ou=hosts,"])
+        {
+            Assert.Contains(result.Entries, e => e.Dn.Contains(ou, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     [Fact]
@@ -59,7 +63,7 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
         using var cts = TestCancellation.Source();
 
         var all = await fixture.Directory.SearchAsync(
-            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = 100 },
+            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = 5000 },
             cts.Token);
         Assert.False(all.Truncated);
         var actualCount = all.Entries.Count;
