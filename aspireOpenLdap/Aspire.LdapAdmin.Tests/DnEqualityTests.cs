@@ -68,6 +68,25 @@ public class DnEqualityTests
     }
 
     [Fact]
+    public void A_descendant_is_under_its_ancestor_however_spelled()
+    {
+        Assert.True(DnEquality.IsUnder("cn=admin,dc=example,dc=org", "DC=Example, DC=Org"));
+        Assert.True(DnEquality.IsUnder("uid=x,ou=people,dc=example,dc=org", "dc=example,dc=org"));
+        Assert.True(DnEquality.IsUnder("uid=x,ou=people,dc=example,dc=org", "ou=people,dc=example,dc=org"));
+    }
+
+    [Fact]
+    public void Equal_sibling_reversed_or_mismatched_dns_are_not_under()
+    {
+        Assert.False(DnEquality.IsUnder("cn=admin,dc=example,dc=org", "cn=admin,dc=example,dc=org")); // equal, not under
+        Assert.False(DnEquality.IsUnder("cn=a,dc=example,dc=org", "cn=b,dc=example,dc=org"));
+        Assert.False(DnEquality.IsUnder("dc=example,dc=org", "cn=admin,dc=example,dc=org")); // reversed
+        Assert.False(DnEquality.IsUnder("cn=admin,dc=example,dc=net", "dc=example,dc=org"));
+        Assert.False(DnEquality.IsUnder("cn=admin,dc=example,dc=org", ""));
+        Assert.False(DnEquality.IsUnder("not a dn", "dc=example,dc=org"));
+    }
+
+    [Fact]
     public void An_unparsable_null_or_empty_dn_is_never_equivalent()
     {
         // An unescaped '<' is an RFC 4514 parse failure.

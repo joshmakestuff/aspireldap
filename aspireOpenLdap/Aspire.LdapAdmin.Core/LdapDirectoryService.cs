@@ -225,6 +225,15 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
             return LdapOperationResult.Invalid("A modify must carry at least one change.");
         }
 
+        // The #94 password guard, at its second door: a userPassword modification on the
+        // bind identity is the same silent self-brick the RFC 3062 path refuses.
+        if (changes.Any(static c => c.Name.Equals("userPassword", StringComparison.OrdinalIgnoreCase))
+            && DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
+        {
+            return LdapOperationResult.Invalid(
+                $"'{dn}' is the console's bind identity; its password cannot be changed from here.");
+        }
+
         var request = new ModifyRequest(dn);
         foreach (var change in changes)
         {
@@ -269,6 +278,23 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         {
             return dnError;
         }
+
+        // Deleting the bind identity severs every connection the console makes from then on;
+        // refused without a round trip (#136). The subtree walk gets the ancestor check too,
+        // because its children are deleted through raw DeleteRequests that never re-enter
+        // this method — without it the walk would sweep the identity away mid-recursion. A
+        // plain delete of an ancestor needs no guard: the server refuses non-leaves.
+        if (DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
+        {
+            return LdapOperationResult.Invalid(
+                $"'{dn}' is the console's bind identity; it cannot be deleted from here.");
+        }
+        if (subtree && DnEquality.IsUnder(factory.ConnectionString.BindDn, dn))
+        {
+            return LdapOperationResult.Invalid(
+                $"'{dn}' contains the console's bind identity; its subtree cannot be deleted from here.");
+        }
+
         if (!subtree)
         {
             return await SendWriteAsync(new DeleteRequest(dn), cancellationToken).ConfigureAwait(false);
@@ -386,6 +412,20 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         if (newParentDn is not null && TryInvalidDn(newParentDn, out var parentError))
         {
             return new LdapRenameResult(parentError, null);
+        }
+
+        // Renaming the bind identity — or a container it lives under, which renames it just
+        // as surely — desyncs the AppHost's declared credentials from the directory; refused
+        // here without a round trip, like the password guard (#94, #136).
+        if (DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
+        {
+            return new LdapRenameResult(LdapOperationResult.Invalid(
+                $"'{dn}' is the console's bind identity; it cannot be renamed from here."), null);
+        }
+        if (DnEquality.IsUnder(factory.ConnectionString.BindDn, dn))
+        {
+            return new LdapRenameResult(LdapOperationResult.Invalid(
+                $"'{dn}' contains the console's bind identity; renaming it would rename the identity too."), null);
         }
 
         IReadOnlyList<RelativeDistinguishedName> parsedRdn;

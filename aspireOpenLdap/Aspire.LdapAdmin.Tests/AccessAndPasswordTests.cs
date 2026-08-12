@@ -99,6 +99,44 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
+    public async Task Every_write_that_would_invalidate_the_bind_identity_is_rejected_without_a_round_trip()
+    {
+        // The #94 class, closed (#136): rename and delete of the identity, rename and
+        // subtree-delete of a container holding it, and the password change through the
+        // modify door. Each uses a case/whitespace variant so string.Equals cannot pass.
+        using var cts = TestCancellation.Source();
+        var variant = fixture.Settings.BindDn.ToUpperInvariant().Replace(",", ", ");
+        var baseVariant = fixture.BaseDn.ToUpperInvariant().Replace(",", ", ");
+
+        var renamed = await fixture.Directory.RenameEntryAsync(variant, "cn=renamed", cancellationToken: cts.Token);
+        Assert.Equal(LdapOperationStatus.InvalidRequest, renamed.Outcome.Status);
+        Assert.Null(renamed.Outcome.ResultCode);
+
+        var containerRenamed = await fixture.Directory.RenameEntryAsync(baseVariant, "dc=elsewhere", cancellationToken: cts.Token);
+        Assert.Equal(LdapOperationStatus.InvalidRequest, containerRenamed.Outcome.Status);
+        Assert.Contains("contains", containerRenamed.Outcome.Message);
+
+        var deleted = await fixture.Directory.DeleteEntryAsync(variant, cts.Token);
+        Assert.Equal(LdapOperationStatus.InvalidRequest, deleted.Status);
+        Assert.Null(deleted.ResultCode);
+
+        var subtreeDeleted = await fixture.Directory.DeleteEntryAsync(baseVariant, subtree: true, cts.Token);
+        Assert.Equal(LdapOperationStatus.InvalidRequest, subtreeDeleted.Status);
+        Assert.Contains("contains", subtreeDeleted.Message);
+
+        var passwordModified = await fixture.Directory.ModifyEntryAsync(
+            variant,
+            [new LdapAttributeChange(DirectoryAttributeOperation.Replace, "userPassword", ["would-brick"])],
+            cts.Token);
+        Assert.Equal(LdapOperationStatus.InvalidRequest, passwordModified.Status);
+        Assert.Null(passwordModified.ResultCode);
+
+        // The declared credentials still work, and the directory is intact.
+        var asAdmin = fixture.DirectoryAs(fixture.Settings.BindDn, fixture.Settings.BindPassword);
+        Assert.NotNull(await asAdmin.GetEntryAsync(fixture.BaseDn, ["dc"], cts.Token));
+    }
+
+    [Fact]
     public async Task Setting_a_password_on_an_entry_that_does_not_exist_reports_a_failure()
     {
         using var cts = TestCancellation.Source();

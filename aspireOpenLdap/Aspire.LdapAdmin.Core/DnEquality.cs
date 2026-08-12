@@ -51,6 +51,47 @@ public static class DnEquality
         return true;
     }
 
+    /// <summary>
+    /// True when <paramref name="descendant"/> names an entry strictly beneath
+    /// <paramref name="ancestor"/> — its RDN sequence ends with the ancestor's, with more in
+    /// front. Equality is not "under"; unparsable or empty input is under nothing.
+    /// </summary>
+    public static bool IsUnder(string? descendant, string? ancestor)
+    {
+        if (string.IsNullOrWhiteSpace(descendant) || string.IsNullOrWhiteSpace(ancestor))
+        {
+            return false;
+        }
+
+        IReadOnlyList<RelativeDistinguishedName> descendantRdns;
+        IReadOnlyList<RelativeDistinguishedName> ancestorRdns;
+        try
+        {
+            descendantRdns = Dn.Parse(descendant);
+            ancestorRdns = Dn.Parse(ancestor);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        if (ancestorRdns.Count == 0 || descendantRdns.Count <= ancestorRdns.Count)
+        {
+            return false;
+        }
+
+        var offset = descendantRdns.Count - ancestorRdns.Count;
+        for (var i = 0; i < ancestorRdns.Count; i++)
+        {
+            if (!RdnsEquivalent(descendantRdns[offset + i], ancestorRdns[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool RdnsEquivalent(RelativeDistinguishedName left, RelativeDistinguishedName right)
     {
         if (left.Attributes.Count != right.Attributes.Count)
