@@ -99,6 +99,7 @@
     <PackageReference Include="LdifDotNet" />
     <PackageReference Include="LdifDotNet.Generator" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" VersionOverride="10.0.11" />
     <PackageReference Include="System.DirectoryServices.Protocols" />
   </ItemGroup>
 
