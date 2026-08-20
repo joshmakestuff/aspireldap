@@ -12,5 +12,6 @@
   <Folder Name="/tests/">
     <Project Path="Aspire.Hosting.OpenLdap.Tests/Aspire.Hosting.OpenLdap.Tests.csproj" />
     <Project Path="Aspire.LdapAdmin.Tests/Aspire.LdapAdmin.Tests.csproj" />
+    <Project Path="Aspire.Hosting.OpenLdap.Tests.Worker/Aspire.Hosting.OpenLdap.Tests.Worker.csproj" />
   </Folder>
 </Solution>

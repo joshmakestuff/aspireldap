@@ -14,6 +14,9 @@ internal static class OpenLdapCertificateGenerator
     private const int KeySizeBits = 2048;
     private static readonly TimeSpan CertLifetime = TimeSpan.FromDays(365 * 2);
     private static readonly TimeSpan RegenWithinExpiry = TimeSpan.FromDays(30);
+    private static readonly Lock Gate = new();
+    private const int LockAcquireTimeoutMs = 30_000;
+    private const int LockRetryDelayMs = 50;
 
     public readonly record struct GeneratedCertificates(
         string Directory,
@@ -23,20 +26,54 @@ internal static class OpenLdapCertificateGenerator
 
     public static GeneratedCertificates EnsureCertificates(string appHostDir, string resourceName)
     {
-        var dir = Path.Combine(appHostDir, "obj", "aspire-openldap-certs", resourceName);
-        System.IO.Directory.CreateDirectory(dir);
-
-        var caPath = Path.Combine(dir, "ca.crt");
-        var serverCertPath = Path.Combine(dir, "server.crt");
-        var serverKeyPath = Path.Combine(dir, "server.key");
-
-        if (CertsAreFresh(resourceName, caPath, serverCertPath, serverKeyPath))
+        lock (Gate)
         {
-            return new GeneratedCertificates(dir, caPath, serverCertPath, serverKeyPath);
-        }
+            var dir = Path.Combine(appHostDir, "obj", "aspire-openldap-certs", resourceName);
+            System.IO.Directory.CreateDirectory(dir);
 
-        Generate(resourceName, caPath, serverCertPath, serverKeyPath);
-        return new GeneratedCertificates(dir, caPath, serverCertPath, serverKeyPath);
+            using (AcquireLock(dir))
+            {
+                var caPath = Path.Combine(dir, "ca.crt");
+                var serverCertPath = Path.Combine(dir, "server.crt");
+                var serverKeyPath = Path.Combine(dir, "server.key");
+
+                if (!CertsAreFresh(resourceName, caPath, serverCertPath, serverKeyPath))
+                {
+                    Generate(resourceName, caPath, serverCertPath, serverKeyPath);
+                }
+
+                return new GeneratedCertificates(dir, caPath, serverCertPath, serverKeyPath);
+            }
+        }
+    }
+
+    private static FileStream AcquireLock(string dir)
+    {
+        var lockPath = Path.Combine(dir, ".generate.lock");
+        var deadline = Environment.TickCount64 + LockAcquireTimeoutMs;
+
+        while (true)
+        {
+            try
+            {
+                // FileShare.None makes this an exclusive cross-process lock: a second process
+                // holding the file raises IOException (a sharing violation), which we retry for
+                // a bounded window. The lock file is deliberately never deleted — removing it
+                // would reintroduce a create/delete race.
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException ex)
+            {
+                if (Environment.TickCount64 >= deadline)
+                {
+                    throw new IOException(
+                        $"Timed out acquiring the certificate-generation lock '{lockPath}'. " +
+                        "Another process may be generating certificates for this directory.", ex);
+                }
+
+                Thread.Sleep(LockRetryDelayMs);
+            }
+        }
     }
 
     /// <summary>
