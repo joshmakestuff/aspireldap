@@ -261,7 +261,8 @@ public class DashboardCommandTests
             .Single(c => c.Name == "export-ldif");
         var result = await command.ExecuteCommand(new ExecuteCommandContext
         {
-            ServiceProvider = app.Services,
+            // Aspire 13.5.0: Services replaced ServiceProvider (obsolete) and is required.
+            Services = app.Services,
             ResourceName = ldap.Resource.Name,
             CancellationToken = CancellationToken.None,
             Logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,

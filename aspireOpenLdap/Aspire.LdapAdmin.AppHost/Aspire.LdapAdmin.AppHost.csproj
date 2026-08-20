@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.5.0">
+<Project Sdk="Aspire.AppHost.Sdk">
 
   <!--
     Test AppHost for the admin: an OpenLDAP resource plus the admin web host, used by
