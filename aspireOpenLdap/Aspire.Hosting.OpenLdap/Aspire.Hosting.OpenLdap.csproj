@@ -36,6 +36,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Aspire.Hosting.OpenLdap.Tests" />
+    <InternalsVisibleTo Include="Aspire.Hosting.OpenLdap.Tests.Worker" />
   </ItemGroup>
 
   <!--

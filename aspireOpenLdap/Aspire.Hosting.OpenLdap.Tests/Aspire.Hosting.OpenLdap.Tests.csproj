@@ -19,6 +19,16 @@
   <ItemGroup>
     <ProjectReference Include="..\Aspire.OpenLdap\Aspire.OpenLdap.csproj" />
     <ProjectReference Include="..\AspireOpenLdap.TestAppHost\AspireOpenLdap.TestAppHost.csproj" />
+    <ProjectReference Include="..\Aspire.Hosting.OpenLdap.Tests.Worker\Aspire.Hosting.OpenLdap.Tests.Worker.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- The cross-process concurrency test spawns the worker via dotnet exec; embed its
+       build-output path so the test does not hardcode a bin/<config>/<tfm> guess. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>WorkerAssemblyPath</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)../Aspire.Hosting.OpenLdap.Tests.Worker/bin/$(Configuration)/net10.0/Aspire.Hosting.OpenLdap.Tests.Worker.dll</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>

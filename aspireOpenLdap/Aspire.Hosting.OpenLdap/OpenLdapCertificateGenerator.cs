@@ -15,6 +15,17 @@ internal static class OpenLdapCertificateGenerator
     private static readonly TimeSpan CertLifetime = TimeSpan.FromDays(365 * 2);
     private static readonly TimeSpan RegenWithinExpiry = TimeSpan.FromDays(30);
 
+    /// <summary>
+    /// Generation takes well under a second, so this bounds only the wait on a stuck peer
+    /// (paused under a debugger, leaked handle — a killed process releases its handle).
+    /// The fresh path pays the same wait when a peer holds the lock, which is why the
+    /// window is short: EnsureCertificates runs synchronously during AppHost model
+    /// construction, and a stuck peer must become a prompt, named error, not a half-minute
+    /// silent stall.
+    /// </summary>
+    private const int LockAcquireTimeoutMs = 10_000;
+    private const int LockRetryDelayMs = 50;
+
     public readonly record struct GeneratedCertificates(
         string Directory,
         string CaCertPath,
@@ -26,17 +37,79 @@ internal static class OpenLdapCertificateGenerator
         var dir = Path.Combine(appHostDir, "obj", "aspire-openldap-certs", resourceName);
         System.IO.Directory.CreateDirectory(dir);
 
-        var caPath = Path.Combine(dir, "ca.crt");
-        var serverCertPath = Path.Combine(dir, "server.crt");
-        var serverKeyPath = Path.Combine(dir, "server.key");
-
-        if (CertsAreFresh(resourceName, caPath, serverCertPath, serverKeyPath))
+        // The file lock is the whole serialization story, in-process included: a second
+        // opener in the same process raises the same sharing violation a second process
+        // does, and AcquireLock's retry handles both. A static gate on top would head-of-
+        // line block unrelated directories behind one directory's lock wait.
+        using (AcquireLock(dir))
         {
+            var caPath = Path.Combine(dir, "ca.crt");
+            var serverCertPath = Path.Combine(dir, "server.crt");
+            var serverKeyPath = Path.Combine(dir, "server.key");
+
+            if (!CertsAreFresh(resourceName, caPath, serverCertPath, serverKeyPath))
+            {
+                Generate(resourceName, caPath, serverCertPath, serverKeyPath);
+            }
+
             return new GeneratedCertificates(dir, caPath, serverCertPath, serverKeyPath);
         }
+    }
 
-        Generate(resourceName, caPath, serverCertPath, serverKeyPath);
-        return new GeneratedCertificates(dir, caPath, serverCertPath, serverKeyPath);
+    private static FileStream AcquireLock(string dir)
+    {
+        var lockPath = Path.Combine(dir, ".generate.lock");
+        var deadline = Environment.TickCount64 + LockAcquireTimeoutMs;
+
+        while (true)
+        {
+            try
+            {
+                // FileShare.None makes this an exclusive cross-process lock: another holder
+                // raises IOException (a sharing violation), which we retry for a bounded
+                // window. The lock file is deliberately never deleted — removing it would
+                // reintroduce a create/delete race.
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // A concurrent clean (dotnet clean, git clean -xdf) removed obj/ between
+                // CreateDirectory and the open; re-create and go again under the same
+                // deadline rather than retrying into a directory that is not coming back.
+                if (Environment.TickCount64 >= deadline)
+                {
+                    throw;
+                }
+
+                System.IO.Directory.CreateDirectory(dir);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                // Not transient: the never-deleted lock file was left unwritable (a run as
+                // another user, a CI cache restore). Retrying cannot change a permission —
+                // fail now, naming the file to remove.
+                throw new IOException(
+                    $"Cannot open the certificate-generation lock '{lockPath}': access denied. " +
+                    "If no other process is generating certificates for this directory, delete the file and retry.",
+                    ex);
+            }
+            catch (IOException ex) when (ex.GetType() == typeof(IOException))
+            {
+                // Only the plain IOException is retried: the sharing violation another
+                // holder raises arrives as exactly IOException, while the non-transient
+                // failures (PathTooLongException, DriveNotFoundException, ...) are
+                // subclasses and propagate instead of burning the whole window.
+                if (Environment.TickCount64 >= deadline)
+                {
+                    throw new IOException(
+                        $"Timed out acquiring the certificate-generation lock '{lockPath}'. " +
+                        "Another process may be generating certificates for this directory; " +
+                        "if none is, delete the lock file and retry.", ex);
+                }
+
+                Thread.Sleep(LockRetryDelayMs);
+            }
+        }
     }
 
     /// <summary>

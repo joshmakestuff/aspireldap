@@ -87,9 +87,9 @@ internal static class OpenLdapDashboardCommands
                     };
                 }
 
-                var runner = ctx.ServiceProvider.GetRequiredService<IContainerCliRunner>();
+                var runner = ctx.Services.GetRequiredService<IContainerCliRunner>();
                 var (runtime, resolveFailure) = await ContainerRuntime.ResolveAsync(
-                    ctx.ServiceProvider, ctx.CancellationToken).ConfigureAwait(false);
+                    ctx.Services, ctx.CancellationToken).ConfigureAwait(false);
                 if (runtime is null)
                 {
                     return resolveFailure!;
@@ -172,7 +172,7 @@ internal static class OpenLdapDashboardCommands
             displayName: "Reset data volume",
             executeCommand: async ctx =>
             {
-                var commandService = ctx.ServiceProvider.GetRequiredService<ResourceCommandService>();
+                var commandService = ctx.Services.GetRequiredService<ResourceCommandService>();
 
                 // Capture the container ID before Stop — once stopped, the snapshot's
                 // container.id property is gone.
@@ -187,7 +187,7 @@ internal static class OpenLdapDashboardCommands
                 }
 
                 var removalFailure = await ContainerRuntime.RemoveContainerAndVolumeAsync(
-                    ctx.ServiceProvider, containerId, volumeName, ctx.CancellationToken).ConfigureAwait(false);
+                    ctx.Services, containerId, volumeName, ctx.CancellationToken).ConfigureAwait(false);
                 if (removalFailure is not null)
                 {
                     return removalFailure;
@@ -207,7 +207,7 @@ internal static class OpenLdapDashboardCommands
 
     private static string? TryGetContainerId(ExecuteCommandContext ctx)
     {
-        var notify = ctx.ServiceProvider.GetRequiredService<ResourceNotificationService>();
+        var notify = ctx.Services.GetRequiredService<ResourceNotificationService>();
         if (!notify.TryGetCurrentState(ctx.ResourceName, out var evt) || evt is null)
         {
             return null;

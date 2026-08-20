@@ -193,9 +193,13 @@ public class ProbeLogFilterTests : IDisposable
         var daemonLogs = await PollDaemonLogsAsync(name,
             logs => logs.Contains("SRCH base=\"dc=example,dc=org\"", StringComparison.Ordinal), cts.Token);
 
-        // The probe block is gone: no sentinel, no root-DSE search line.
-        Assert.DoesNotContain("aspire-healthcheck", daemonLogs);
-        Assert.DoesNotContain("SRCH base=\"\" scope=0", daemonLogs);
+        // The probe block is gone: no sentinel, no root-DSE search line. Dump the full
+        // filtered slice on failure — docker logs is append-only, so a leaked sentinel is
+        // the whole diagnostic and the default DoesNotContain message truncates it away (#143).
+        Assert.False(daemonLogs.Contains("aspire-healthcheck", StringComparison.Ordinal),
+            $"probe sentinel leaked into the filtered daemon log:{Environment.NewLine}{daemonLogs}");
+        Assert.False(daemonLogs.Contains("SRCH base=\"\" scope=0", StringComparison.Ordinal),
+            $"probe root-DSE search leaked into the filtered daemon log:{Environment.NewLine}{daemonLogs}");
 
         // Real traffic is logged: the search block and the readiness whoamis (which also prove
         // that withheld probe-shaped prefixes get flushed once a conn deviates).
