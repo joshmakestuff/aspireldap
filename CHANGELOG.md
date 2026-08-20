@@ -41,7 +41,8 @@
 
 - **Cross-process certificate generation** ([#139](https://github.com/joshmakestuff/aspireldap/issues/139)):
   `EnsureCertificates` now serializes its freshness check and generation behind a per-directory
-  lock — an in-process gate plus a `.generate.lock` file held with `FileShare.None` — so two
+  lock — a `.generate.lock` file held with `FileShare.None`, which serializes in-process
+  callers too — so two
   concurrent `WithTls()` runs on the same AppHost directory can no longer interleave their
   per-file moves into a mismatched CA/server pair, or race a `File.Move(overwrite: true)` against
   a concurrent freshness read. Covered by a fast two-process concurrency test.
