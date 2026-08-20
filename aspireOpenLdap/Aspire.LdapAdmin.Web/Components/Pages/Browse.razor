@@ -75,7 +75,7 @@
                 @foreach (var row in BuildRows())
                 {
                     <button class="trow @row.DepthClass @row.MoreClass" aria-current="@(row.Current ? "true" : null)"
-                            aria-expanded="@(row.HasTwisty ? (row.Twisty == "▾" ? "true" : "false") : null)"
+                            aria-expanded="@(row.HasTwisty ? (row.Expanded ? "true" : "false") : null)"
                             @key="row.Key" @onclick="@(() => OnRowClickAsync(row))"
                             @onkeydown="@(e => OnRowKeyDownAsync(e, row))">
                         @if (row.HasTwisty)
@@ -274,10 +274,16 @@
         public bool Capped { get; set; }
     }
 
-    /// <summary>One rendered rail row: a node, a "show more" row, or the cap's search handoff.</summary>
+    /// <summary>
+    /// One rendered rail row: a node, a "show more" row, or the cap's search handoff.
+    /// Expanded is the RENDERED open state — under a filter an ancestor renders open on
+    /// matches while Node.Open stays false — and is what aria-expanded and the keyboard
+    /// handler must read, never Node.Open or the twisty glyph.
+    /// </summary>
     internal readonly record struct Row(
         string Key, TreeNode? Node, string Label, string Twisty, bool HasTwisty,
-        string Count, string DepthClass, string MoreClass, bool Current, bool IsMore, bool IsCap);
+        string Count, string DepthClass, string MoreClass, bool Current, bool IsMore, bool IsCap,
+        bool Expanded = false);
 
     protected override async Task OnInitializedAsync()
     {
@@ -429,7 +435,7 @@
             Key: node.Dn, Node: node, Label: node.Rdn, Twisty: twisty,
             HasTwisty: isParent, Count: count, DepthClass: Depth(depth), MoreClass: string.Empty,
             Current: string.Equals(node.Dn, selectedDn, StringComparison.OrdinalIgnoreCase),
-            IsMore: false, IsCap: false));
+            IsMore: false, IsCap: false, Expanded: isOpen));
 
         if (!isOpen || visibleChildren is null)
         {
@@ -528,19 +534,24 @@
     /// ArrowLeft): the twisty is a mouse affordance, so without this a keyboard user could
     /// open a node only via the click handler's expand-and-select, and collapse not at all.
     /// Enter/Space stay the native button click (select, expanding a closed parent).
+    /// Inert while the filter is active: the filter owns rendered open-state then, so a
+    /// toggle would change nothing visible while corrupting the saved Open the filter's
+    /// clearing is documented to restore. Decisions read row.Expanded — the rendered
+    /// state — which equals node.Open whenever this handler acts.
     /// </summary>
     private async Task OnRowKeyDownAsync(KeyboardEventArgs e, Row row)
     {
-        if (row.IsMore || row.IsCap || row.Node is not { HasChildren: true } node)
+        if (row.IsMore || row.IsCap || row.Node is not { HasChildren: true } node
+            || _treeFilter.Trim().Length > 0)
         {
             return;
         }
 
-        if (e.Key == "ArrowRight" && !node.Open)
+        if (e.Key == "ArrowRight" && !row.Expanded)
         {
             await ToggleAsync(node);
         }
-        else if (e.Key == "ArrowLeft" && node.Open)
+        else if (e.Key == "ArrowLeft" && row.Expanded)
         {
             node.Open = false;
         }

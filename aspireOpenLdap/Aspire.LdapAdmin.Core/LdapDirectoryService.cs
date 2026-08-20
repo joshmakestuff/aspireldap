@@ -343,9 +343,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
                 }
                 catch (DirectoryOperationException ex) when (ex.Response is not null)
                 {
-                    var code = ex.Response.ResultCode;
-                    return new LdapOperationResult(Classify(code), code,
-                        $"listing children of '{dn}': {ex.Response.ErrorMessage ?? ex.Message}");
+                    return FromError(ex, $"listing children of '{dn}'");
                 }
                 foreach (SearchResultEntry entry in response.Entries)
                 {
@@ -512,10 +510,18 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         }
         catch (DirectoryOperationException ex) when (ex.Response is not null)
         {
-            var code = ex.Response.ResultCode;
-            return new LdapOperationResult(
-                Classify(code), code, Contextualize(context, ex.Response.ErrorMessage ?? ex.Message));
+            return FromError(ex, context);
         }
+    }
+
+    /// <summary>The one wrap for a thrown response: Classify + Contextualize. Every catch
+    /// of a <see cref="DirectoryOperationException"/> carrying a response goes through
+    /// here, so failure wording cannot drift between the read and write paths.</summary>
+    private static LdapOperationResult FromError(DirectoryOperationException ex, string? context)
+    {
+        var code = ex.Response!.ResultCode;
+        return new LdapOperationResult(Classify(code), code,
+            Contextualize(context, ex.Response.ErrorMessage ?? ex.Message));
     }
 
     private static string? Contextualize(string? context, string? message) =>

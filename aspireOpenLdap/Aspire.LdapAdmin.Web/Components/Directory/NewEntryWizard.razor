@@ -237,8 +237,21 @@
 
     protected override void OnInitialized() => _parentDn = Model.ParentDn;
 
-    /// <summary>A replaced Schema parameter invalidates everything derived from it.</summary>
-    protected override void OnParametersSet() => InvalidateDerived();
+    private LdapSchema? _lastSchema;
+
+    /// <summary>
+    /// A replaced Schema parameter invalidates everything derived from it — and only that:
+    /// parameters re-set on every parent re-render (each toast costs Browse two), so an
+    /// unconditional wipe here would defeat the memoization per keystroke it exists for.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_lastSchema, Schema))
+        {
+            _lastSchema = Schema;
+            InvalidateDerived();
+        }
+    }
 
     private string? Current(int step) => _step == step ? "true" : null;
 
