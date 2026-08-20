@@ -88,6 +88,7 @@
 .railtop .railhead{padding-bottom:0;flex:1;min-width:0}
 .railfilter{height:26px;min-height:26px;padding:0 6px;font-size:12px}
 .btn-sm{padding:2px 8px;font-size:11px;white-space:nowrap}
+.btn-icon.btn-sm{width:26px;height:26px}
 .railhead{display:flex;align-items:center;gap:6px;padding:0 var(--space-2) var(--space-2);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
 .pane{overflow:auto;padding:var(--space-4) var(--space-6) var(--space-8);min-width:0}
 .trow{display:flex;align-items:center;gap:6px;width:100%;text-align:left;padding:3px 6px;border:0;background:transparent;font:inherit;font-size:13px;cursor:pointer;color:inherit}
@@ -126,7 +127,16 @@
    bar appears, the text rewraps narrower and fits, the bar disappears, the text rewraps
    wider and overflows again. Reserving the gutter breaks the loop. */
 .ta{width:100%;min-height:220px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;padding:var(--space-3);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:0;color:inherit;scrollbar-gutter:stable}
+.ta-sm{min-height:120px}
 .frow{display:grid;grid-template-columns:minmax(120px,1.1fr) 92px minmax(120px,1.4fr) 36px;gap:var(--space-2);align-items:end;margin-bottom:var(--space-2)}
+/* The dialogs' two-column RDN row (attribute + value), shared by rename and the wizard. */
+.frow-2{grid-template-columns:minmax(120px,1fr) minmax(180px,2fr);margin-bottom:0}
+/* Small body text (13px): the notes and empty states the handoff renders below full size. */
+.note{font-size:13px}
+/* Inline checkbox row (subtree delete, delete-old-RDN). */
+.check{display:inline-flex;align-items:center;gap:var(--space-2);font-size:13px;cursor:pointer}
+/* The wizard's required-field marker; accent-700 reads at body size in both themes. */
+.must{color:var(--color-accent-700)}
 
 /* ── Scrollbars ────────────────────────────────────────────────────────────
    Naming scrollbar-width/-color opts Chromium out of its overlay scrollbars, which
@@ -176,6 +186,8 @@
    the title and actions stay pinned on the frame. */
 .wide{width:min(720px,100%);display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-6);border:1px solid var(--color-divider);background:var(--color-bg);box-shadow:var(--shadow-lg);max-height:88vh;min-height:0}
 .dbody{display:flex;flex-direction:column;gap:var(--space-3);overflow:auto;min-height:0;flex:1 1 auto;scrollbar-gutter:stable}
+/* Inside a dialog the flex gap owns vertical rhythm; paragraph margins would double it. */
+.dbody p{margin:0}
 /* Native <dialog> UA overrides (#117): dialog:modal ships overflow:auto — the −6px corner
    marks would re-trigger the measured scrollbar oscillation above, so the panel stays
    overflow:visible and .dbody remains the only scroll container. The UA's color:CanvasText

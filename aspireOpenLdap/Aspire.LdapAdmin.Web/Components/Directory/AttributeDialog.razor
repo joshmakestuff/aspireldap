@@ -5,12 +5,12 @@
     is guidance, not enforcement — free-typed names still go to the server, which stays
     authoritative; a null Schema (unavailable subschema) degrades to the free-text form.
 
-    The model carries the save delegate the shell provides: a returned error renders inline
-    and the dialog closes only on null (success), so a failed write never dismisses the
-    user's input.
+    Save protocol from DialogBase: a returned error renders inline and the dialog closes
+    only on null (success), so a failed write never dismisses the user's input.
 *@
+@inherits DialogBase
 
-<ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="Close" Busy="_busy">
+<ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="CloseAsync" Busy="Busy">
     <ChildContent>
     @if (Model.IsNew)
     {
@@ -51,23 +51,24 @@
         }
         else
         {
-            <textarea class="ta" style="min-height: 120px;" @bind="Model.ValuesText" spellcheck="false"></textarea>
+            <textarea class="ta ta-sm" @bind="Model.ValuesText" spellcheck="false"></textarea>
         }
     </div>
     @if (!Model.IsNew)
     {
-        <p class="text-muted" style="font-size: 13px; margin: 0;">
+        <p class="text-muted note">
             Saving replaces every value of this attribute; saving with no values removes it.
         </p>
     }
-    @if (_error is not null)
+    @if (Error is not null)
     {
-        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@Error</div>
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
-        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Saving…" : "Save")</button>
+        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-primary" disabled="@Busy"
+                @onclick="@(() => SaveAsync(() => Model.SaveAsync(Model)))">@(Busy ? "Saving…" : "Save")</button>
     </Actions>
 </ConsoleDialog>
 
@@ -79,12 +80,6 @@
     [Parameter]
     public LdifDotNet.Schema.LdapSchema? Schema { get; set; }
 
-    /// <summary>Raised when the dialog is done (saved or cancelled); the shell removes it.</summary>
-    [Parameter]
-    public EventCallback OnClose { get; set; }
-
-    private string? _error;
-    private bool _busy;
     private IReadOnlyList<AttributeGuidance> _candidates = [];
 
     private IEnumerable<string> EntryObjectClasses =>
@@ -107,26 +102,5 @@
         _candidates = Schema is null
             ? []
             : SchemaGuide.AddCandidates(Schema, EntryObjectClasses, Model.Entry.Attributes.Select(static a => a.Name));
-    }
-
-    private Task Close() => OnClose.InvokeAsync();
-
-    private async Task SaveAsync()
-    {
-        _busy = true;
-        _error = null;
-        try
-        {
-            _error = await Model.SaveAsync(Model);
-        }
-        finally
-        {
-            _busy = false;
-        }
-
-        if (_error is null)
-        {
-            await Close();
-        }
     }
 }

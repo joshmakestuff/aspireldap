@@ -9,16 +9,17 @@
     malformed input is an inline answer, not a server round trip. When switching the RDN
     attribute would make delete-old-RDN a guaranteed objectClassViolation (the old attribute
     is required and holds only that value), the checkbox unchecks itself and a bar explains
-    why; the server stays authoritative for everything else.
+    why; the server stays authoritative for everything else. Save protocol from DialogBase.
 *@
 @using Aspire.LdapAdmin.Core
 @using LdifDotNet
 @using LdifDotNet.Schema
+@inherits DialogBase
 
-<ConsoleDialog Title="Rename entry" OnCancel="Close" Busy="_busy">
+<ConsoleDialog Title="Rename entry" OnCancel="CloseAsync" Busy="Busy">
     <ChildContent>
     <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
-    <div class="frow" style="grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); margin-bottom: 0;">
+    <div class="frow frow-2">
         <div class="field">
             <label>New RDN attribute</label>
             @if (Schema is not null)
@@ -44,13 +45,13 @@
         <label>New parent DN <span class="text-muted">(leave empty to rename in place)</span></label>
         <input class="input mono" @bind="Model.NewParentDn" @bind:event="oninput" spellcheck="false" />
     </div>
-    <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-        <input type="checkbox" @bind="Model.DeleteOldRdn" disabled="@_busy" />
+    <label class="check">
+        <input type="checkbox" @bind="Model.DeleteOldRdn" disabled="@Busy" />
         Also remove the old name value (<span class="mono">@CurrentRdnDisplay</span>) from the entry
     </label>
     @if (!Model.DeleteOldRdn)
     {
-        <p class="text-muted" style="font-size: 13px; margin: 0;">
+        <p class="text-muted note">
             The old value stays on the entry as an ordinary attribute value.
         </p>
     }
@@ -66,14 +67,14 @@
     {
         <div class="dnline mono" style="margin-top: 0;">becomes @previewDn</div>
     }
-    @if (_error is not null)
+    @if (Error is not null)
     {
-        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@Error</div>
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
-        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Renaming…" : "Rename")</button>
+        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-primary" disabled="@Busy" @onclick="ValidateAndSaveAsync">@(Busy ? "Renaming…" : "Rename")</button>
     </Actions>
 </ConsoleDialog>
 
@@ -85,12 +86,6 @@
     [Parameter]
     public LdapSchema? Schema { get; set; }
 
-    /// <summary>Raised when the dialog is done (saved or cancelled); the shell removes it.</summary>
-    [Parameter]
-    public EventCallback OnClose { get; set; }
-
-    private string? _error;
-    private bool _busy;
     private string _currentRdnAttribute = string.Empty;
     private bool _hazardActive;
 
@@ -208,9 +203,7 @@
         _hazardActive = hazardous;
     }
 
-    private Task Close() => OnClose.InvokeAsync();
-
-    private async Task SaveAsync()
+    private async Task ValidateAndSaveAsync()
     {
         var attribute = Model.RdnAttribute.Trim();
         var value = Model.RdnValue.Trim();
@@ -220,12 +213,12 @@
         // service re-validates authoritatively (RenameEntryAsync).
         if (attribute.Length == 0)
         {
-            _error = "Enter an attribute type for the new RDN.";
+            Error = "Enter an attribute type for the new RDN.";
             return;
         }
         if (value.Length == 0)
         {
-            _error = "Enter a value for the new RDN.";
+            Error = "Enter a value for the new RDN.";
             return;
         }
         try
@@ -236,7 +229,7 @@
         }
         catch (ArgumentException ex)
         {
-            _error = ex.Message;
+            Error = ex.Message;
             return;
         }
         if (parent.Length > 0)
@@ -247,7 +240,7 @@
             }
             catch (ArgumentException ex)
             {
-                _error = $"The new parent is not a valid DN: {ex.Message}";
+                Error = $"The new parent is not a valid DN: {ex.Message}";
                 return;
             }
         }
@@ -256,20 +249,6 @@
         Model.RdnValue = value;
         Model.NewParentDn = parent;
 
-        _busy = true;
-        _error = null;
-        try
-        {
-            _error = await Model.SaveAsync(Model);
-        }
-        finally
-        {
-            _busy = false;
-        }
-
-        if (_error is null)
-        {
-            await Close();
-        }
+        await SaveAsync(() => Model.SaveAsync(Model));
     }
 }

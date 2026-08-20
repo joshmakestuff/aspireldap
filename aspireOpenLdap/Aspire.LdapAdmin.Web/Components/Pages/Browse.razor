@@ -41,7 +41,7 @@
         <div class="conn mono"><i class="led"></i>@Connection.ServerLabel</div>
         <div class="conn mono">bind: @Connection.BindDn</div>
         <button class="btn btn-secondary btn-sm" @onclick="RefreshAsync">Refresh</button>
-        <button class="btn btn-secondary btn-icon btn-sm" style="width: 26px; height: 26px;"
+        <button class="btn btn-secondary btn-icon btn-sm"
                 title="Toggle light/dark theme" aria-label="Toggle light/dark theme"
                 @onclick="ToggleThemeAsync">◐</button>
     </div>
@@ -68,14 +68,16 @@
             </div>
             @if (_root is null)
             {
-                <p class="text-muted" style="font-size: 13px; padding: var(--space-2);">Loading…</p>
+                <p class="text-muted note" style="padding: var(--space-2);">Loading…</p>
             }
             else
             {
                 @foreach (var row in BuildRows())
                 {
                     <button class="trow @row.DepthClass @row.MoreClass" aria-current="@(row.Current ? "true" : null)"
-                            @key="row.Key" @onclick="@(() => OnRowClickAsync(row))">
+                            aria-expanded="@(row.HasTwisty ? (row.Twisty == "▾" ? "true" : "false") : null)"
+                            @key="row.Key" @onclick="@(() => OnRowClickAsync(row))"
+                            @onkeydown="@(e => OnRowKeyDownAsync(e, row))">
                         @if (row.HasTwisty)
                         {
                             <i class="tw tw-on" @onclick="@(() => ToggleAsync(row.Node!))"
@@ -105,7 +107,7 @@
 
                 @if (_loadingEntry)
                 {
-                    <p class="text-muted" style="font-size: 13px;">Loading…</p>
+                    <p class="text-muted note">Loading…</p>
                 }
                 else if (_entry is not null)
                 {
@@ -136,7 +138,7 @@
                 }
                 else if (_error is null)
                 {
-                    <p class="text-muted" style="font-size: 13px;">Select an entry.</p>
+                    <p class="text-muted note">Select an entry.</p>
                 }
             </div>
             <div style="@PanelDisplay(AdminView.Search)">
@@ -521,6 +523,29 @@
         await SelectAsync(node.Dn, reveal: false);
     }
 
+    /// <summary>
+    /// Keyboard expand/collapse on the focused row (the ARIA tree pattern's ArrowRight/
+    /// ArrowLeft): the twisty is a mouse affordance, so without this a keyboard user could
+    /// open a node only via the click handler's expand-and-select, and collapse not at all.
+    /// Enter/Space stay the native button click (select, expanding a closed parent).
+    /// </summary>
+    private async Task OnRowKeyDownAsync(KeyboardEventArgs e, Row row)
+    {
+        if (row.IsMore || row.IsCap || row.Node is not { HasChildren: true } node)
+        {
+            return;
+        }
+
+        if (e.Key == "ArrowRight" && !node.Open)
+        {
+            await ToggleAsync(node);
+        }
+        else if (e.Key == "ArrowLeft" && node.Open)
+        {
+            node.Open = false;
+        }
+    }
+
     // ---- Selection ----------------------------------------------------------------------
 
     /// <summary>The URL is the view state: view + selected dn, both restorable from a deep link.</summary>
@@ -723,21 +748,40 @@
     private void ShowToast(string message)
     {
         _toastCts?.Cancel();
+        _toastCts?.Dispose();
         var cts = new CancellationTokenSource();
         _toastCts = cts;
         _toast = message;
         StateHasChanged();
-        _ = Task.Delay(TimeSpan.FromSeconds(2.6), cts.Token).ContinueWith(t =>
+        _ = ClearToastLaterAsync(cts);
+    }
+
+    /// <summary>
+    /// Clears the toast after its dwell — only if it is still the current one. The cancel
+    /// in ShowToast cannot cover the window where an elapsed timer's clear is already in
+    /// flight when the next toast shows; without the ownership check that stale clear would
+    /// cut the new toast short. The check runs under InvokeAsync, serialized with ShowToast
+    /// on the sync context, so ownership cannot change mid-decision.
+    /// </summary>
+    private async Task ClearToastLaterAsync(CancellationTokenSource cts)
+    {
+        try
         {
-            if (!t.IsCanceled)
+            await Task.Delay(TimeSpan.FromSeconds(2.6), cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return; // A newer toast replaced this one; its own timer owns the clear.
+        }
+
+        await InvokeAsync(() =>
+        {
+            if (ReferenceEquals(_toastCts, cts))
             {
-                _ = InvokeAsync(() =>
-                {
-                    _toast = null;
-                    StateHasChanged();
-                });
+                _toast = null;
+                StateHasChanged();
             }
-        }, TaskScheduler.Default);
+        });
     }
 
     // ---- Entry editing ------------------------------------------------------------------
