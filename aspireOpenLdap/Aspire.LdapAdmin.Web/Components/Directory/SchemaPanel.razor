@@ -13,6 +13,7 @@
     handle is listed rather than dropped.
 *@
 @using LdifDotNet.Schema
+@implements IDisposable
 @inject LdapSchemaService SchemaService
 
 <div class="dh">
@@ -24,7 +25,7 @@
 
 @if (_schema is null)
 {
-    <p class="text-muted" style="font-size: 13px; margin-top: var(--space-4);">Loading schema…</p>
+    <p class="text-muted note" style="margin-top: var(--space-4);">Loading schema…</p>
 }
 else if (!_schema.Available)
 {
@@ -37,14 +38,16 @@ else if (!_schema.Available)
 else
 {
     @* The filter is client-side over an already-loaded schema, so it narrows as you type;
-       bound on 'change' it would only apply on blur, which reads as broken. *@
+       bound on 'change' it would only apply on blur, which reads as broken. Debounced:
+       applying on every keystroke re-filtered all three tables synchronously per key. *@
     <div style="margin-top: var(--space-4);">
-        <input class="input mono" style="max-width: 30rem;" @bind="_query" @bind:event="oninput"
+        <input class="input mono" style="max-width: 30rem;" @bind="_queryInput" @bind:event="oninput"
+               @bind:after="DebounceFilterAsync"
                placeholder="Filter by name, OID, or description" spellcheck="false"
                aria-label="Filter the schema" />
     </div>
 
-    <div class="sec">Object classes — @FilteredClasses.Count</div>
+    <div class="sec">Object classes — @_filteredClasses.Count</div>
     <table class="table">
         <thead>
             <tr>
@@ -55,7 +58,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var objectClass in FilteredClasses)
+            @foreach (var objectClass in _filteredClasses)
             {
                 <tr>
                     <td class="mono">
@@ -66,7 +69,7 @@ else
                         }
                     </td>
                     <td class="mono text-muted">@objectClass.Kind</td>
-                    <td class="mono" style="font-size: 12px;">
+                    <td class="mono">
                         @if (objectClass.Must.Count > 0)
                         {
                             <div><b>MUST</b> @string.Join(", ", objectClass.Must)</div>
@@ -82,7 +85,7 @@ else
         </tbody>
     </table>
 
-    <div class="sec">Attribute types — @FilteredAttributes.Count</div>
+    <div class="sec">Attribute types — @_filteredAttributes.Count</div>
     <table class="table">
         <thead>
             <tr>
@@ -93,7 +96,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var attributeType in FilteredAttributes)
+            @foreach (var attributeType in _filteredAttributes)
             {
                 <tr>
                     <td class="mono">
@@ -111,7 +114,7 @@ else
                             <i class="tk mono" style="margin-left: 6px;">obsolete</i>
                         }
                     </td>
-                    <td style="font-size: 13px;">@attributeType.Description</td>
+                    <td class="note">@attributeType.Description</td>
                     <td class="mono text-muted"><span title="@attributeType.Syntax">@SyntaxLabel(attributeType.Syntax)</span></td>
                     <td class="mono text-muted">@attributeType.SuperiorName</td>
                 </tr>
@@ -119,7 +122,7 @@ else
         </tbody>
     </table>
 
-    <div class="sec">Syntaxes — @FilteredSyntaxes.Count</div>
+    <div class="sec">Syntaxes — @_filteredSyntaxes.Count</div>
     <table class="table">
         <thead>
             <tr>
@@ -129,11 +132,11 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var syntax in FilteredSyntaxes)
+            @foreach (var syntax in _filteredSyntaxes)
             {
                 <tr>
                     <td class="mono">@syntax.Oid</td>
-                    <td style="font-size: 13px;">@syntax.Description</td>
+                    <td class="note">@syntax.Description</td>
                     <td>
                         @if (syntax.NotHumanReadable)
                         {
@@ -152,13 +155,13 @@ else
     @if (_schema.Schema.UnparsedDefinitions.Count > 0)
     {
         <div class="sec">Unparsed — @_schema.Schema.UnparsedDefinitions.Count</div>
-        <p class="text-muted" style="font-size: 13px;">
+        <p class="text-muted note">
             Definitions the parser could not interpret. They are listed rather than dropped,
             so nothing in the server's schema is invisible here.
         </p>
         @foreach (var unparsed in _schema.Schema.UnparsedDefinitions)
         {
-            <p style="font-size: 13px; margin-bottom: var(--space-1);">@unparsed.Kind — @unparsed.Error</p>
+            <p class="note" style="margin-bottom: var(--space-1);">@unparsed.Kind — @unparsed.Error</p>
             <div class="pre mono">@unparsed.Definition</div>
         }
     }
@@ -166,31 +169,72 @@ else
 
 @code {
     private LdapSchemaResult? _schema;
+
+    /// <summary>What the input holds right now; becomes the applied filter after the debounce.</summary>
+    private string _queryInput = string.Empty;
+
+    /// <summary>The applied filter the three tables render from.</summary>
     private string _query = string.Empty;
 
+    private CancellationTokenSource? _debounceCts;
+
     protected override Task OnInitializedAsync() => LoadAsync();
+
+    /// <summary>
+    /// Applies the typed query 200 ms after the last keystroke (the old Fluent filter's
+    /// ImmediateDelay): each keystroke cancels the pending apply, so the three tables
+    /// re-filter once per pause instead of once per key.
+    /// </summary>
+    private async Task DebounceFilterAsync()
+    {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        var cts = _debounceCts = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(200), cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return; // A newer keystroke owns the apply.
+        }
+        _query = _queryInput;
+        ApplyFilter();
+    }
+
+    public void Dispose()
+    {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+    }
 
     private async Task LoadAsync()
     {
         // The service reports an unreadable schema as data (Available = false) rather than
         // throwing, so there is no catch here: every outcome renders.
         _schema = await SchemaService.GetSchemaAsync();
+        ApplyFilter();
     }
 
-    private IReadOnlyList<LdapObjectClass> FilteredClasses =>
-        _schema is null
+    // Filtered once per applied query (ApplyFilter), not per render: renders happen on
+    // every keystroke, and computed-property filtering would still sweep all three lists
+    // each time even while the debounce holds the query steady.
+    private IReadOnlyList<LdapObjectClass> _filteredClasses = [];
+    private IReadOnlyList<LdapAttributeType> _filteredAttributes = [];
+    private IReadOnlyList<LdapSyntax> _filteredSyntaxes = [];
+
+    private void ApplyFilter()
+    {
+        _filteredClasses = _schema is null
             ? []
             : [.. _schema.Schema.ObjectClasses.Where(c => Matches(c.Names, c.Oid, c.Description))];
-
-    private IReadOnlyList<LdapAttributeType> FilteredAttributes =>
-        _schema is null
+        _filteredAttributes = _schema is null
             ? []
             : [.. _schema.Schema.AttributeTypes.Where(a => Matches(a.Names, a.Oid, a.Description))];
-
-    private IReadOnlyList<LdapSyntax> FilteredSyntaxes =>
-        _schema is null
+        _filteredSyntaxes = _schema is null
             ? []
             : [.. _schema.Schema.Syntaxes.Where(s => Matches(s.Names, s.Oid, s.Description))];
+    }
 
     private bool Matches(IReadOnlyList<string> names, string oid, string? description)
     {

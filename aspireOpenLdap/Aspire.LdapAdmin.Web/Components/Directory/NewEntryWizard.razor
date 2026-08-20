@@ -16,8 +16,9 @@
 @using Aspire.LdapAdmin.Core
 @using LdifDotNet
 @using LdifDotNet.Schema
+@inherits DialogBase
 
-<ConsoleDialog Title="New entry" OnCancel="Close" Busy="_busy">
+<ConsoleDialog Title="New entry" OnCancel="CloseAsync" Busy="Busy">
     <ChildContent>
     <div class="steps">
         <span class="step" aria-current="@Current(1)">1 — object class</span>
@@ -65,7 +66,7 @@
         }
         else
         {
-            <p class="text-muted" style="font-size: 13px; margin: 0;">
+            <p class="text-muted note">
                 The server's schema is not readable, so classes are free text; the server decides.
             </p>
             <div class="field">
@@ -81,12 +82,12 @@
             <label>Parent DN</label>
             <input class="input mono" @bind="_parentDn" spellcheck="false" />
         </div>
-        <div class="frow" style="grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); margin-bottom: 0;">
+        <div class="frow frow-2">
             <div class="field">
-                <label>RDN attribute <span style="color: var(--color-accent-700);">·must</span></label>
+                <label>RDN attribute <span class="must">·must</span></label>
                 @if (Schema is not null)
                 {
-                    <select class="input mono" @bind="_rdnAttribute">
+                    <select class="input mono" @bind="_rdnAttribute" @bind:after="InvalidateDerived">
                         @foreach (var name in RdnChoices)
                         {
                             <option value="@name">@name</option>
@@ -95,11 +96,11 @@
                 }
                 else
                 {
-                    <input class="input mono" @bind="_rdnAttribute" spellcheck="false" placeholder="uid" />
+                    <input class="input mono" @bind="_rdnAttribute" @bind:after="InvalidateDerived" spellcheck="false" placeholder="uid" />
                 }
             </div>
             <div class="field">
-                <label>RDN value <span style="color: var(--color-accent-700);">·must</span></label>
+                <label>RDN value <span class="must">·must</span></label>
                 <input class="input mono" @bind="_rdnValue" @bind:event="oninput" spellcheck="false" />
             </div>
         </div>
@@ -117,7 +118,7 @@
                             <span class="mono">@guidance.Name</span>
                             @if (guidance.Required)
                             {
-                                <span style="color: var(--color-accent-700);"> ·must</span>
+                                <span class="must"> ·must</span>
                             }
                             @if (guidance.SyntaxLabel.Length > 0)
                             {
@@ -126,7 +127,7 @@
                             @if (!guidance.Required)
                             {
                                 <button type="button" class="btn btn-ghost btn-sm"
-                                        @onclick="@(() => _added.Remove(guidance.Name))">×</button>
+                                        @onclick="@(() => RemoveMay(guidance.Name))">×</button>
                             }
                         </label>
                         <input class="input mono" spellcheck="false"
@@ -148,7 +149,7 @@
         {
             <div class="field">
                 <label>Attributes <span class="mono text-muted">name: value, one per line</span></label>
-                <textarea class="ta" style="min-height: 120px;" @bind="_freeAttributes" spellcheck="false"
+                <textarea class="ta ta-sm" @bind="_freeAttributes" spellcheck="false"
                           placeholder="cn: Jane Doe&#10;sn: Doe"></textarea>
             </div>
         }
@@ -165,16 +166,16 @@
         <div class="pre mono">@_ldifPreview</div>
     }
 
-    @if (_error is not null)
+    @if (Error is not null)
     {
-        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@Error</div>
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
+        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
         @if (_step > 1)
         {
-            <button class="btn btn-secondary" disabled="@_busy" @onclick="Back">Back</button>
+            <button class="btn btn-secondary" disabled="@Busy" @onclick="Back">Back</button>
         }
         @if (_step < 3)
         {
@@ -182,7 +183,7 @@
         }
         else
         {
-            <button class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">@(_busy ? "Creating…" : "Create entry")</button>
+            <button class="btn btn-primary" disabled="@Busy" @onclick="CreateAsync">@(Busy ? "Creating…" : "Create entry")</button>
         }
     </Actions>
 </ConsoleDialog>
@@ -195,12 +196,7 @@
     [Parameter]
     public LdapSchema? Schema { get; set; }
 
-    [Parameter]
-    public EventCallback OnClose { get; set; }
-
     private int _step = 1;
-    private string? _error;
-    private bool _busy;
 
     // Step 1
     private string _classFilter = string.Empty;
@@ -221,13 +217,47 @@
     private List<string> _missingMust = [];
     private LdapNewEntry? _plan;
 
+    // The schema-derived sets recompute only when their inputs change (picked classes,
+    // RDN attribute, added MAYs), not per render: typing in a step-2 field re-renders on
+    // every keystroke, and re-walking the schema each time was the measured hotspot (#123).
+    private IReadOnlyList<string>? _chainedCache;
+    private (IReadOnlyList<string> Must, IReadOnlyList<string> May)? _setsCache;
+    private IReadOnlyList<string>? _rdnChoicesCache;
+    private IReadOnlyList<AttributeGuidance>? _formFieldsCache;
+    private IReadOnlyList<AttributeGuidance>? _mayCandidatesCache;
+
+    private void InvalidateDerived()
+    {
+        _chainedCache = null;
+        _setsCache = null;
+        _rdnChoicesCache = null;
+        _formFieldsCache = null;
+        _mayCandidatesCache = null;
+    }
+
     protected override void OnInitialized() => _parentDn = Model.ParentDn;
+
+    private LdapSchema? _lastSchema;
+
+    /// <summary>
+    /// A replaced Schema parameter invalidates everything derived from it — and only that:
+    /// parameters re-set on every parent re-render (each toast costs Browse two), so an
+    /// unconditional wipe here would defeat the memoization per keystroke it exists for.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_lastSchema, Schema))
+        {
+            _lastSchema = Schema;
+            InvalidateDerived();
+        }
+    }
 
     private string? Current(int step) => _step == step ? "true" : null;
 
     /// <summary>The picked classes plus every superior they imply, top first.</summary>
     private IReadOnlyList<string> Chained =>
-        Schema is { } schema ? SchemaGuide.WithSuperiors(schema, _picked) : [.. _picked];
+        _chainedCache ??= Schema is { } schema ? SchemaGuide.WithSuperiors(schema, _picked) : [.. _picked];
 
     private bool HasStructural =>
         Schema is { } schema && Chained.Any(name =>
@@ -248,86 +278,84 @@
         {
             _picked.Add(name);
         }
+        InvalidateDerived();
     }
 
     private (IReadOnlyList<string> Must, IReadOnlyList<string> May) Sets =>
-        Schema is { } schema ? SchemaGuide.EffectiveSets(schema, Chained) : ([], []);
+        _setsCache ??= Schema is { } schema ? SchemaGuide.EffectiveSets(schema, Chained) : ([], []);
 
     /// <summary>RDN attribute choices: the effective set, common naming attributes first.</summary>
-    private IReadOnlyList<string> RdnChoices
-    {
-        get
-        {
-            var (must, may) = Sets;
-            var all = must.Concat(may)
-                .Where(static n => !n.Equals("objectClass", StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            all.Sort((a, b) => Preference(a).CompareTo(Preference(b)));
-            return all;
+    private IReadOnlyList<string> RdnChoices => _rdnChoicesCache ??= ComputeRdnChoices();
 
-            static int Preference(string name) => name.ToLowerInvariant() switch
-            {
-                "uid" => 0,
-                "cn" => 1,
-                "ou" => 2,
-                _ => 3,
-            };
-        }
+    private IReadOnlyList<string> ComputeRdnChoices()
+    {
+        var (must, may) = Sets;
+        var all = must.Concat(may)
+            .Where(static n => !n.Equals("objectClass", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        all.Sort((a, b) => Preference(a).CompareTo(Preference(b)));
+        return all;
+
+        static int Preference(string name) => name.ToLowerInvariant() switch
+        {
+            "uid" => 0,
+            "cn" => 1,
+            "ou" => 2,
+            _ => 3,
+        };
     }
 
     /// <summary>MUST fields (minus objectClass and the RDN attribute) plus explicitly added MAYs.</summary>
-    private IReadOnlyList<AttributeGuidance> FormFields
+    private IReadOnlyList<AttributeGuidance> FormFields => _formFieldsCache ??= ComputeFormFields();
+
+    private IReadOnlyList<AttributeGuidance> ComputeFormFields()
     {
-        get
+        if (Schema is not { } schema)
         {
-            if (Schema is not { } schema)
-            {
-                return [];
-            }
-            var (must, _) = Sets;
-            List<AttributeGuidance> fields = [];
-            foreach (var name in must)
-            {
-                if (name.Equals("objectClass", StringComparison.OrdinalIgnoreCase)
-                    || name.Equals(_rdnAttribute, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                fields.Add(SchemaGuide.Describe(schema, name, required: true)
-                    ?? new AttributeGuidance(null!, name, true, false, false, string.Empty));
-            }
-            foreach (var name in _added)
-            {
-                if (SchemaGuide.Describe(schema, name, required: false) is { } guidance)
-                {
-                    fields.Add(guidance);
-                }
-                else
-                {
-                    fields.Add(new AttributeGuidance(null!, name, false, false, false, string.Empty));
-                }
-            }
-            return fields;
+            return [];
         }
+        var (must, _) = Sets;
+        List<AttributeGuidance> fields = [];
+        foreach (var name in must)
+        {
+            if (name.Equals("objectClass", StringComparison.OrdinalIgnoreCase)
+                || name.Equals(_rdnAttribute, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            fields.Add(SchemaGuide.Describe(schema, name, required: true)
+                ?? new AttributeGuidance(null!, name, true, false, false, string.Empty));
+        }
+        foreach (var name in _added)
+        {
+            if (SchemaGuide.Describe(schema, name, required: false) is { } guidance)
+            {
+                fields.Add(guidance);
+            }
+            else
+            {
+                fields.Add(new AttributeGuidance(null!, name, false, false, false, string.Empty));
+            }
+        }
+        return fields;
     }
 
-    private IReadOnlyList<AttributeGuidance> MayCandidates
+    private IReadOnlyList<AttributeGuidance> MayCandidates => _mayCandidatesCache ??= ComputeMayCandidates();
+
+    private IReadOnlyList<AttributeGuidance> ComputeMayCandidates()
     {
-        get
+        if (Schema is not { } schema)
         {
-            if (Schema is not { } schema)
-            {
-                return [];
-            }
-            var (_, may) = Sets;
-            return [.. may
-                .Where(n => !_added.Contains(n, StringComparer.OrdinalIgnoreCase)
-                    && !n.Equals(_rdnAttribute, StringComparison.OrdinalIgnoreCase))
-                .Select(n => SchemaGuide.Describe(schema, n, required: false))
-                .OfType<AttributeGuidance>()
-                .Where(static g => !g.NoUserModification)];
+            return [];
         }
+        var (_, may) = Sets;
+        return [.. may
+            .Where(n => !_added.Contains(n, StringComparer.OrdinalIgnoreCase)
+                && !n.Equals(_rdnAttribute, StringComparison.OrdinalIgnoreCase))
+            .Select(n => SchemaGuide.Describe(schema, n, required: false))
+            .OfType<AttributeGuidance>()
+            .Where(static g => !g.NoUserModification)];
     }
 
     private string FieldValue(string name) => _values.TryGetValue(name, out var value) ? value : string.Empty;
@@ -337,8 +365,15 @@
         if (_mayName.Length > 0 && !_added.Contains(_mayName, StringComparer.OrdinalIgnoreCase))
         {
             _added.Add(_mayName);
+            InvalidateDerived();
         }
         _mayName = string.Empty;
+    }
+
+    private void RemoveMay(string name)
+    {
+        _added.Remove(name);
+        InvalidateDerived();
     }
 
     private string? PreviewDn
@@ -362,23 +397,23 @@
 
     private void Back()
     {
-        _error = null;
+        Error = null;
         _step = Math.Max(1, _step - 1);
     }
 
     private void ContinueStep()
     {
-        _error = null;
+        Error = null;
         if (_step == 1)
         {
             if (Schema is not null && _picked.Count == 0)
             {
-                _error = "Pick at least one object class.";
+                Error = "Pick at least one object class.";
                 return;
             }
             if (Schema is null && _freeClasses.Trim().Length == 0)
             {
-                _error = "Enter at least one object class.";
+                Error = "Enter at least one object class.";
                 return;
             }
             // Default the RDN attribute once classes are known, and re-default it when a
@@ -388,6 +423,7 @@
             if (choices.Count > 0 && !choices.Contains(_rdnAttribute, StringComparer.OrdinalIgnoreCase))
             {
                 _rdnAttribute = choices[0];
+                InvalidateDerived();
             }
             _step = 2;
             return;
@@ -400,12 +436,12 @@
         }
         catch (ArgumentException ex)
         {
-            _error = $"Parent DN: {ex.Message}";
+            Error = $"Parent DN: {ex.Message}";
             return;
         }
         if (_rdnAttribute.Trim().Length == 0 || _rdnValue.Trim().Length == 0)
         {
-            _error = "The RDN attribute and value are required.";
+            Error = "The RDN attribute and value are required.";
             return;
         }
         try
@@ -414,7 +450,7 @@
         }
         catch (ArgumentException ex)
         {
-            _error = ex.Message;
+            Error = ex.Message;
             return;
         }
         _step = 3;
@@ -475,27 +511,11 @@
             new LdifWriterOptions());
     }
 
-    private Task Close() => OnClose.InvokeAsync();
-
     private async Task CreateAsync()
     {
-        if (_plan is not { } plan)
+        if (_plan is { } plan)
         {
-            return;
-        }
-        _busy = true;
-        _error = null;
-        try
-        {
-            _error = await Model.SaveAsync(plan);
-        }
-        finally
-        {
-            _busy = false;
-        }
-        if (_error is null)
-        {
-            await Close();
+            await SaveAsync(() => Model.SaveAsync(plan));
         }
     }
 }

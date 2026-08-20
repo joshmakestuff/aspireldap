@@ -163,4 +163,45 @@ public class BrowseTreeRowsTests
         Assert.Single(rows);
         Assert.Equal("1+", rows[0].Count);
     }
+
+    [Fact]
+    public void Expanded_mirrors_open_state_without_a_filter()
+    {
+        var root = Node("dc=example", capped: false, open: true,
+            Node("ou=open", capped: false, open: true, Node("uid=alice")),
+            Node("ou=closed", capped: false, open: false, Node("uid=bob")));
+
+        var rows = Rows(root);
+
+        Assert.True(rows.Single(r => r.Label == "ou=open").Expanded);
+        Assert.False(rows.Single(r => r.Label == "ou=closed").Expanded);
+    }
+
+    [Fact]
+    public void Expanded_reports_the_rendered_state_for_a_filter_forced_open_ancestor()
+    {
+        // The keyboard handler and aria-expanded read Row.Expanded, never Node.Open: under
+        // a filter an ancestor with a matching descendant renders open while Open is false.
+        var root = Node("dc=example", capped: false, open: true,
+            Node("ou=people", capped: false, open: false, Node("uid=alice")));
+
+        var rows = Rows(root, "alice");
+
+        var ancestor = rows.Single(r => r.Label == "ou=people");
+        Assert.True(ancestor.Expanded);
+        Assert.False(ancestor.Node!.Open); // the saved state the filter's clearing restores
+        Assert.Equal("▾", ancestor.Twisty);
+    }
+
+    [Fact]
+    public void Expanded_is_false_for_a_filtered_node_with_no_visible_children()
+    {
+        var root = Node("dc=example", capped: false, open: true,
+            Node("ou=hosts", capped: true, open: true, Node("uid=printer-9")));
+
+        var rows = Rows(root, "hosts");
+
+        // Matches its own RDN but no loaded child matches: renders closed regardless of Open.
+        Assert.False(rows.Single(r => r.Label == "ou=hosts").Expanded);
+    }
 }

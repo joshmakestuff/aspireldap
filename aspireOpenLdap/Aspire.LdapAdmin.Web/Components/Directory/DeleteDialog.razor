@@ -1,66 +1,41 @@
 @*
     Delete confirmation on the owned ConsoleDialog frame. The DN renders in body markup with
-    word-break, never in the title (docs/findings.md). Save semantics as AttributeDialog.
+    word-break, never in the title (docs/findings.md). Save protocol from DialogBase.
 *@
+@inherits DialogBase
 
-<ConsoleDialog Title="Delete entry" OnCancel="Close" Busy="_busy">
+<ConsoleDialog Title="Delete entry" OnCancel="CloseAsync" Busy="Busy">
     <ChildContent>
     <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
-    <p style="font-size: 13px; margin: 0;">
+    <p class="note">
         The entry is removed from the directory. Entries with children cannot be deleted —
         the server refuses non-leaf deletes — unless the subtree option is checked.
     </p>
-    <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-        <input type="checkbox" @bind="Model.Subtree" disabled="@_busy" />
+    <label class="check">
+        <input type="checkbox" @bind="Model.Subtree" disabled="@Busy" />
         Also delete every entry beneath this one (subtree)
     </label>
     @if (Model.Subtree)
     {
-        <p class="text-muted" style="font-size: 13px; margin: 0;">
+        <p class="text-muted note">
             Deletes depth-first, children before parents, and stops at the first refusal
             naming the entry that failed. The server has no tree-delete control, so this is
             one delete per entry.
         </p>
     }
-    @if (_error is not null)
+    @if (Error is not null)
     {
-        <div class="bar err" role="alert" style="margin-bottom: 0;">@_error</div>
+        <div class="bar err" role="alert" style="margin-bottom: 0;">@Error</div>
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@_busy" @onclick="Close">Cancel</button>
-        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Deleting…" : "Delete")</button>
+        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-primary" disabled="@Busy"
+                @onclick="@(() => SaveAsync(() => Model.SaveAsync(Model)))">@(Busy ? "Deleting…" : "Delete")</button>
     </Actions>
 </ConsoleDialog>
 
 @code {
     [Parameter, EditorRequired]
     public required DeleteDialogModel Model { get; set; }
-
-    [Parameter]
-    public EventCallback OnClose { get; set; }
-
-    private string? _error;
-    private bool _busy;
-
-    private Task Close() => OnClose.InvokeAsync();
-
-    private async Task SaveAsync()
-    {
-        _busy = true;
-        _error = null;
-        try
-        {
-            _error = await Model.SaveAsync(Model);
-        }
-        finally
-        {
-            _busy = false;
-        }
-
-        if (_error is null)
-        {
-            await Close();
-        }
-    }
 }

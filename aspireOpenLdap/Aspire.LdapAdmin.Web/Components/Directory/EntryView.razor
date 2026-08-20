@@ -21,7 +21,7 @@
         </tr>
     </thead>
     <tbody>
-        @foreach (var attr in Rows)
+        @foreach (var attr in _rows)
         {
             var plan = PlanFor(attr);
             <tr>
@@ -102,13 +102,15 @@
     [Parameter]
     public EventCallback<LdapAttributeValues> OnEdit { get; set; }
 
-    private IEnumerable<LdapAttributeValues> Rows =>
-        Entry.Attributes.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase);
+    /// <summary>The entry's attributes in display order, sorted once per parameter change
+    /// (OnParametersSet) rather than on every render.</summary>
+    private IReadOnlyList<LdapAttributeValues> _rows = [];
 
     /// <summary>Attribute names the user explicitly expanded past the display cap.</summary>
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
 
     private string? _entryDn;
+    private LdapEntry? _lastEntry;
 
     private int Cap => Settings.AttributeValueDisplayCap;
 
@@ -117,10 +119,18 @@
 
     /// <summary>
     /// Expansion is per attribute of the entry on screen; showing a different entry resets
-    /// it, so one entry's "show all" can never silently uncap another's.
+    /// it, so one entry's "show all" can never silently uncap another's. The reference
+    /// check gates the sort: Browse assigns a fresh entry object per load, and parameters
+    /// re-set on every parent re-render (toasts, tree keystrokes) with the same object.
     /// </summary>
     protected override void OnParametersSet()
     {
+        if (ReferenceEquals(_lastEntry, Entry))
+        {
+            return;
+        }
+        _lastEntry = Entry;
+        _rows = [.. Entry.Attributes.OrderBy(static a => a.Name, StringComparer.OrdinalIgnoreCase)];
         if (!string.Equals(_entryDn, Entry.Dn, StringComparison.Ordinal))
         {
             _entryDn = Entry.Dn;

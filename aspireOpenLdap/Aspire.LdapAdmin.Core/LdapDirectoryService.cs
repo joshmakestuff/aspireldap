@@ -343,9 +343,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
                 }
                 catch (DirectoryOperationException ex) when (ex.Response is not null)
                 {
-                    var code = ex.Response.ResultCode;
-                    return new LdapOperationResult(Classify(code), code,
-                        $"listing children of '{dn}': {ex.Response.ErrorMessage ?? ex.Message}");
+                    return FromError(ex, $"listing children of '{dn}'");
                 }
                 foreach (SearchResultEntry entry in response.Entries)
                 {
@@ -373,26 +371,11 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
     }
 
     /// <summary>One delete on the walk's shared client; the result names the DN on failure.</summary>
-    private static async Task<LdapOperationResult> DeleteOneAsync(
+    private static Task<LdapOperationResult> DeleteOneAsync(
         OpenLdapClient client,
         string dn,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var response = await client.SendAsync(new DeleteRequest(dn), cancellationToken).ConfigureAwait(false);
-            return response.ResultCode == ResultCode.Success
-                ? LdapOperationResult.Ok()
-                : new LdapOperationResult(Classify(response.ResultCode), response.ResultCode,
-                    $"deleting '{dn}': {response.ErrorMessage}");
-        }
-        catch (DirectoryOperationException ex) when (ex.Response is not null)
-        {
-            var code = ex.Response.ResultCode;
-            return new LdapOperationResult(Classify(code), code,
-                $"deleting '{dn}': {ex.Response.ErrorMessage ?? ex.Message}");
-        }
-    }
+        CancellationToken cancellationToken) =>
+        SendWriteAsync(client, new DeleteRequest(dn), $"deleting '{dn}'", cancellationToken);
 
     /// <summary>
     /// Renames and/or moves an entry, returning its new DN on success. When
@@ -502,19 +485,47 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         CancellationToken cancellationToken)
     {
         using var client = factory.CreateClient();
+        return await SendWriteAsync(client, request, context: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The one classify-and-wrap for every write: sends on the given client and maps the
+    /// outcome — success, a non-success response, or a thrown response — through
+    /// <see cref="Classify"/>. <paramref name="context"/> prefixes the failure message
+    /// (e.g. naming the DN a subtree walk stopped at); null leaves the server's words alone.
+    /// </summary>
+    private static async Task<LdapOperationResult> SendWriteAsync(
+        OpenLdapClient client,
+        DirectoryRequest request,
+        string? context,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
             return response.ResultCode == ResultCode.Success
                 ? LdapOperationResult.Ok()
-                : new LdapOperationResult(Classify(response.ResultCode), response.ResultCode, response.ErrorMessage);
+                : new LdapOperationResult(
+                    Classify(response.ResultCode), response.ResultCode, Contextualize(context, response.ErrorMessage));
         }
         catch (DirectoryOperationException ex) when (ex.Response is not null)
         {
-            var code = ex.Response.ResultCode;
-            return new LdapOperationResult(Classify(code), code, ex.Response.ErrorMessage ?? ex.Message);
+            return FromError(ex, context);
         }
     }
+
+    /// <summary>The one wrap for a thrown response: Classify + Contextualize. Every catch
+    /// of a <see cref="DirectoryOperationException"/> carrying a response goes through
+    /// here, so failure wording cannot drift between the read and write paths.</summary>
+    private static LdapOperationResult FromError(DirectoryOperationException ex, string? context)
+    {
+        var code = ex.Response!.ResultCode;
+        return new LdapOperationResult(Classify(code), code,
+            Contextualize(context, ex.Response.ErrorMessage ?? ex.Message));
+    }
+
+    private static string? Contextualize(string? context, string? message) =>
+        context is null ? message : $"{context}: {message}";
 
     /// <summary>
     /// Maps a server result code onto the outcome classes a UI has to render differently.
