@@ -6,7 +6,7 @@
 
   <!-- Aspire -->
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting" Version="13.5.0" />
+    <PackageVersion Include="Aspire.Hosting" Version="13.5.1" />
     <PackageVersion Include="Aspire.Hosting.Testing" Version="13.5.0" />
   </ItemGroup>
 
@@ -37,7 +37,7 @@
   <!-- Build / packaging -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.400" />
-    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.151" />
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.176" />
   </ItemGroup>
 
   <!-- Test -->
