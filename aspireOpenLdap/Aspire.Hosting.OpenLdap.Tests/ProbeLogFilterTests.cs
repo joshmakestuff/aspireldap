@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
@@ -16,6 +17,8 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 [Trait("Category", "Integration")]
 public class ProbeLogFilterTests : IDisposable
 {
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(5);
+
     private const string AdminDn = "cn=admin,dc=example,dc=org";
     private const string AdminPassword = "probe-filter-test-pw";
 
@@ -176,33 +179,69 @@ public class ProbeLogFilterTests : IDisposable
         Assert.True(run.ExitCode == 0, $"docker run failed: {run.Output}");
         await DockerCli.WaitForLdapReadyAsync(name, AdminDn, AdminPassword, cts.Token);
 
-        // Mimic the AppHost health check exactly: authenticated root-DSE search carrying both
-        // markers (the sentinel attribute and the no-op filter branch).
-        var probe = await LdapSearchAsync(name, cts.Token,
-            "-b", "", "-s", "base", "(|(objectClass=*)(cn=aspire-healthcheck))", "namingContexts", "aspire-healthcheck");
-        Assert.True(probe.ExitCode == 0, $"probe-mimic search failed: {probe.Output}");
+        // The filter's fail-open contract deliberately releases a withheld probe block whole
+        // on any surprise — including a delivery stall past MAX_PENDING_SECONDS, which a
+        // loaded CI runner can produce (#143). So "sentinel absent" is not a guaranteed
+        // property of a single probe. Distinguish the two outcomes instead: a legitimate
+        // fail-open flush surfaces the COMPLETE block (ACCEPT through closed) and merely
+        // costs a retry; a fragment — sentinel without its block, or the root-DSE line
+        // without its sentinel — is a filter bug and fails immediately.
+        var dropped = false;
+        var sliceStart = 0;
+        var daemonLogs = "";
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            // Mimic the AppHost health check exactly: authenticated root-DSE search carrying
+            // both markers (the sentinel attribute and the no-op filter branch).
+            var probe = await LdapSearchAsync(name, cts.Token,
+                "-b", "", "-s", "base", "(|(objectClass=*)(cn=aspire-healthcheck))", "namingContexts", "aspire-healthcheck");
+            Assert.True(probe.ExitCode == 0, $"probe-mimic search failed: {probe.Output}");
 
-        var real = await LdapSearchAsync(name, cts.Token,
-            "-b", "dc=example,dc=org", "(objectClass=organization)");
-        Assert.True(real.ExitCode == 0, $"real search failed: {real.Output}");
+            // A real search doubles as the barrier: slapd logs conns in order and the probe
+            // finished first, so once this attempt's marker reaches the log the probe block
+            // has been resolved — dropped or flushed. Poll (bounded, not a fixed sleep) and
+            // assert only on the foreground daemon's slice — the init-phase slapd
+            // (ldapi-only, unfiltered) legitimately logs its own bootstrap operations.
+            var barrier = $"(uid=probe-barrier-{attempt})";
+            var real = await LdapSearchAsync(name, cts.Token, "-b", "dc=example,dc=org", barrier);
+            Assert.True(real.ExitCode == 0, $"barrier search failed: {real.Output}");
+            daemonLogs = await PollDaemonLogsAsync(name,
+                logs => logs.IndexOf(barrier, Math.Min(sliceStart, logs.Length), StringComparison.Ordinal) >= 0, cts.Token);
+            var barrierAt = daemonLogs.IndexOf(barrier, Math.Min(sliceStart, daemonLogs.Length), StringComparison.Ordinal);
+            Assert.True(barrierAt >= 0,
+                $"barrier search never reached the filtered daemon log:{Environment.NewLine}{daemonLogs}");
+            var slice = daemonLogs[sliceStart..barrierAt];
+            sliceStart = barrierAt + barrier.Length;
 
-        // The filter releases/drops blocks as each conn closes; poll (bounded, not a fixed
-        // sleep) until the real search's block has been delivered to the log.
-        // Only assert on the foreground daemon's output — the init-phase slapd (ldapi-only,
-        // unfiltered) legitimately logs its own bootstrap operations.
-        var daemonLogs = await PollDaemonLogsAsync(name,
-            logs => logs.Contains("SRCH base=\"dc=example,dc=org\"", StringComparison.Ordinal), cts.Token);
+            var sentinelAt = slice.IndexOf("aspire-healthcheck", StringComparison.Ordinal);
+            if (sentinelAt < 0)
+            {
+                // Sentinel gone; the root-DSE line alone would be a partially-dropped block.
+                Assert.False(slice.Contains("SRCH base=\"\" scope=0", StringComparison.Ordinal),
+                    $"probe root-DSE line leaked without its sentinel — block fragment, filter bug:{Environment.NewLine}{slice}");
+                dropped = true;
+                break;
+            }
 
-        // The probe block is gone: no sentinel, no root-DSE search line. Dump the full
-        // filtered slice on failure — docker logs is append-only, so a leaked sentinel is
-        // the whole diagnostic and the default DoesNotContain message truncates it away (#143).
-        Assert.False(daemonLogs.Contains("aspire-healthcheck", StringComparison.Ordinal),
-            $"probe sentinel leaked into the filtered daemon log:{Environment.NewLine}{daemonLogs}");
-        Assert.False(daemonLogs.Contains("SRCH base=\"\" scope=0", StringComparison.Ordinal),
-            $"probe root-DSE search leaked into the filtered daemon log:{Environment.NewLine}{daemonLogs}");
+            // Sentinel surfaced: legitimate only as a whole-block fail-open flush.
+            var lineStart = slice.LastIndexOf('\n', sentinelAt) + 1;
+            var lineEnd = slice.IndexOf('\n', sentinelAt);
+            var sentinelLine = slice[lineStart..(lineEnd < 0 ? slice.Length : lineEnd)];
+            var connId = Regex.Match(sentinelLine, @"conn=([0-9]+)", RegexOptions.None, RegexTimeout).Groups[1].Value;
+            Assert.True(connId.Length > 0,
+                $"sentinel leaked outside any conn block:{Environment.NewLine}{slice}");
+            Assert.True(
+                Regex.IsMatch(slice, $@"conn={connId} fd=[0-9]+ ACCEPT", RegexOptions.None, RegexTimeout)
+                    && Regex.IsMatch(slice, $@"conn={connId} fd=[0-9]+ closed", RegexOptions.None, RegexTimeout),
+                $"probe block fragment leaked (conn={connId}) — filter bug, not a fail-open flush:{Environment.NewLine}{slice}");
+            // Whole block: the fail-open contract fired (CI stall); probe again.
+        }
 
-        // Real traffic is logged: the search block and the readiness whoamis (which also prove
-        // that withheld probe-shaped prefixes get flushed once a conn deviates).
+        Assert.True(dropped,
+            $"probe block was never dropped across 5 attempts:{Environment.NewLine}{daemonLogs}");
+
+        // Real traffic is logged: the barrier search block and the readiness whoamis (which
+        // also prove that withheld probe-shaped prefixes get flushed once a conn deviates).
         Assert.Contains("SRCH base=\"dc=example,dc=org\"", daemonLogs);
         Assert.Contains("EXT oid=1.3.6.1.4.1.4203.1.11.3", daemonLogs);
     }
