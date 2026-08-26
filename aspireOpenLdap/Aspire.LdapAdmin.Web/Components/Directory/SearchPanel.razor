@@ -25,38 +25,117 @@
 <div class="dh">
     <div style="min-width: 0;">
         <h3 style="margin: 0;">Search</h3>
-        <div class="dnline">RFC 4515 filter over the directory; Enter runs it.</div>
+        <div class="dnline">Filter builder over the DIT — the raw filter stays in sync both ways. Enter runs it.</div>
     </div>
 </div>
 
 <div class="sec">Raw filter — RFC 4515</div>
-<input class="input mono" @bind="_filter" @bind:event="oninput" @onkeydown="OnFilterKeyDown"
+<input class="input mono" value="@RawFilter" @oninput="OnRawInput" @onkeydown="OnFilterKeyDown"
        placeholder="(objectClass=inetOrgPerson)" spellcheck="false" aria-label="LDAP filter" />
 
-<div class="grid2" style="margin-top: var(--space-3);">
-    <div class="field">
-        <label>Search base <span class="text-muted">(empty = @Directory.BaseDn)</span></label>
-        <input class="input mono" @bind="_baseDn" @onkeydown="OnFilterKeyDown" spellcheck="false" />
+@* Query builder (design handoff § 2; #111). The builder is the raw filter's flat
+   projection: once the raw field is hand-edited it wins, and the rows below merely
+   mirror what of it they can represent — until a builder control is touched, which
+   adopts the projection and regenerates the raw filter from it. *@
+<div class="sec" style="margin-top: var(--space-4);">
+    Query builder
+    <button class="btn btn-ghost btn-sm" style="order: 1; text-transform: none;"
+            @onclick="@(() => _builderOpen = !_builderOpen)">@(_builderOpen ? "Hide" : "Show")</button>
+</div>
+
+@if (_builderOpen)
+{
+    <div class="grid2">
+        <div class="field">
+            <label>Search base <span class="text-muted">(empty = @Directory.BaseDn)</span></label>
+            <input class="input mono" @bind="_baseDn" @onkeydown="OnFilterKeyDown" spellcheck="false"
+                   list="search-base-options" aria-label="Search base" />
+            <datalist id="search-base-options">
+                @foreach (var option in _baseOptions)
+                {
+                    <option value="@option"></option>
+                }
+            </datalist>
+        </div>
+        <div class="field">
+            <label>Scope</label>
+            <select class="input mono" @bind="_scope">
+                <option value="@SearchScope.Subtree">subtree</option>
+                <option value="@SearchScope.OneLevel">onelevel</option>
+                <option value="@SearchScope.Base">base</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>Join</label>
+            <div class="seg" role="group" aria-label="Condition join">
+                <label class="seg-opt mono">
+                    <input type="radio" name="filter-join" checked="@(DisplayJoin == LdapFilterJoin.All)"
+                           @onchange="@(() => SetJoin(LdapFilterJoin.All))" />
+                    &amp; all
+                </label>
+                <label class="seg-opt mono">
+                    <input type="radio" name="filter-join" checked="@(DisplayJoin == LdapFilterJoin.Any)"
+                           @onchange="@(() => SetJoin(LdapFilterJoin.Any))" />
+                    | any
+                </label>
+            </div>
+        </div>
+        <div class="field">
+            <label>Limit</label>
+            <input class="input mono" type="number" min="1" max="1000" @bind="_limit" />
+        </div>
+        <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" disabled="@_running" @onclick="RunAsync">
+                @(_running ? "Searching…" : "Search")
+            </button>
+        </div>
     </div>
-    <div class="field">
-        <label>Scope</label>
-        <select class="input mono" @bind="_scope">
-            <option value="@SearchScope.Subtree">subtree</option>
-            <option value="@SearchScope.OneLevel">onelevel</option>
-            <option value="@SearchScope.Base">base</option>
-        </select>
+
+    var rows = DisplayRows;
+    <div style="margin-top: var(--space-3);">
+        @for (var i = 0; i < rows.Count; i++)
+        {
+            var index = i;
+            var row = rows[index];
+            <div class="frow">
+                <input class="input mono" value="@row.Attribute" placeholder="attribute" spellcheck="false"
+                       aria-label="Condition attribute" @onkeydown="OnFilterKeyDown"
+                       @oninput="e => SetAttribute(index, e.Value?.ToString() ?? string.Empty)" />
+                <select class="input mono" value="@OperatorKey(row.Operator)" aria-label="Condition operator"
+                        @onchange="e => SetOperator(index, e.Value?.ToString() ?? string.Empty)">
+                    <option value="eq">=</option>
+                    <option value="present">present</option>
+                    <option value="ge">&gt;=</option>
+                    <option value="le">&lt;=</option>
+                </select>
+                <input class="input mono" value="@row.Value" spellcheck="false" aria-label="Condition value"
+                       disabled="@(row.Operator == LdapFilterOperator.Present)"
+                       title="@(row.Operator == LdapFilterOperator.Present ? "Presence has no value" : null)"
+                       @onkeydown="OnFilterKeyDown"
+                       @oninput="e => SetValue(index, e.Value?.ToString() ?? string.Empty)" />
+                <button class="btn btn-ghost btn-sm" title="Remove condition" aria-label="Remove condition"
+                        @onclick="() => RemoveCondition(index)">×</button>
+            </div>
+        }
+        <button class="btn btn-secondary btn-sm" @onclick="AddCondition">Add condition</button>
+        @if (RawIsLossy)
+        {
+            <p class="text-muted note" style="margin-top: var(--space-2);">
+                The raw filter holds structure the builder cannot show; touching a builder
+                control rewrites it to just the rows above.
+            </p>
+        }
     </div>
-    <div class="field">
-        <label>Limit</label>
-        <input class="input mono" type="number" min="1" max="1000" @bind="_limit" />
-    </div>
-    <div class="field">
-        <label>&nbsp;</label>
+}
+else
+{
+    <div style="margin-top: var(--space-3);">
         <button class="btn btn-primary" disabled="@_running" @onclick="RunAsync">
             @(_running ? "Searching…" : "Search")
         </button>
     </div>
-</div>
+}
 
 @if (_error is not null)
 {
@@ -118,7 +197,7 @@
     }
     else
     {
-        <p class="text-muted note">No entry matched. <span class="mono">@_filter</span></p>
+        <p class="text-muted note">No entry matched. <span class="mono">@_ranFilter</span></p>
     }
 }
 
@@ -127,15 +206,121 @@
     [Parameter]
     public EventCallback<string> OnEntrySelected { get; set; }
 
-    private string _filter = "(objectClass=*)";
     private string _baseDn = string.Empty;
     private SearchScope _scope = SearchScope.Subtree;
     private int? _limit;
+
+    // ---- Query builder state (#111) -----------------------------------------------------
+    // The builder rows and join are canonical until the raw filter is hand-edited
+    // (_rawEdited != null); from then the raw string wins and the rows shown are its flat
+    // projection, until a builder control is touched (Adopt), which materializes that
+    // projection and regenerates the raw filter from it — the handoff's rawEdited model.
+
+    private bool _builderOpen = true;
+    private List<ConditionRow> _conds = [new() { Attribute = "objectClass", Operator = LdapFilterOperator.Present }];
+    private LdapFilterJoin _join = LdapFilterJoin.All;
+    private string? _rawEdited;
+    private IReadOnlyList<string> _baseOptions = [];
+
+    /// <summary>The filter the search runs and the raw field shows.</summary>
+    private string RawFilter => _rawEdited ?? LdapFilterConditions.Compose(
+        _conds.Select(static c => c.ToCondition()), _join);
+
+    private LdapFilterParse? RawProjection =>
+        _rawEdited is null ? null : LdapFilterConditions.Parse(_rawEdited);
+
+    private List<ConditionRow> DisplayRows =>
+        RawProjection is { } parse ? [.. parse.Conditions.Select(ConditionRow.From)] : _conds;
+
+    private LdapFilterJoin DisplayJoin => RawProjection?.Join ?? _join;
+
+    private bool RawIsLossy => RawProjection is { Lossy: true };
+
+    private void OnRawInput(ChangeEventArgs args) => _rawEdited = args.Value?.ToString() ?? string.Empty;
+
+    /// <summary>A builder control was touched: the raw projection becomes the state again.</summary>
+    private void Adopt()
+    {
+        if (RawProjection is { } parse)
+        {
+            _conds = [.. parse.Conditions.Select(ConditionRow.From)];
+            _join = parse.Join;
+            _rawEdited = null;
+        }
+    }
+
+    private void SetJoin(LdapFilterJoin join)
+    {
+        Adopt();
+        _join = join;
+    }
+
+    private void SetAttribute(int index, string value)
+    {
+        Adopt();
+        _conds[index].Attribute = value;
+    }
+
+    private void SetOperator(int index, string key)
+    {
+        Adopt();
+        _conds[index].Operator = key switch
+        {
+            "present" => LdapFilterOperator.Present,
+            "ge" => LdapFilterOperator.GreaterOrEqual,
+            "le" => LdapFilterOperator.LessOrEqual,
+            _ => LdapFilterOperator.Equals,
+        };
+    }
+
+    private void SetValue(int index, string value)
+    {
+        Adopt();
+        _conds[index].Value = value;
+    }
+
+    private void AddCondition()
+    {
+        Adopt();
+        _conds.Add(new ConditionRow());
+    }
+
+    private void RemoveCondition(int index)
+    {
+        Adopt();
+        _conds.RemoveAt(index);
+    }
+
+    private static string OperatorKey(LdapFilterOperator op) => op switch
+    {
+        LdapFilterOperator.Present => "present",
+        LdapFilterOperator.GreaterOrEqual => "ge",
+        LdapFilterOperator.LessOrEqual => "le",
+        _ => "eq",
+    };
+
+    /// <summary>One mutable builder row; the record form is what compose/parse speak.</summary>
+    internal sealed class ConditionRow
+    {
+        public string Attribute { get; set; } = string.Empty;
+        public LdapFilterOperator Operator { get; set; } = LdapFilterOperator.Equals;
+        public string Value { get; set; } = string.Empty;
+
+        public LdapFilterCondition ToCondition() => new(Attribute, Operator, Value);
+
+        public static ConditionRow From(LdapFilterCondition condition) => new()
+        {
+            Attribute = condition.Attribute,
+            Operator = condition.Operator,
+            Value = condition.Value,
+        };
+    }
 
     private LdapSearchResult? _result;
     private List<LdapEntry> _displayEntries = [];
     private string _commonSuffix = string.Empty;
     private string? _error;
+    private string _ranFilter = string.Empty;
     private bool _running;
 
     protected override void OnInitialized()
@@ -143,6 +328,34 @@
         // The initial size limit is an AppHost-set default (#98); the field stays editable
         // per search — a default, not a ceiling.
         _limit = Settings.DefaultSearchLimit;
+    }
+
+    /// <summary>
+    /// Search-base suggestions: the base DN plus the directory's OUs, loaded once after
+    /// first render. A datalist, not a select — a pasted or exotic base must stay typable.
+    /// Loading is a convenience; failure just leaves the list empty.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            var ous = await Directory.SearchAsync(new LdapSearchOptions
+            {
+                Filter = "(objectClass=organizationalUnit)",
+                Attributes = ["objectClass"],
+                Limit = 200,
+            });
+            _baseOptions = [Directory.BaseDn, .. ous.Entries.Select(static e => e.Dn)];
+            StateHasChanged();
+        }
+        catch (DirectoryException)
+        {
+        }
     }
 
     /// <summary>
@@ -156,7 +369,19 @@
     {
         _baseDn = baseDn;
         _scope = scope;
-        _filter = filter;
+        // Land in builder-canonical state (handoff § Tree behavior): the preset filter
+        // becomes builder rows when it projects cleanly, else the raw field carries it.
+        var parse = LdapFilterConditions.Parse(filter);
+        if (parse.Lossy)
+        {
+            _rawEdited = filter;
+        }
+        else
+        {
+            _conds = [.. parse.Conditions.Select(ConditionRow.From)];
+            _join = parse.Join;
+            _rawEdited = null;
+        }
         return RunAsync();
     }
 
@@ -172,7 +397,8 @@
 
     private async Task RunAsync()
     {
-        if (string.IsNullOrWhiteSpace(_filter))
+        var filter = RawFilter;
+        if (string.IsNullOrWhiteSpace(filter))
         {
             _error = "Enter a filter.";
             return;
@@ -187,7 +413,7 @@
         {
             result = await Directory.SearchAsync(new LdapSearchOptions
             {
-                Filter = _filter,
+                Filter = filter,
                 BaseDn = string.IsNullOrWhiteSpace(_baseDn) ? null : _baseDn,
                 Scope = _scope,
                 Limit = _limit ?? Settings.DefaultSearchLimit,
@@ -210,6 +436,7 @@
         _running = false;
         _error = error;
         _result = result;
+        _ranFilter = filter;
         _commonSuffix = result is null ? string.Empty : DnDisplay.CommonSuffix([.. result.Entries.Select(static e => e.Dn)]);
         // Display order only — the AppHost-set default (#98). Sorting happens after the
         // (truncation-aware) fetch, so it never changes which entries came back, and it keys
