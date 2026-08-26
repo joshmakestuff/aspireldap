@@ -35,6 +35,7 @@ builder.Services.AddRazorComponents()
 builder.Services.AddScoped<ConsoleToastService>();
 // The one guarded copy-to-clipboard path (#119) — never throws into a handler.
 builder.Services.AddScoped<ConsoleClipboard>();
+builder.Services.AddScoped<ConsoleDownload>();
 
 var app = builder.Build();
 
