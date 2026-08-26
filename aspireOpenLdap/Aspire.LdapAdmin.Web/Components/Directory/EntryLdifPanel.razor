@@ -1,0 +1,114 @@
+@*
+    The LDIF tab (design handoff § 1): the entry as one content record, editable in place.
+    Apply diffs the draft against the entry (LdapEntryLdif.Diff) and stages only the
+    replaces/deletes that make the entry match — parse failures, extra records, changetype
+    records and DN edits are refused with the reason, never guessed at.
+*@
+@using System.DirectoryServices.Protocols
+@inject ConsoleClipboard Clipboard
+@inject ConsoleToastService Toasts
+
+<p class="text-muted note" style="margin-top: var(--space-4);">
+    The entry as <span class="mono">ldapmodify</span> would write it. Edit and apply to stage
+    the changes that make the entry match the draft.
+</p>
+<textarea class="ta mono" rows="@Rows" spellcheck="false" aria-label="Entry LDIF draft"
+          @bind="_draft" @bind:event="oninput"></textarea>
+
+@if (_error is { } error)
+{
+    <div class="bar err" role="alert" style="margin-top: var(--space-4);">@error</div>
+}
+
+<div style="display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4);">
+    <button class="btn btn-secondary btn-sm" @onclick="CopyAsync">Copy</button>
+    @if (ApplyAsync is not null)
+    {
+        @if (Dirty)
+        {
+            <button class="btn btn-ghost btn-sm" @onclick="Revert" disabled="@_busy">Discard edits</button>
+        }
+        <button class="btn btn-primary btn-sm" @onclick="ApplyDraftAsync" disabled="@(!Dirty || _busy)">
+            Apply changes
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public required LdapEntry Entry { get; set; }
+
+    /// <summary>
+    /// Applies the staged changes; returns an error to show inline, or null on success (the
+    /// parent reloads the entry, which regenerates the draft). Absent = read-only LDIF.
+    /// </summary>
+    [Parameter]
+    public Func<IReadOnlyList<LdapAttributeChange>, Task<string?>>? ApplyAsync { get; set; }
+
+    private string _generated = string.Empty;
+    private string _draft = string.Empty;
+    private LdapEntry? _lastEntry;
+    private string? _error;
+    private bool _busy;
+
+    private bool Dirty => !string.Equals(_draft, _generated, StringComparison.Ordinal);
+
+    /// <summary>Room for the whole record up to a bound; the textarea scrolls past it.</summary>
+    private int Rows => Math.Clamp(_generated.Count(static c => c == '\n') + 2, 6, 24);
+
+    protected override void OnParametersSet()
+    {
+        // Fresh entry object = regenerate; re-renders with the same object keep the draft.
+        if (ReferenceEquals(_lastEntry, Entry))
+        {
+            return;
+        }
+        _lastEntry = Entry;
+        _generated = LdapEntryLdif.Write(Entry);
+        _draft = _generated;
+        _error = null;
+        _busy = false;
+    }
+
+    private void Revert()
+    {
+        _draft = _generated;
+        _error = null;
+    }
+
+    private async Task CopyAsync() =>
+        Toasts.Show(await Clipboard.CopyAsync(_draft) ? "LDIF copied" : "copy failed — clipboard unavailable");
+
+    private async Task ApplyDraftAsync()
+    {
+        if (ApplyAsync is null || _busy)
+        {
+            return;
+        }
+
+        var diff = LdapEntryLdif.Diff(Entry, _draft);
+        if (diff.Error is { } error)
+        {
+            _error = error;
+            return;
+        }
+
+        if (diff.Changes is not { Count: > 0 } changes)
+        {
+            _error = null;
+            Toasts.Show("draft matches the entry — nothing to apply");
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await ApplyAsync(changes);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

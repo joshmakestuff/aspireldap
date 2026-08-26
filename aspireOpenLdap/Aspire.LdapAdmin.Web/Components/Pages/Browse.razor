@@ -129,12 +129,32 @@
                     </div>
 
                     <div class="strip" style="margin-top: var(--space-4);">
-                        <div class="stat"><b class="mono">@_entry.Attributes.Count</b><span>attributes</span></div>
-                        <div class="stat"><b class="mono">@_entry.Attributes.Sum(static a => a.Values.Count)</b><span>values</span></div>
-                        <div class="stat"><b class="mono">@ObjectClassCount(_entry)</b><span>object classes</span></div>
+                        @foreach (var tile in EntryStats.For(_entry))
+                        {
+                            <div class="stat"><b class="mono">@tile.Value</b><span>@tile.Label</span></div>
+                        }
                     </div>
 
-                    <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
+                    @* Entry tabs (design handoff § 1). The relationship tab (Members /
+                       Member of) arrives with #101. Panels toggle by display so the
+                       Attributes tab's expand state survives a tab switch. *@
+                    <div class="dtabs" role="tablist" aria-label="Entry detail">
+                        <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Overview)"
+                                @onclick="@(() => _entryTab = EntryTab.Overview)">Overview</button>
+                        <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Attributes)"
+                                @onclick="@(() => _entryTab = EntryTab.Attributes)">Attributes</button>
+                        <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Ldif)"
+                                @onclick="@(() => _entryTab = EntryTab.Ldif)">LDIF</button>
+                    </div>
+                    <div style="@TabDisplay(EntryTab.Overview)">
+                        <EntryOverview Entry="_entry" SaveAsync="ApplyEntryChangesAsync" />
+                    </div>
+                    <div style="@TabDisplay(EntryTab.Attributes)">
+                        <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
+                    </div>
+                    <div style="@TabDisplay(EntryTab.Ldif)">
+                        <EntryLdifPanel Entry="_entry" ApplyAsync="ApplyEntryChangesAsync" />
+                    </div>
                 }
                 else if (_error is null)
                 {
@@ -256,6 +276,45 @@
 
     /// <summary>Hides an inactive panel without destroying it; the wrapper div is owned markup.</summary>
     private string? PanelDisplay(AdminView view) => _view == view ? null : "display: none;";
+
+    // ---- Entry tabs (#113) --------------------------------------------------------------
+
+    private enum EntryTab
+    {
+        Overview,
+        Attributes,
+        Ldif,
+    }
+
+    /// <summary>The active detail tab; survives selecting another entry on purpose.</summary>
+    private EntryTab _entryTab = EntryTab.Overview;
+
+    private string TabSelected(EntryTab tab) => _entryTab == tab ? "true" : "false";
+
+    private string? TabDisplay(EntryTab tab) => _entryTab == tab ? null : "display: none;";
+
+    /// <summary>
+    /// Applies staged changes from the Overview or LDIF tab as one modify, then re-fetches
+    /// the entry so every tab rebuilds from what the server actually holds. Returns the
+    /// error to show inline, or null on success.
+    /// </summary>
+    private async Task<string?> ApplyEntryChangesAsync(IReadOnlyList<LdapAttributeChange> changes)
+    {
+        if (_selectedDn is not { } dn)
+        {
+            return "No entry is selected.";
+        }
+
+        var result = await GuardedAsync(() => Directory.ModifyEntryAsync(dn, changes));
+        if (!result.Succeeded)
+        {
+            return Describe(result);
+        }
+
+        ShowToast($"modify {dn} — {changes.Count} {(changes.Count == 1 ? "change" : "changes")} applied");
+        await SelectAsync(dn, reveal: false);
+        return null;
+    }
 
     // ---- Tree ---------------------------------------------------------------------------
 
@@ -1108,10 +1167,6 @@
             return entry.Dn;
         }
     }
-
-    private static int ObjectClassCount(LdapEntry entry) =>
-        entry.Attributes.FirstOrDefault(static a =>
-            a.Name.Equals("objectClass", StringComparison.OrdinalIgnoreCase))?.Values.Count ?? 0;
 
     /// <summary>The outcome classes a UI renders differently, in words.</summary>
     internal static string Describe(LdapOperationResult result)
