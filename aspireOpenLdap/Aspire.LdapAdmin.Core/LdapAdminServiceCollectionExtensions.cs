@@ -23,6 +23,7 @@ public static class LdapAdminServiceCollectionExtensions
 
         services.TryAddSingleton<LdapSchemaService>();
         services.TryAddSingleton<LdapDirectoryService>();
+        services.TryAddSingleton<LdapLdifService>();
         return services;
     }
 }

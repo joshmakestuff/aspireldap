@@ -1,0 +1,238 @@
+@*
+    The LDIF view (#110, design handoff § 3): subtree export as content records, and
+    change-record import with a parsed plan shown before anything runs. Both halves ride
+    LdapLdifService — import applies through the same guarded write operations as the
+    dialogs, so every app-level protection holds for pasted records too. Hosted like
+    SearchPanel: an always-alive panel in the shell's contextual pane.
+*@
+@using System.DirectoryServices.Protocols
+@using Aspire.LdapAdmin.Web.Components.Pages
+@inject LdapLdifService Ldif
+@inject LdapDirectoryService Directory
+@inject ConsoleClipboard Clipboard
+@inject ConsoleDownload Download
+@inject ConsoleToastService Toasts
+
+<div class="dh">
+    <div style="min-width: 0;">
+        <h3 style="margin: 0;">LDIF</h3>
+        <div class="dnline">Subtree export and change-record import over the directory.</div>
+    </div>
+</div>
+
+<div class="sec">Export — subtree as content records</div>
+<div class="frow-2">
+    <div class="field">
+        <label>Export base <span class="text-muted">(empty = @Directory.BaseDn)</span></label>
+        <input class="input mono" @bind="_exportBase" spellcheck="false" aria-label="Export base"
+               @onkeydown="OnExportKeyDown" />
+    </div>
+    <div class="field">
+        <label>&nbsp;</label>
+        <button class="btn btn-primary" disabled="@_exporting" @onclick="ExportAsync">
+            @(_exporting ? "Exporting…" : "Export")
+        </button>
+    </div>
+</div>
+
+@if (_exportError is not null)
+{
+    <div class="bar err" role="alert" style="margin-top: var(--space-3);">@_exportError</div>
+}
+
+@if (_export is { } export)
+{
+    @if (export.Truncated)
+    {
+        <div class="bar" style="margin-top: var(--space-3);">
+            Showing the first @export.EntryCount entries — the subtree has more. Export a
+            narrower base; the cap is @LdapLdifService.ExportLimit.
+        </div>
+    }
+    <div class="sec" style="margin-top: var(--space-3);">
+        @(export.EntryCount == 1 ? "1 entry" : $"{export.EntryCount} entries")
+    </div>
+    <textarea class="ta mono" readonly aria-label="Subtree LDIF export" value="@export.Ldif"></textarea>
+    <div style="display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2);">
+        <button class="btn btn-secondary btn-sm" @onclick="CopyExportAsync">Copy</button>
+        <button class="btn btn-secondary btn-sm" @onclick="DownloadExportAsync">Download .ldif</button>
+    </div>
+}
+
+<div class="sec" style="margin-top: var(--space-6);">Import — change records</div>
+<p class="text-muted note">
+    Records apply in order through the same guarded operations as the dialogs
+    (<span class="mono">add</span>, <span class="mono">modify</span>,
+    <span class="mono">delete</span>, <span class="mono">moddn</span>; a content record
+    imports as an add). The apply stops at the first failure and says how far it got.
+</p>
+<textarea class="ta ta-sm mono" spellcheck="false" aria-label="LDIF import draft"
+          value="@_importText" @oninput="OnImportInput"></textarea>
+<div style="display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2);">
+    <button class="btn btn-secondary btn-sm" @onclick="ParseImport">Parse</button>
+    @if (_plan is { Error: null, Items.Count: > 0 } plan)
+    {
+        <button class="btn btn-primary btn-sm" disabled="@_applying" @onclick="ApplyAsync">
+            @(_applying ? "Applying…" : $"Apply {plan.Items.Count}")
+        </button>
+    }
+</div>
+
+@if (_plan is { Error: { } planError })
+{
+    <div class="bar err" role="alert" style="margin-top: var(--space-3);">@planError</div>
+}
+@if (_plan is { Error: null, Items.Count: > 0 })
+{
+    <table class="table" style="margin-top: var(--space-3);">
+        <thead>
+            <tr>
+                <th style="width: 90px;">Changetype</th>
+                <th>DN</th>
+                <th style="width: 110px;">Attributes</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in _plan.Items)
+            {
+                <tr>
+                    <td class="mono">@item.ChangeType</td>
+                    <td class="mono" style="overflow-wrap: anywhere;">@item.Dn</td>
+                    <td class="mono">@(item.DetailCount > 0 ? item.DetailCount.ToString() : "—")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (_applyResult is { } applied)
+{
+    @if (applied.Succeeded)
+    {
+        <div class="bar" role="status" style="margin-top: var(--space-3);">
+            Applied @(applied.Total == 1 ? "1 record" : $"all {applied.Total} records").
+        </div>
+    }
+    else
+    {
+        <div class="bar err" role="alert" style="margin-top: var(--space-3);">
+            Applied @applied.Applied of @applied.Total records, then stopped at
+            <span class="mono">@applied.FailedDn</span> — @Browse.Describe(applied.Outcome)
+            The applied records stay applied.
+        </div>
+    }
+}
+
+@code {
+    private string _exportBase = string.Empty;
+    private LdifExportResult? _export;
+    private string? _exportError;
+    private bool _exporting;
+
+    private string _importText = string.Empty;
+    private LdifImportPlan? _plan;
+    private LdifApplyResult? _applyResult;
+    private bool _applying;
+
+    private async Task OnExportKeyDown(KeyboardEventArgs args)
+    {
+        if (string.Equals(args.Key, "Enter", StringComparison.Ordinal))
+        {
+            await ExportAsync();
+        }
+    }
+
+    private async Task ExportAsync()
+    {
+        _exporting = true;
+        _exportError = null;
+        try
+        {
+            _export = await Ldif.ExportSubtreeAsync(_exportBase);
+        }
+        catch (DirectoryException ex)
+        {
+            _export = null;
+            _exportError = $"The export failed ({ex.GetType().Name}): {ex.Message}";
+        }
+        catch (ArgumentException ex)
+        {
+            _export = null;
+            _exportError = ex.Message;
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private async Task CopyExportAsync()
+    {
+        if (_export is { } export)
+        {
+            Toasts.Show(await Clipboard.CopyAsync(export.Ldif) ? "LDIF copied" : "copy failed — clipboard unavailable");
+        }
+    }
+
+    private async Task DownloadExportAsync()
+    {
+        if (_export is { } export)
+        {
+            var saved = await Download.SaveAsync(ExportFileName(_exportBase, Directory.BaseDn), export.Ldif);
+            if (!saved)
+            {
+                Toasts.Show("download failed — browser unavailable");
+            }
+        }
+    }
+
+    /// <summary>A filesystem-safe name derived from the exported base DN.</summary>
+    internal static string ExportFileName(string exportBase, string baseDn)
+    {
+        var dn = string.IsNullOrWhiteSpace(exportBase) ? baseDn : exportBase.Trim();
+        var safe = new string([.. dn.Select(static c => char.IsLetterOrDigit(c) ? c : '-')]);
+        return $"{(safe.Length > 0 ? safe : "export")}.ldif";
+    }
+
+    /// <summary>Editing the text orphans any parsed plan — Apply must match what is on screen.</summary>
+    private void OnImportInput(ChangeEventArgs args)
+    {
+        _importText = args.Value?.ToString() ?? string.Empty;
+        _plan = null;
+        _applyResult = null;
+    }
+
+    private void ParseImport()
+    {
+        _applyResult = null;
+        _plan = LdapLdifService.ParsePlan(_importText);
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (_plan is not { Error: null, Items.Count: > 0 } plan || _applying)
+        {
+            return;
+        }
+
+        _applying = true;
+        try
+        {
+            // Transport failures come back as a Failed outcome with the progress count —
+            // the service guards per record, so this cannot throw for directory reasons.
+            _applyResult = await Ldif.ApplyAsync(plan.Items);
+        }
+        finally
+        {
+            _applying = false;
+            // The plan is consumed either way: a second click must re-parse against the
+            // directory's new state, never re-run records that already applied.
+            _plan = null;
+        }
+
+        if (_applyResult is { Succeeded: true, Total: var total })
+        {
+            Toasts.Show($"ldapmodify — {total} {(total == 1 ? "record" : "records")} applied");
+        }
+    }
+}

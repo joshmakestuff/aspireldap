@@ -163,3 +163,16 @@ export function closeModal() {
   restoreTo = null;
   netRef = null;
 }
+
+export function downloadText(filename, text) {
+  // Client-side save of an export the server already streamed as component state; a Blob
+  // URL avoids re-fetching and works offline from the rendered page.
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

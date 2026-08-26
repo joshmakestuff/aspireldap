@@ -16,15 +16,16 @@ public static class LdapEntryLdif
     /// The entry as one LDIF content record — objectClass values first, then the remaining
     /// attributes in server order; binary values as base64.
     /// </summary>
-    public static string Write(LdapEntry entry)
-    {
-        var ordered = entry.Attributes
+    public static string Write(LdapEntry entry) =>
+        LdifWriter.WriteToString([ToRecord(entry)], WriterOptions);
+
+    /// <summary>The entry as a content record; shared with the LDIF view's subtree export.</summary>
+    public static LdifContentRecord ToRecord(LdapEntry entry) =>
+        new(entry.Dn, entry.Attributes
             .OrderBy(static a => IsObjectClass(a.Name) ? 0 : 1)
             .Select(static a => new LdifAttribute(a.Name, a.Values.Select(value => a.IsBinary
                 ? LdifValue.FromBytes(Convert.FromBase64String(value))
-                : LdifValue.FromString(value))));
-        return LdifWriter.WriteToString([new LdifContentRecord(entry.Dn, ordered)], WriterOptions);
-    }
+                : LdifValue.FromString(value)))));
 
     /// <summary>
     /// Diffs an edited draft against the entry it was generated from. On success,

@@ -51,6 +51,8 @@
                 @onclick="@(() => SwitchView(AdminView.Browse))">Directory</button>
         <button class="vt" role="tab" aria-selected="@Selected(AdminView.Search)"
                 @onclick="@(() => SwitchView(AdminView.Search))">Search</button>
+        <button class="vt" role="tab" aria-selected="@Selected(AdminView.Ldif)"
+                @onclick="@(() => SwitchView(AdminView.Ldif))">LDIF</button>
         <button class="vt" role="tab" aria-selected="@Selected(AdminView.Schema)"
                 @onclick="@(() => SwitchView(AdminView.Schema))">Schema</button>
     </div>
@@ -164,6 +166,12 @@
             <div style="@PanelDisplay(AdminView.Search)">
                 <SearchPanel @ref="_searchPanel" OnEntrySelected="OnSearchEntrySelected" />
             </div>
+            @if (_ldifVisited)
+            {
+                <div style="@PanelDisplay(AdminView.Ldif)">
+                    <LdifPanel />
+                </div>
+            }
             @if (_schemaVisited)
             {
                 <div style="@PanelDisplay(AdminView.Schema)">
@@ -254,7 +262,7 @@
     [SupplyParameterFromQuery(Name = "view")]
     public string? ViewParam { get; set; }
 
-    internal enum AdminView { Browse, Search, Schema }
+    internal enum AdminView { Browse, Search, Ldif, Schema }
 
     private AdminView _view = AdminView.Browse;
 
@@ -265,9 +273,13 @@
     /// </summary>
     private bool _schemaVisited;
 
+    /// <summary>Same lazy-then-alive pattern for the LDIF view (#110).</summary>
+    private bool _ldifVisited;
+
     private string ViewTitle => _view switch
     {
         AdminView.Search => "Search",
+        AdminView.Ldif => "LDIF",
         AdminView.Schema => "Schema",
         _ => "Directory",
     };
@@ -389,10 +401,12 @@
         _view = ViewParam?.ToLowerInvariant() switch
         {
             "search" => AdminView.Search,
+            "ldif" => AdminView.Ldif,
             "schema" => AdminView.Schema,
             _ => AdminView.Browse,
         };
         _schemaVisited |= _view == AdminView.Schema;
+        _ldifVisited |= _view == AdminView.Ldif;
 
         if (DeepLinkDn is { Length: > 0 } dn && !string.Equals(dn, _selectedDn, StringComparison.Ordinal))
         {
@@ -622,7 +636,7 @@
     private static string Url(AdminView view, string? dn)
     {
         var query = new List<string>(2);
-        if (view is AdminView.Search or AdminView.Schema)
+        if (view is AdminView.Search or AdminView.Ldif or AdminView.Schema)
         {
             query.Add($"view={view.ToString().ToLowerInvariant()}");
         }
