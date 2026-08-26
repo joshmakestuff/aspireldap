@@ -227,7 +227,7 @@ public class ProbeLogFilterTests : IDisposable
             var lineStart = slice.LastIndexOf('\n', sentinelAt) + 1;
             var lineEnd = slice.IndexOf('\n', sentinelAt);
             var sentinelLine = slice[lineStart..(lineEnd < 0 ? slice.Length : lineEnd)];
-            var connId = Regex.Match(sentinelLine, @"conn=([0-9]+)", RegexOptions.None, RegexTimeout).Groups[1].Value;
+            var connId = Regex.Match(sentinelLine, @"conn=(?<id>[0-9]+)", RegexOptions.ExplicitCapture, RegexTimeout).Groups["id"].Value;
             Assert.True(connId.Length > 0,
                 $"sentinel leaked outside any conn block:{Environment.NewLine}{slice}");
             Assert.True(
