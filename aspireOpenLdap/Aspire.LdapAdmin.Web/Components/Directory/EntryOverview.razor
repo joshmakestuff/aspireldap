@@ -1,0 +1,231 @@
+@*
+    The Overview tab (design handoff § 1): a .grid2 of labeled fields for the entry's kind,
+    then the object classes as outline chips. Fields edit in place and save as Replace
+    operations; a field whose attribute is multi-valued or binary is read-only here — the
+    Attributes tab owns those shapes, and a single input cannot honestly represent them.
+*@
+@using System.DirectoryServices.Protocols
+
+<div class="grid2" style="margin-top: var(--space-4);">
+    @foreach (var field in _fields)
+    {
+        <div class="field">
+            <label>@field.Label <span class="mono" style="opacity: .55;">@field.Attribute</span></label>
+            @if (field.Editable)
+            {
+                <input class="input mono" spellcheck="false" @bind="field.Draft" @bind:event="oninput" />
+            }
+            else
+            {
+                <input class="input mono" readonly value="@field.Draft" title="@field.ReadOnlyReason" />
+            }
+        </div>
+    }
+</div>
+
+<div class="sec" style="margin-top: var(--space-6);">Object classes</div>
+<div style="display: flex; flex-wrap: wrap; gap: var(--space-2);">
+    @foreach (var objectClass in _objectClasses)
+    {
+        <span class="tag tag-outline mono">@objectClass</span>
+    }
+    @if (_objectClasses.Count == 0)
+    {
+        <span class="text-muted note">none readable</span>
+    }
+</div>
+
+@if (_error is { } error)
+{
+    <div class="bar err" role="alert" style="margin-top: var(--space-4);">@error</div>
+}
+
+@if (SaveAsync is not null)
+{
+    <div style="display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4);">
+        @if (Dirty)
+        {
+            <button class="btn btn-ghost btn-sm" @onclick="Revert" disabled="@_busy">Discard edits</button>
+        }
+        <button class="btn btn-primary btn-sm" @onclick="SaveChangesAsync" disabled="@(!Dirty || _busy)">
+            Save changes
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public required LdapEntry Entry { get; set; }
+
+    /// <summary>
+    /// Applies the changes; returns an error to show inline, or null on success (the parent
+    /// reloads the entry, which rebuilds this tab). Absent = read-only overview.
+    /// </summary>
+    [Parameter]
+    public Func<IReadOnlyList<LdapAttributeChange>, Task<string?>>? SaveAsync { get; set; }
+
+    private List<OverviewField> _fields = [];
+    private IReadOnlyList<string> _objectClasses = [];
+    private LdapEntry? _lastEntry;
+    private string? _error;
+    private bool _busy;
+
+    private bool Dirty => _fields.Any(static f => f.Editable && !string.Equals(f.Draft, f.Original, StringComparison.Ordinal));
+
+    protected override void OnParametersSet()
+    {
+        // Fresh entry object = (re)build; re-renders with the same object keep drafts.
+        if (ReferenceEquals(_lastEntry, Entry))
+        {
+            return;
+        }
+        _lastEntry = Entry;
+        _error = null;
+        _busy = false;
+        _fields = [.. BuildFields(Entry)];
+        _objectClasses = FindAttribute(Entry, "objectClass")?.Values ?? [];
+    }
+
+    private void Revert()
+    {
+        foreach (var field in _fields)
+        {
+            field.Draft = field.Original;
+        }
+    }
+
+    private async Task SaveChangesAsync()
+    {
+        if (SaveAsync is null || _busy)
+        {
+            return;
+        }
+
+        var changes = PlanChanges(_fields);
+        if (changes.Count == 0)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await SaveAsync(changes);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// The saves a dirty field set implies: a cleared field deletes its attribute (when it
+    /// existed), anything else replaces the whole attribute with the single edited value —
+    /// which is honest exactly because multi-valued fields are never editable here.
+    /// </summary>
+    internal static IReadOnlyList<LdapAttributeChange> PlanChanges(IEnumerable<OverviewField> fields)
+    {
+        var changes = new List<LdapAttributeChange>();
+        foreach (var field in fields)
+        {
+            if (!field.Editable || string.Equals(field.Draft, field.Original, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (field.Draft.Length == 0)
+            {
+                if (field.Existed)
+                {
+                    changes.Add(new LdapAttributeChange(DirectoryAttributeOperation.Delete, field.Attribute, []));
+                }
+            }
+            else
+            {
+                changes.Add(new LdapAttributeChange(DirectoryAttributeOperation.Replace, field.Attribute, [field.Draft]));
+            }
+        }
+
+        return changes;
+    }
+
+    /// <summary>The kind's field set (design handoff § 1), bound to the entry's values.</summary>
+    internal static IEnumerable<OverviewField> BuildFields(LdapEntry entry)
+    {
+        foreach (var (label, attribute) in FieldSpec(entry))
+        {
+            var current = FindAttribute(entry, attribute);
+            var value = current is { IsBinary: false } ? current.Values.FirstOrDefault() ?? string.Empty : string.Empty;
+            var reason = current switch
+            {
+                { IsBinary: true } => "Binary — edit in the Attributes tab",
+                { Values.Count: > 1 } => "Multi-valued — edit in the Attributes tab",
+                _ => null,
+            };
+            yield return new OverviewField
+            {
+                Label = label,
+                Attribute = attribute,
+                Original = value,
+                Draft = value,
+                Existed = current is not null,
+                ReadOnlyReason = reason,
+            };
+        }
+    }
+
+    internal static IReadOnlyList<(string Label, string Attribute)> FieldSpec(LdapEntry entry) =>
+        LdapEntryKinds.Classify(entry) switch
+        {
+            LdapEntryKind.Person =>
+            [
+                ("Display name", "cn"), ("Surname", "sn"), ("Given name", "givenName"),
+                ("Email", "mail"), ("Login name", "uid"), ("UID number", "uidNumber"),
+                ("Primary GID", "gidNumber"), ("Home directory", "homeDirectory"),
+                ("Login shell", "loginShell"), ("Title", "title"),
+            ],
+            LdapEntryKind.Group => [("Group name", "cn"), ("Description", "description")],
+            _ => [("Name", ContainerNameAttribute(entry)), ("Description", "description")],
+        };
+
+    /// <summary>
+    /// The attribute that names a container: whichever of ou/o the entry actually carries,
+    /// else the RDN's own attribute type (a dc entry names itself with dc).
+    /// </summary>
+    private static string ContainerNameAttribute(LdapEntry entry)
+    {
+        if (FindAttribute(entry, "ou") is not null)
+        {
+            return "ou";
+        }
+        if (FindAttribute(entry, "o") is not null)
+        {
+            return "o";
+        }
+
+        try
+        {
+            return LdifDotNet.Dn.Parse(entry.Dn)[0].Attributes[0].Type;
+        }
+        catch (ArgumentException)
+        {
+            return "ou";
+        }
+    }
+
+    private static LdapAttributeValues? FindAttribute(LdapEntry entry, string name) =>
+        entry.Attributes.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>One Overview field: its spec, its saved value, and the edit in progress.</summary>
+    internal sealed class OverviewField
+    {
+        public required string Label { get; init; }
+        public required string Attribute { get; init; }
+        public required string Original { get; init; }
+        public required string Draft { get; set; }
+        public required bool Existed { get; init; }
+        public string? ReadOnlyReason { get; init; }
+        public bool Editable => ReadOnlyReason is null;
+    }
+}
