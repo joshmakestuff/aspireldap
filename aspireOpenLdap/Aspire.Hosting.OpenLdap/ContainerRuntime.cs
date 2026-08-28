@@ -27,7 +27,7 @@ internal static class ContainerRuntime
     }
 
     /// <summary>
-/// Resolves the container runtime the dashboard commands shell out to. An explicit
+    /// Resolves the container runtime the dashboard commands shell out to. An explicit
     /// configuration is authoritative — used as-is so a misconfiguration fails loudly on use
     /// rather than being silently papered over. With no configuration, mirror Aspire's own
     /// behavior of probing known runtimes (DCP auto-detects when unconfigured, so LDAP can be
