@@ -26,7 +26,7 @@ internal static class OpenLdapMounts
     /// target survives rebuilds, and the placeholder exists because a bind mount needs a file at
     /// start time — the real content is written by the caller's <c>OnBeforeResourceStarted</c> hook.
     /// The deterministic path means parallel builders can prepare the same file (test threads,
-    /// concurrent test processes), so creation must be atomic and must never truncate (#128).
+    /// concurrent test processes), so creation must be atomic and must never truncate.
     /// </summary>
     internal static string PrepareGeneratedFile(
         IResourceBuilder<OpenLdapResource> builder, string directoryName, string fileName)

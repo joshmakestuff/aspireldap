@@ -5,9 +5,9 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// <summary>
 /// Docker-driven regressions for container bootstrap semantics:
 /// <list type="bullet">
-/// <item><c>LDAP_ACCESSLOG_ADMIN_PASSWORD</c> is honored (it used to be silently overwritten
-/// by the <c>LDAP_ACCESSLOG_PASSWORD</c> alias's default, leaving the known default password
-/// active on the access-log database),</item>
+/// <item><c>LDAP_ACCESSLOG_ADMIN_PASSWORD</c> overrides the <c>LDAP_ACCESSLOG_PASSWORD</c>
+/// alias's default, so the known default password is never left active on the access-log
+/// database,</item>
 /// <item>default-tree user passwords are stored hashed, not as recoverable cleartext,</item>
 /// <item>a <c>c=</c> root longer than two characters fails validation up front instead of
 /// dying mid-bootstrap on an opaque olcSuffix syntax error,</item>
@@ -68,8 +68,8 @@ public class BootstrapRegressionTests : IDisposable
         const string resolve =
             ". /opt/openldap/scripts/libopenldap.sh && eval \"$(ldap_env)\" && printf 'resolved=%s' \"$LDAP_ACCESSLOG_ADMIN_PASSWORD\"";
 
-        // Migration path: the canonical setting was added while an obsolete alias _FILE
-        // reference (whose secret is no longer mounted) is still present. The alias is not
+        // Migration path: an obsolete alias _FILE reference (whose secret is not
+        // mounted) is still present alongside the canonical setting. The alias is not
         // the selected credential source, so the stale file must be ignored, not fatal.
         var migration = await DockerCli.RunAsync(cts.Token,
             "run", "--rm",
@@ -352,8 +352,8 @@ public class BootstrapRegressionTests : IDisposable
         var image = await BundledImage.GetAsync(cts.Token);
         var name = NewContainer();
 
-        // '\;' is the RFC 4514-escaped form the model validation accepts (#35 rejects only
-        // the raw unescaped ';'); it must bootstrap and decode to a literal ';' in the value.
+        // '\;' is the RFC 4514-escaped form the model validation accepts (only
+        // the raw unescaped ';' is rejected); it must bootstrap and decode to a literal ';' in the value.
         const string root = "o=Acme\\; Inc.";
         var run = await DockerCli.RunAsync(cts.Token,
             "run", "-d", "--name", name,
@@ -394,8 +394,7 @@ public class BootstrapRegressionTests : IDisposable
 
         // A dangling trailing backslash is invalid RFC 4514. End-to-end contract: the
         // container must die loudly (slapd rejects the suffix at the privileged cn=config
-        // apply) and never serve a silently altered directory — the pre-fix unescaper
-        // swallowed the backslash, which would have bootstrapped "o=Acme" instead.
+        // apply) and never serve a silently altered directory.
         var run = await DockerCli.RunAsync(cts.Token,
             "run", "--rm",
             "-e", $"LDAP_ADMIN_PASSWORD={AdminPassword}",
@@ -482,8 +481,8 @@ public class BootstrapRegressionTests : IDisposable
         var slapcat = await DockerCli.RunAsync(cts.Token, "exec", name, "slapcat", "-b", root);
         Assert.True(slapcat.ExitCode == 0, $"slapcat failed: {slapcat.Output}");
 
-        // The naming value decodes to "Acme, Inc."; the pre-fix behavior emitted a second,
-        // mangled attribute value with the backslash stripped ("Acme2C Inc.").
+        // The naming value decodes to "Acme, Inc.", not a second mangled attribute value
+        // with the backslash stripped ("Acme2C Inc.").
         Assert.Contains("o: Acme, Inc.", slapcat.Output);
         Assert.DoesNotContain("o: Acme2C", slapcat.Output);
     }

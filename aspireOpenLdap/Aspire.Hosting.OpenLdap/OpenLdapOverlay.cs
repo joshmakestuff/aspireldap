@@ -107,9 +107,9 @@ public sealed class OpenLdapOverlay
     /// </summary>
     /// <param name="checkpoint">
     /// <c>olcSpCheckpoint</c> as <c>"&lt;ops&gt; &lt;minutes&gt;"</c>; both values must be positive
-    /// integers. Default <c>"1 1"</c>, the measured dev-right value: it keeps <c>contextCSN</c>
-    /// durable across unclean container stops, where the production-style <c>"100 10"</c>
-    /// regressed the CSN by minutes and made resuming clients replay seen changes.
+    /// integers. Default <c>"1 1"</c> keeps <c>contextCSN</c> durable across unclean container
+    /// stops; a larger checkpoint interval can regress the CSN, making resuming clients replay
+    /// seen changes.
     /// </param>
     /// <param name="sessionLog">
     /// <c>olcSpSessionLog</c> size. Must be at least 1. Default 100: gives delta deletes on a

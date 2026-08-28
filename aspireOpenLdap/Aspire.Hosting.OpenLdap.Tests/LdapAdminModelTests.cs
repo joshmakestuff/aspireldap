@@ -6,11 +6,10 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Model-level tests for <c>WithLdapAdmin()</c> (#78): resource shape, the configuration
+/// Model-level tests for <c>WithLdapAdmin()</c>: resource shape, the configuration
 /// contract the admin host reads, the packaged-payload guard, and the TLS arm. All tests share
 /// one class because they create/delete the fabricated payload under the fixed
 /// <c>AppContext.BaseDirectory/ldapadmin</c> path, and same-class tests run sequentially.
-/// The real packed payload is exercised end-to-end by the clean-consumer test (#82).
 /// </summary>
 public class LdapAdminModelTests
 {
@@ -94,7 +93,7 @@ public class LdapAdminModelTests
 
         Assert.Equal("ldap", env["LdapAdmin__ConnectionName"]);
 
-        // The options contract (#98) is always emitted, defaults included, so the env the
+        // The options contract is always emitted, defaults included, so the env the
         // admin binds states the whole surface even when no options were configured.
         Assert.Equal("System", env["LdapAdmin__Theme"]);
         Assert.Equal("100", env["LdapAdmin__DefaultSearchLimit"]);

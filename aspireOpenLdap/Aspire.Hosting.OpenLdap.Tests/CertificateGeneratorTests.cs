@@ -9,8 +9,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
 /// The generated-certificate cache must only be reused when the full set (CA, server cert,
-/// server key) is valid and mutually consistent — a corrupt or mismatched cached file used
-/// to survive as "fresh" for up to two years as long as server.crt itself parsed.
+/// server key) is valid and mutually consistent.
 /// </summary>
 public class CertificateGeneratorTests : IDisposable
 {
@@ -63,8 +62,7 @@ public class CertificateGeneratorTests : IDisposable
         var certs = OpenLdapCertificateGenerator.EnsureCertificates(_appHostDir, "ldap");
         var originalCert = File.ReadAllText(certs.ServerCertPath);
 
-        // A parseable CA that did NOT sign the cached server certificate — the old
-        // expiry-only check accepted this silently.
+        // A parseable CA that did NOT sign the cached server certificate.
         using (var key = ECDsa.Create(ECCurve.NamedCurves.nistP256))
         {
             var request = new CertificateRequest("CN=Unrelated CA", key, HashAlgorithmName.SHA256);

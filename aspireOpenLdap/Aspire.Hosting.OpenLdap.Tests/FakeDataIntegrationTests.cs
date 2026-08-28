@@ -24,7 +24,7 @@ public class FakeDataIntegrationTests(AppHostFixture appHost)
         var started = await appHost.StartAsync(TestAppHostScenarios.FakeData, cts.Token);
         var settings = started.Settings;
 
-        // #72: emitter equivalence on the plain no-CaCertFile arm — Build() must reproduce real
+        // Emitter equivalence on the plain no-CaCertFile arm — Build() must reproduce real
         // hosting output byte for byte, or a consumer that writes its own connection string
         // (AspireLdapAdmin) drifts from the one the integration emits.
         Assert.Equal(started.ConnectionString, settings.Build());

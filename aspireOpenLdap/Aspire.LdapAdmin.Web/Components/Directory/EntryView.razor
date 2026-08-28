@@ -33,7 +33,7 @@
                     }
                     @if (attr.Values.Count > 1)
                     {
-                        @* Paired with the display cap (#98): while capped the badge itself
+                        @* Paired with the display cap: while capped the badge itself
                            says "N of M values", so the cap is surfaced next to the name too. *@
                         <i class="tk mono" style="margin-left: 6px;">@CountBadge(plan)</i>
                     }
@@ -45,7 +45,7 @@
                     }
                     else
                     {
-                        @* Display cap (#98, absorbed #100): a many-valued attribute renders at
+                        @* Display cap: a many-valued attribute renders at
                            most the AppHost-set cap of values, and the cap is always surfaced,
                            never silent. *@
                         @foreach (var value in attr.Values.Take(plan.Shown))
@@ -142,7 +142,7 @@
     internal readonly record struct ValueDisplayPlan(int Shown, int Total, bool Capped);
 
     /// <summary>
-    /// The cap decision (#98): an expanded attribute — or one at/below the cap — shows every
+    /// The cap decision: an expanded attribute — or one at/below the cap — shows every
     /// value; anything else shows exactly the cap and says so. Never silent: Capped is true
     /// whenever fewer than every value renders.
     /// </summary>

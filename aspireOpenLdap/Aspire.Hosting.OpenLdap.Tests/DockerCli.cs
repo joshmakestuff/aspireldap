@@ -7,9 +7,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 internal sealed record DockerResult(int ExitCode, string Output);
 
 /// <summary>
-/// Shared docker CLI plumbing for the direct-docker integration tests. Previously each test
-/// class carried its own copy of these helpers (and its own image tag, so the bundled image
-/// was rebuilt once per class).
+/// Shared docker CLI plumbing for the direct-docker integration tests.
 /// </summary>
 internal static class DockerCli
 {
@@ -192,10 +190,7 @@ internal static class DockerCli
 }
 
 /// <summary>
-/// Owns the docker containers and volumes a test creates, and removes them on dispose. Each
-/// direct-docker test class used to carry its own copy of this list + naming + cleanup, which
-/// let the copies diverge (two of the four forgot volumes entirely, so a leaked volume
-/// outlived the run).
+/// Owns the docker containers and volumes a test creates, and removes them on dispose.
 /// </summary>
 internal sealed class DockerScope : IDisposable
 {
@@ -236,9 +231,9 @@ internal sealed class DockerScope : IDisposable
 /// The one lock both Docker-using test families share. The AppHost start path (DCP host boot,
 /// which builds and starts its own OpenLDAP container) and the direct-docker bundled-image
 /// build each hold it for their full duration, so the two can structurally never overlap.
-/// Docker Desktop serializes badly under that overlap — a context-metadata lock during a
-/// concurrent build once cascaded into 30 misleading failures (#54). Everything after the
-/// gated sections (running containers, exec probes) stays parallel.
+/// Docker Desktop serializes badly under that overlap (a context-metadata lock during a
+/// concurrent build). Everything after the gated sections (running containers, exec probes)
+/// stays parallel.
 /// </summary>
 internal static class DockerHostGate
 {

@@ -7,11 +7,10 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Regression guard for issue #3: the health check must not report healthy until a large
-/// seed has fully loaded. Before the fix, the init daemon bound the public LDAP port while
-/// <c>ldapadd</c> was still streaming entries, so a <c>WaitFor(openldap)</c> dependent could
-/// observe a partially-seeded directory. The init daemon now binds <c>ldapi:///</c> only, so
-/// the public port opens only after setup (and thus the seed) completes.
+/// The health check must not report healthy until a large seed has fully loaded: the init
+/// daemon binds <c>ldapi:///</c> only, so the public LDAP port opens only after setup (and
+/// thus the seed) completes. A dependent's <c>WaitFor(openldap)</c> must never observe a
+/// partially-seeded directory.
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]

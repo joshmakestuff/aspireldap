@@ -37,12 +37,11 @@ public class HealthCheckCancellationTests
         var stopwatch = Stopwatch.StartNew();
         cts.Cancel();
 
-        // Expected: the caller's cancellation surfaces, not a health verdict. On rare CI-only
-        // runs the check has completed with a result instead — locally unreproducible (on both
-        // libldap 2.5 and 2.6 a silent-but-open server blocks SendRequest indefinitely, so only
-        // cancellation can unblock it). When that happens, fail with the result's own
-        // description, which names the exception type and LDAP error code that ended the probe
-        // early — the evidence a bare ThrowsAny discards.
+        // Expected: the caller's cancellation surfaces, not a health verdict (on both
+        // libldap 2.5 and 2.6 a silent-but-open server blocks SendRequest indefinitely, so
+        // only cancellation can unblock it). If the check ever completes with a result,
+        // fail with the result's own description, which names the exception type and LDAP
+        // error code that ended the probe early — the evidence a bare ThrowsAny discards.
         try
         {
             var result = await checkTask;

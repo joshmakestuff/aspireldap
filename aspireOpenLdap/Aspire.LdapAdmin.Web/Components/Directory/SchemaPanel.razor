@@ -1,10 +1,10 @@
 @*
     The server's subschema, straight from LdapSchemaService — LdifDotNet.Schema types render
-    directly, no view-model mapping layer (docs/decisions.md § Architecture). Hosted in the
-    contextual pane of the shell page (#102) — a panel, not a routed page, so the browse
+    directly, no view-model mapping layer. Hosted in the
+    contextual pane of the shell page — a panel, not a routed page, so the browse
     tree stays alive while the schema is open, and the loaded schema survives view switches.
 
-    Layout per the design handoff § Schema: stacked .sec-headed Industry tables (object
+    Layout: stacked .sec-headed Industry tables (object
     classes, attribute types, syntaxes) filtered by one client-side query.
 
     The unavailable state is shown, not inferred: an unreadable subschema and a directory
@@ -38,8 +38,8 @@ else if (!_schema.Available)
 else
 {
     @* The filter is client-side over an already-loaded schema, so it narrows as you type;
-       bound on 'change' it would only apply on blur, which reads as broken. Debounced:
-       applying on every keystroke re-filtered all three tables synchronously per key. *@
+       bound on 'change' it would only apply on blur. Debounced: applying on every keystroke
+       re-filters all three tables synchronously per key. *@
     <div style="margin-top: var(--space-4);">
         <input class="input mono" style="max-width: 30rem;" @bind="_queryInput" @bind:event="oninput"
                @bind:after="DebounceFilterAsync"
@@ -181,8 +181,8 @@ else
     protected override Task OnInitializedAsync() => LoadAsync();
 
     /// <summary>
-    /// Applies the typed query 200 ms after the last keystroke (the old Fluent filter's
-    /// ImmediateDelay): each keystroke cancels the pending apply, so the three tables
+    /// Applies the typed query 200 ms after the last keystroke: each keystroke cancels the
+    /// pending apply, so the three tables
     /// re-filter once per pause instead of once per key.
     /// </summary>
     private async Task DebounceFilterAsync()

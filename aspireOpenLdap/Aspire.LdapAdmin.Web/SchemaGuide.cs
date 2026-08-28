@@ -3,7 +3,7 @@ using LdifDotNet.Schema;
 namespace Aspire.LdapAdmin.Web;
 
 /// <summary>
-/// One attribute type presented as guidance in a picker or form (issue #103): resolved
+/// One attribute type presented as guidance in a picker or form: resolved
 /// schema facts only — the server stays authoritative, this is never enforcement.
 /// </summary>
 public sealed record AttributeGuidance(
@@ -125,7 +125,7 @@ public static class SchemaGuide
     }
 
     /// <summary>
-    /// Picker candidates for adding an attribute to an entry (#103): the MUST/MAY set of its
+    /// Picker candidates for adding an attribute to an entry: the MUST/MAY set of its
     /// object classes, minus <c>objectClass</c> itself, minus NO-USER-MODIFICATION types,
     /// minus attributes already present that are single-valued (a second value is a
     /// guaranteed refusal). Required-first, then by name.

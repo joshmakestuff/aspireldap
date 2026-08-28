@@ -22,8 +22,8 @@ public class AdminBindDnTests
     [Fact]
     public void Username_Needing_Dn_Escaping_Is_Rejected_At_Construction()
     {
-        // Previously $"cn={AdminUsername},{BaseDn}" produced a silently broken DN whose
-        // cn RDN ended at the first comma. The container init composes the same DN
+        // A username like "Doe, John" would produce a DN whose cn RDN ends at the first
+        // comma. The container init composes the same DN
         // verbatim, so such usernames can never bind consistently — they are rejected
         // at model construction rather than escaped into a host/container mismatch.
         var ex = Assert.Throws<ArgumentException>(() => CreateResource("Doe, John", "dc=example,dc=org"));
@@ -137,7 +137,7 @@ public class LdapSeedLdifGeneratorTests
             "uid=user01,ou=people,dc=example,dc=org",
             Assert.Single(group["member"]!.Values).AsString());
 
-        // The password is stored hashed, never cleartext (F05).
+        // The password is stored hashed, never cleartext.
         Assert.StartsWith("{SSHA}", Assert.Single(user["userPassword"]!.Values).AsString());
         Assert.DoesNotContain("password1", ldif);
     }
@@ -320,8 +320,8 @@ public class LdapSeedLdifGeneratorTests
     [Fact]
     public void Root_Entry_For_Country_Base_Dn_Uses_Country_Object_Class()
     {
-        // c=US is a valid suffix; previously the root entry assumed dcObject/organization
-        // and never emitted the naming c attribute, so container init failed mid-bootstrap.
+        // c=US is a valid suffix: the root entry must use the country object class and
+        // emit the naming c attribute, not assume dcObject/organization.
         var resource = CreateResource("c=US");
         var model = new LdapSeedModel();
 
@@ -349,8 +349,8 @@ public class LdapSeedLdifGeneratorTests
     [Fact]
     public void Root_Entry_Handles_Escaped_Comma_In_Base_Dn_Value()
     {
-        // A base DN whose o value contains an escaped comma used to split mid-value:
-        // the old splitter yielded o="Acme\" instead of the real value. Dn.Parse unescapes it.
+        // A base DN whose o value contains an escaped comma: Dn.Parse unescapes it into
+        // the real value rather than splitting mid-value.
         var resource = CreateResource("o=Acme\\, Inc.,c=US");
         var model = new LdapSeedModel();
 
@@ -422,7 +422,7 @@ public class ConfigLdifGenerationTests
     [Fact]
     public void Limits_Ldif_Alone_Is_A_Single_Modify_With_Ordered_Rules()
     {
-        // aspireldap#118: per-principal olcLimits ride the same database-config LDIF.
+        // Per-principal olcLimits ride the same database-config LDIF.
         const string rule0 = "dn.exact=\"uid=svc,ou=users,dc=example,dc=org\" size=10";
         const string rule1 = "users time=30";
         var ldif = OpenLdapOverlayConfiguration.GenerateDatabaseConfigLdif(accessRules: null, [rule0, rule1]);

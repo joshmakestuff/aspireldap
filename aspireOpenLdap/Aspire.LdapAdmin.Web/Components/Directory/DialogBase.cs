@@ -5,7 +5,7 @@ namespace Aspire.LdapAdmin.Web.Components.Directory;
 /// <summary>
 /// The dialogs' shared save protocol: one busy flag, one inline error, close only on
 /// success. A returned error renders inline and the dialog stays up, so a failed write
-/// never dismisses the user's input; Busy feeds ConsoleDialog's dismissal guard (#117).
+/// never dismisses the user's input; Busy feeds ConsoleDialog's dismissal guard.
 /// </summary>
 public abstract class DialogBase : ComponentBase
 {

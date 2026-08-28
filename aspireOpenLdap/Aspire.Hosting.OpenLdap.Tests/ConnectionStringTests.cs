@@ -16,8 +16,7 @@ public class ConnectionStringTests
 
     // One row per parser/quoting equivalence class: unquoted plain, quoted separator chars
     // (';' plus '=' inside a value), doubled embedded quotes, edge whitespace, a value that
-    // itself looks fully quoted, and empty. (A non-ASCII row was prosecuted and removed:
-    // Quote/Parse have no charset-sensitive branch, so it duplicated the plain row.)
+    // itself looks fully quoted, and empty.
     [Theory]
     [InlineData("simplepassword")]
     [InlineData("with=equals;and;semis")]
@@ -68,7 +67,7 @@ public class ConnectionStringTests
     }
 
     /// <summary>
-    /// Pins the published-manifest contract for embedded double quotes (#62): deployment
+    /// Pins the published-manifest contract for embedded double quotes: deployment
     /// substitutes the RAW secret between the literal quotes the manifest expression carries,
     /// with no code of ours running, so a password containing '"' is unsupported. This test
     /// documents BOTH failure shapes — fail-loud parse, and the crafted case that parses to a
@@ -101,8 +100,7 @@ public class ConnectionStringTests
 
     // Each row asserts WHICH rule rejected the input, not merely that something threw.
     // Type-only assertions let a rejection be produced by an unrelated downstream rule — a
-    // mutation pass (#64) showed several parser mutants surviving exactly that way, because
-    // the mangled input still ended up throwing FormatException somewhere else.
+    // mutation pass showed several parser mutants surviving exactly that way, because
     [Theory]
     [InlineData("Endpoint=http://h:1389;BaseDN=a;BindDN=b;BindPassword=c", "scheme must be 'ldap' or 'ldaps'")]
     [InlineData("Endpoint=ldap://h:1389/path;BaseDN=a;BindDN=b;BindPassword=c", "must not contain a path or query")]
@@ -143,7 +141,7 @@ public class ConnectionStringTests
     [Fact]
     public void Portless_Endpoint_Uses_The_Scheme_Default_Port()
     {
-        // Deliberate contract (#41): portless endpoints are supported and resolve to the
+        // Deliberate contract: portless endpoints are supported and resolve to the
         // scheme default. System.Uri supplies 389 for ldap; ldaps is not a registered scheme,
         // so the parser fills in 636 itself.
         var ldap = OpenLdapConnectionStringBuilder.Parse("Endpoint=ldap://h;BaseDN=a;BindDN=b;BindPassword=c");
@@ -171,7 +169,7 @@ public class ConnectionStringTests
         Assert.Null(OpenLdapConnectionStringBuilder.Parse(Build("p") + ";CaCertFile=\"   \"").CaCertFile);
     }
 
-    // ---- Build(): the public write path (#72) ----
+    // ---- Build(): the public write path ----
 
     private static OpenLdapConnectionStringBuilder Sample(
         string password = "pw", string baseDn = "dc=example,dc=org", string? caCertFile = null) =>
@@ -185,7 +183,7 @@ public class ConnectionStringTests
         };
 
     /// <summary>
-    /// The reason #72 exists: a consumer synthesizing a connection string from its own inputs
+    /// A consumer synthesizing a connection string from its own inputs
     /// must be able to call the quoting rules instead of copying them. Same equivalence classes
     /// as <see cref="Password_Round_Trips"/>, driven through the write path.
     /// </summary>

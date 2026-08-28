@@ -79,20 +79,16 @@
   schema allows (`MaxDnValues`, default 4). `SchemaGeneratorOptions.DanglingMemberRatio` mirrors
   the `LdifGeneratorOptions` knob.
   - **`WithFakePeople`/`WithFakeGroups`/`WithFakeDirectory` are unaffected** — they use
-    `LdifGenerator`, whose output is byte-identical to 0.7.0 for the same seed (verified against
-    the real package, not assumed).
+    `LdifGenerator`, whose output is byte-identical to 0.7.0 for the same seed.
   - **Schema-driven output via `WithSeedRecords` changes for a given seed**: DN attributes carry
-    peer DNs instead of the parent DN and may carry several. `docs/fake-data.md` is re-baselined
-    against real 0.8.0 output.
+    peer DNs instead of the parent DN and may carry several.
 
 - **LdifDotNet and LdifDotNet.Generator bumped 0.6.0 → 0.7.0.** No API change in `LdifDotNet`;
   `LdifDotNet.Generator` adds `LdifGeneratorOptions.DanglingMemberRatio` (additive) and fixes
   DN-valued attribute generation in the schema-driven `SchemaEntryGenerator`
   ([ldifdotnet#65](https://github.com/joshmakestuff/ldifdotnet/issues/65)): attributes whose
   syntax is only known to slapd's built-in system schema — `member`, `owner`, `seeAlso`,
-  `manager`, `secretary` — were filled with free text that `slapadd` rejects, and now carry
-  real DNs. This closes the gap in the advanced fake-data guide, which already documented
-  `DanglingMemberRatio` before a released package exposed it.
+  real DNs.
   - `WithFakePeople`/`WithFakeDirectory` output is byte-identical to 0.6.0 for the same seed.
   - **`WithFakeGroups` data changes for a given seed**: generated group `description` values and
     member picks differ from 0.6.0. Counts, entry shape, and determinism per version are
@@ -185,8 +181,7 @@
 
 ### Fixed
 
-Findings from a fourth (2026-07-19) hardening review, run with the lens playbook extracted
-from the first three reviews (#34–#37):
+Findings from a fourth (2026-07-19) hardening review (#34–#37):
 
 - **An unreadable `*_FILE` secret now refuses to start the container** (#34). A configured
   but missing/unreadable secret file (typo'd path, absent mount) used to log one WARN and
@@ -266,7 +261,7 @@ Findings from a third (2026-07-19) adversarial code review (R1–R3, B1–B4):
   and syncprov tuning, `LDAP_CUSTOM_LDIF_CONTINUE_ON_ERROR`, `BITNAMI_DEBUG`).
 - **Health-check probe traffic no longer floods the container log** (#31). The Aspire health
   check polls continuously, and at the default `stats` log level each probe emitted a ~7-line
-  `conn=N` block — drowning real activity in the dashboard's console view. The container now
+  `conn=N` block, obscuring other log output in the dashboard's console view. The container now
   pipes slapd's log through a sentinel-aware filter that drops each probe's block. The probe
   marks itself twice — the `aspire-healthcheck` sentinel attribute (logged on the `SRCH attr=`
   line) and a no-op `(cn=aspire-healthcheck)` branch in its search filter (logged on the

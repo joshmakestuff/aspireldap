@@ -3,10 +3,9 @@ using Aspire.LdapAdmin.Core;
 namespace Aspire.LdapAdmin.Web.Components.Directory;
 
 /// <summary>
-/// The detail pane's stat strip, made entry-semantic where the entry's own data answers
-/// (design handoff § 1). A count the directory cannot answer from this entry — group
-/// memberships, operational timestamps — is simply absent, never invented; those tiles
-/// arrive with #101 and #107.
+/// The detail pane's stat strip, made entry-semantic where the entry's own data answers.
+/// A count the directory cannot answer from this entry — group memberships, operational
+/// timestamps — is simply absent, never invented.
 /// </summary>
 internal static class EntryStats
 {

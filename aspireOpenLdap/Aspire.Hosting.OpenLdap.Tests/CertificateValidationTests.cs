@@ -104,8 +104,8 @@ public class CertificateValidationTests
     [InlineData("example.org", false)]
     [InlineData("a.b.example.org", false)]
     // A host that is nothing but the wildcard's suffix leaves an EMPTY label in front of it.
-    // The empty label must not count as "exactly one label" (#64 mutation witness: dropping the
-    // non-empty check turns this into a match).
+    // The empty label must not count as "exactly one label": dropping the non-empty
+    // check turns this into a match.
     [InlineData(".example.org", false)]
     public void Wildcard_Sans_Match_Exactly_One_Label(string host, bool expected)
     {

@@ -1,12 +1,12 @@
 @*
-    The owned modal frame (design handoff § New entry wizard): a native <dialog> shown with
+    The owned modal frame: a native <dialog> shown with
     showModal(), wearing the .wide .blueprint panel and its four corner registration marks.
-    The platform owns modality (#117): top-layer rendering, background inertness (Tab can
+    The platform owns modality: top-layer rendering, background inertness (Tab can
     never reach the page behind, no matter what the dialog re-renders), Escape as a close
     request ("cancel" event), and the ::backdrop scrim. console.js relays close requests and
     backdrop clicks to CancelFromJs; .NET always decides whether the dialog actually closes.
 
-    Structure rule (measured, 2026-08-10): the panel must NOT be the scroll container. The
+    Structure rule: the panel must NOT be the scroll container. The
     corner marks sit 6px outside the frame by design, so a scrolling panel permanently
     "overflows" by 6px both axes and its auto scrollbars flip on every re-render — the
     per-keystroke scrollbar flicker. The UA gives dialog:modal overflow:auto, so console.css
@@ -17,7 +17,7 @@
     `open` would drop the dialog out of the top layer on the next diff.
 
     DNs never render in the title (one unbreakable token whose min-content width grows with
-    tree depth — docs/findings.md); callers put them in body markup with word-break.
+    tree depth); callers put them in body markup with word-break.
 *@
 @implements IAsyncDisposable
 @inject IJSRuntime Js
@@ -47,7 +47,7 @@
     /// <summary>
     /// True while the owner's operation is in flight. A busy dialog refuses every dismissal
     /// path (Escape, backdrop, Cancel) so a mid-flight save or subtree delete can never be
-    /// silently orphaned and its error always has a mounted dialog to land on (#117). This
+    /// silently orphaned and its error always has a mounted dialog to land on. This
     /// server-side guard is authoritative; the JS checks on data-busy are UX only.
     /// </summary>
     [Parameter]

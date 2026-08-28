@@ -45,7 +45,7 @@ internal static class LdapAdminBuilder
                 context.EnvironmentVariables[$"ConnectionStrings__{parent.Name}"] =
                     BuildContainerConnectionString(parent);
 
-                // The options contract (#98): every member is emitted explicitly — defaults
+                // The options contract: every member is emitted explicitly — defaults
                 // included — so the env the admin host binds always states the whole surface
                 // and a drifted default cannot hide behind an absent variable.
                 context.EnvironmentVariables["LdapAdmin__Theme"] = options.Theme.ToString();
@@ -102,7 +102,7 @@ internal static class LdapAdminBuilder
     /// <summary>
     /// The connection string the admin binds with, addressed over the Aspire-managed container
     /// network: the parent by resource name on its container target port, with the AppHost admin
-    /// credentials (no login exists by decision). When LDAPS is required the scheme and port
+    /// credentials (no login exists). When LDAPS is required the scheme and port
     /// switch; no CaCertFile is emitted — see the LDAPTLS_REQCERT comment above. Evaluated
     /// lazily so late fluent overrides apply.
     /// </summary>
@@ -122,7 +122,7 @@ internal static class LdapAdminBuilder
 
     /// <summary>
     /// The packaged build context is the only supported source — never the AspireLdap source
-    /// checkout (#78/#82). Fail at the fluent call with an actionable message rather than later
+    /// checkout. Fail at the fluent call with an actionable message rather than later
     /// inside the docker build with a missing-file error.
     /// </summary>
     private static void EnsurePackagedPayload(string contextPath)

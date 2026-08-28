@@ -4,14 +4,15 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Model-level witnesses for #89: <c>OpenLdapOverlay.SyncProv(...)</c> and
-/// <c>WithChangeNotifications(...)</c> declare the syncprov overlay with the measured dev-right
-/// defaults, and invalid arguments fail at the .NET call instead of during container bootstrap.
+/// <c>OpenLdapOverlay.SyncProv(...)</c> and
+/// <c>WithChangeNotifications(...)</c> declare the syncprov overlay with the "1 1"
+/// checkpoint and 100 session-log defaults, and invalid arguments fail at the .NET call
+/// instead of during container bootstrap.
 /// </summary>
 public class ChangeNotificationDeclarationTests
 {
     [Fact]
-    public void SyncProv_Defaults_Declare_The_Measured_Dev_Values()
+    public void SyncProv_Defaults_Declare_Checkpoint_And_Session_Log()
     {
         var overlay = OpenLdapOverlay.SyncProv();
 
@@ -24,7 +25,7 @@ public class ChangeNotificationDeclarationTests
     }
 
     [Theory]
-    [InlineData("1 0")]   // the measured exit-80 bootstrap failure: minutes must be > 0
+    [InlineData("1 0")]   // a zero-minute checkpoint is rejected: minutes must be > 0
     [InlineData("100 0")]
     [InlineData("0 1")]   // ops must be positive too
     [InlineData("1")]     // not "<ops> <minutes>"
@@ -148,11 +149,10 @@ public sealed class SyncProvContainerFixture : IAsyncLifetime
 }
 
 /// <summary>
-/// Docker-driven runtime witnesses for #89. The facts assert both that the requested syncprov
+/// Docker-driven runtime witnesses. The facts assert both that the requested syncprov
 /// configuration landed in cn=config AND that the overlay actually notifies: an RFC 4533
-/// refreshAndPersist client (<c>ldapsearch -E sync=rp</c>, the CLI baseline the #53 spike
-/// verified) observes a persist-stage notification for a mutation made after its refresh
-/// completed.
+/// refreshAndPersist client (<c>ldapsearch -E sync=rp</c>) observes a persist-stage
+/// notification for a mutation made after its refresh completed.
 /// </summary>
 [Trait("Category", "Integration")]
 public class ChangeNotificationRuntimeTests(SyncProvContainerFixture fixture)

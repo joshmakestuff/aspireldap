@@ -16,7 +16,7 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
     [Fact]
     public async Task A_subtree_search_finds_every_seeded_person()
     {
-        // Completeness by anchors, not census (aspireldap#124): a seed-count pin turns
+        // Completeness by anchors, not census: a seed-count pin turns
         // green tests red on unrelated seed changes, and a count derived from the search
         // itself could not catch dropped entries. Not-truncated proves the search saw
         // everything; the anchors prove both seeded branches were reached.
@@ -58,7 +58,7 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
     public async Task A_limit_that_exactly_matches_the_result_count_is_not_truncated()
     {
         // The truncation boundary is relative, so the count is derived, never pinned
-        // (aspireldap#124). The stuck-at-false direction of the flag is covered by
+        // The stuck-at-false direction of the flag is covered by
         // Matches_past_the_limit_are_reported_as_truncated — judge the pair together.
         using var cts = TestCancellation.Source();
 
@@ -113,7 +113,7 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
             },
             cts.Token);
 
-        // The contract is scope, not census (aspireldap#124): every hit is a DIRECT child
+        // The contract is scope, not census: every hit is a DIRECT child
         // of the base — one RDN deeper, still under ou=people — and the base itself is
         // absent. A later typed user must not red this test.
         Assert.NotEmpty(result.Entries);

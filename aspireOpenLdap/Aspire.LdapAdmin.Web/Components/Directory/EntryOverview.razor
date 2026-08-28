@@ -122,7 +122,7 @@
     /// <summary>
     /// The saves a dirty field set implies: a cleared field deletes its attribute (when it
     /// existed), anything else replaces the whole attribute with the single edited value —
-    /// which is honest exactly because multi-valued fields are never editable here.
+    /// multi-valued fields are never editable here.
     /// </summary>
     internal static IReadOnlyList<LdapAttributeChange> PlanChanges(IEnumerable<OverviewField> fields)
     {
@@ -150,7 +150,7 @@
         return changes;
     }
 
-    /// <summary>The kind's field set (design handoff § 1), bound to the entry's values.</summary>
+    /// <summary>The kind's field set, bound to the entry's values.</summary>
     internal static IEnumerable<OverviewField> BuildFields(LdapEntry entry)
     {
         foreach (var (label, attribute) in FieldSpec(entry))

@@ -9,11 +9,10 @@ using EntryView = Aspire.LdapAdmin.Web.Components.Directory.EntryView;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// Component tests for the Industry-console markup — possible at all because the redesign
-/// owns every element (no component-library shadow DOM between the test and the behavior).
+/// Component tests for the Industry-console markup — every element is owned by the app
+/// (no component-library shadow DOM between the test and the behavior).
 /// These assert consumer-visible behavior: what renders, what a click changes, what a save
-/// failure keeps on screen. Browser verification in both themes remains a separate,
-/// mandatory gate (docs/method.md); these tests do not replace it.
+/// failure keeps on screen.
 /// </summary>
 public sealed class ConsoleComponentTests : TestContext
 {
@@ -195,7 +194,7 @@ public sealed class ConsoleComponentTests : TestContext
     [Fact]
     public void NewEntryWizard_Resets_A_Stale_Rdn_Attribute_After_A_Class_Swap()
     {
-        // aspireldap#120: back-and-swap flow. inetOrgPerson defaults the RDN attribute
+        // Back-and-swap flow: inetOrgPerson defaults the RDN attribute
         // to uid; swapping to person alone removes uid from the choices, so keeping it
         // would compose an RDN the select never offered — a schema violation.
         JSInterop.Mode = JSRuntimeMode.Loose;
@@ -250,7 +249,7 @@ public sealed class ConsoleComponentTests : TestContext
     [Fact]
     public async Task ConsoleDialog_Busy_Refuses_The_Cancel_Relay_And_Marks_The_Element()
     {
-        // aspireldap#117 defect 1: while an operation is in flight the relay is refused
+        // While an operation is in flight the relay is refused
         // server-side (authoritative), and the element carries the attributes the JS and
         // the platform use to refuse client-side: data-busy for console.js, closedby=none
         // so supporting engines suppress close requests before they even fire.
@@ -272,7 +271,7 @@ public sealed class ConsoleComponentTests : TestContext
     [Fact]
     public async Task AttributeDialog_InFlight_Save_Refuses_Cancel_And_Still_Lands_The_Late_Error()
     {
-        // aspireldap#117 defect 1: the dialog must stay mounted and un-dismissable for the
+        // The dialog must stay mounted and un-dismissable for the
         // whole operation, so an error returned after a cancel attempt still renders
         // instead of landing on a disposed component.
         JSInterop.Mode = JSRuntimeMode.Loose;
@@ -331,7 +330,7 @@ public sealed class ConsoleComponentTests : TestContext
     [Fact]
     public void DeleteDialog_InFlight_Delete_Disables_Cancel_And_The_Subtree_Checkbox()
     {
-        // aspireldap#117 defect 1: flipping the subtree checkbox mid-walk would lie about
+        // Flipping the subtree checkbox mid-walk would lie about
         // what the running operation is doing; it locks with the rest of the dialog.
         JSInterop.Mode = JSRuntimeMode.Loose;
         var pending = new TaskCompletionSource<string?>();
@@ -366,11 +365,11 @@ public sealed class ConsoleComponentTests : TestContext
         var panel = cut.Find("dialog.wide.blueprint");
         Assert.Equal("Framed", panel.GetAttribute("aria-label"));
         Assert.False(panel.HasAttribute("open"));
-        // The design system's registration marks are load-bearing (industry-ui skill).
+        // The four corner blocks are the design system's registration marks on the dialog frame.
         Assert.Equal(4, cut.FindAll(".blueprint > .corner").Count);
     }
 
-    // ---- Rename dialog (#106): guided RDN, validation before submit, hazard prediction ----
+    // ---- Rename dialog: guided RDN, validation before submit, hazard prediction ----
 
     /// <summary>A person entry named by cn, as the shell's OpenRenameDialog would hand over:
     /// RDN prefilled, parent computed, entry snapshotted.</summary>
@@ -493,7 +492,7 @@ public sealed class ConsoleComponentTests : TestContext
     public void RenameDialog_Unchecks_Delete_Old_Rdn_With_A_Warning_When_It_Would_Violate_Schema()
     {
         // cn is MUST on person and the entry's only cn value is its name: switching the RDN
-        // to sn with delete-old-RDN on is a guaranteed objectClassViolation (#106).
+        // to sn with delete-old-RDN on is a guaranteed objectClassViolation.
         JSInterop.Mode = JSRuntimeMode.Loose;
         var cut = RenderComponent<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel())
@@ -566,7 +565,7 @@ internal static class ConsoleTestSchema
         ]);
 }
 
-/// <summary>Schema-guide composition checks (#103/#105) — the SUP walking itself is the library's.</summary>
+/// <summary>Schema-guide composition checks — the SUP walking itself is the library's.</summary>
 public sealed class SchemaGuideTests
 {
     [Fact]
@@ -640,7 +639,7 @@ public sealed class ConsoleDisplayLogicTests
     [Fact]
     public void EntryTitle_Prefers_The_Display_Name_Over_The_Rdn_Value()
     {
-        // Design reference: the header reads "Alice Chen", not "alice.chen".
+        // The header reads "Alice Chen", not "alice.chen".
         var entry = new LdapEntry("uid=alice.chen,ou=people,dc=aspire,dc=dev",
         [
             new LdapAttributeValues("uid", false, ["alice.chen"], LdapValueClassification.Schema),
@@ -662,7 +661,7 @@ public sealed class ConsoleDisplayLogicTests
     [Fact]
     public void EntryTitle_Unescapes_The_Rdn_Value_Instead_Of_Splitting_On_Escaped_Commas()
     {
-        // aspireldap#122: the RFC 4514 escaped comma is part of the value, not a DN
+        // The RFC 4514 escaped comma is part of the value, not a DN
         // separator — the title must read "Doe, Jane", never "Doe\".
         var entry = new LdapEntry(@"uid=Doe\, Jane,ou=people,dc=aspire,dc=dev", []);
         Assert.Equal("Doe, Jane", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
@@ -671,7 +670,7 @@ public sealed class ConsoleDisplayLogicTests
     [Fact]
     public void EntryTitle_Joins_The_Values_Of_A_Multi_Valued_Rdn()
     {
-        // aspireldap#122: a multi-valued RDN yields every value, plus-joined like
+        // A multi-valued RDN yields every value, plus-joined like
         // RelativeDistinguishedName.ToString(), with the attribute types stripped.
         var entry = new LdapEntry("uid=achen+cn=Alice Chen,ou=people,dc=aspire,dc=dev", []);
         Assert.Equal("achen+Alice Chen", Aspire.LdapAdmin.Web.Components.Pages.Browse.EntryTitle(entry));
@@ -680,7 +679,7 @@ public sealed class ConsoleDisplayLogicTests
     [Fact]
     public void EntryTitle_Honors_DisplayName_Like_The_Search_Panel_Does()
     {
-        // aspireldap#122: displayName belongs in the chain — SearchPanel's name column
+        // displayName belongs in the chain — SearchPanel's name column
         // already honors it, and the two surfaces must agree on an entry's name.
         var entry = new LdapEntry("uid=alice.chen,ou=people,dc=aspire,dc=dev",
         [

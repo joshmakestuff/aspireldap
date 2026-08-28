@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aspire.Hosting.OpenLdap;
 
 /// <summary>
-/// Container-runtime interactions behind the dashboard commands (#58): which CLI to shell out
+/// Container-runtime interactions behind the dashboard commands: which CLI to shell out
 /// to, and the container/volume removal the reset command is built on. Kept apart from the
 /// resource-model construction in <see cref="OpenLdapResourceBuilderExtensions"/> so process
 /// execution is testable against a fake <see cref="IContainerCliRunner"/>.
@@ -27,7 +27,7 @@ internal static class ContainerRuntime
     }
 
     /// <summary>
-    /// Resolves the container runtime the dashboard commands shell out to (#58). An explicit
+/// Resolves the container runtime the dashboard commands shell out to. An explicit
     /// configuration is authoritative — used as-is so a misconfiguration fails loudly on use
     /// rather than being silently papered over. With no configuration, mirror Aspire's own
     /// behavior of probing known runtimes (DCP auto-detects when unconfigured, so LDAP can be

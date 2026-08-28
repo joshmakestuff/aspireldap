@@ -7,7 +7,7 @@ namespace Aspire.Hosting.OpenLdap;
 /// <summary>
 /// Runs container-runtime CLI commands (docker/podman) for the dashboard commands.
 /// Abstracted behind an interface so command handlers are testable without depending on a
-/// developer's global container-CLI state (#58).
+/// developer's global container-CLI state.
 /// </summary>
 internal interface IContainerCliRunner
 {

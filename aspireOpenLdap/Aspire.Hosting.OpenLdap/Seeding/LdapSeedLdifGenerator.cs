@@ -71,7 +71,7 @@ internal static class LdapSeedLdifGenerator
     private static LdifContentRecord RootEntry(OpenLdapResource resource)
     {
         // Parse the base DN into ordered, unescaped RDN components (escape-aware, so an
-        // escaped comma in a value like o=Acme\, Inc. no longer splits mid-value). The
+        // escaped comma in a value like o=Acme\, Inc. does not split mid-value). The
         // LEADING RDN names the root entry, so it drives the object class and must appear
         // as an attribute; dc=/o=/c= are the supported forms, enforced by
         // OpenLdapDnValidation at model construction.

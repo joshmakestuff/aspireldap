@@ -45,7 +45,7 @@ public class OpenLdapBuilderModelTests
     [InlineData("dc=exa\nmple,dc=org", "control characters")]            // LDIF line injection
     [InlineData("c=USA", "two-letter ISO 3166")]                         // country > 2 chars
     [InlineData("c=U1", "two-letter ISO 3166")]                          // country non-letter
-    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; — rejected by Dn.Parse itself since LdifDotNet 0.5.0 (ldifdotnet#43)
+    [InlineData("o=Acme; Inc.,c=US", "unescaped ';'")]                   // RFC 4514 requires \; — rejected by Dn.Parse itself
     [InlineData("dc=example;dc=org", "unescaped ';'")]                   // ';' as an RFC 2253 RDN separator is rejected too, not silently split
     public void WithBaseDn_Rejects_Invalid_Or_Unsupported_Dns(string baseDn, string expectedFragment)
     {
@@ -114,8 +114,8 @@ public class OpenLdapBuilderModelTests
         var dir = Directory.CreateTempSubdirectory("aspire-ldap-tls-test");
         try
         {
-            // Deliberately non-default filenames (the original bug mounted only the directory
-            // and assumed server.crt/server.key/ca.crt).
+            // Deliberately non-default filenames: each is mounted at its own fixed
+            // container path rather than the directory default.
             var cert = Path.Combine(dir.FullName, "certificate.pem");
             var key = Path.Combine(dir.FullName, "private-key.pem");
             var ca = Path.Combine(dir.FullName, "root.pem");
@@ -180,8 +180,8 @@ public class OpenLdapBuilderModelTests
         var builder = DistributedApplication.CreateBuilder();
         var ldap = builder.AddOpenLdap("ldap")
             .WithPhpLdapAdmin()
-            // Everything below is applied AFTER the sidecar — the original bug froze the
-            // sidecar's view of the parent at the WithPhpLdapAdmin call.
+            // Everything below is applied AFTER the sidecar — the sidecar must resolve the
+            // parent's settings at start, not freeze them at the WithPhpLdapAdmin call.
             .WithBaseDn("dc=late,dc=org")
             .WithAdminUsername("root");
 
@@ -209,7 +209,7 @@ public class OpenLdapBuilderModelTests
         Assert.Equal("phpldapadmin/phpldapadmin", image.Image);
         Assert.Equal("2.3.11", image.Tag);
 
-        // The static-asset health check (see #31) must stay registered with exactly this
+        // The static-asset health check must stay registered with exactly this
         // configuration. Aspire encodes {resource}_{endpoint}_{path}_{status} in the check
         // key, so a wrong path (e.g. the login page, which floods the LDAP log) or status
         // fails deterministically.

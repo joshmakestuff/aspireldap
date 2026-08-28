@@ -13,8 +13,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// Docker-backed LDAPS coverage through the REAL connection paths — the AppHost health check
 /// and <see cref="OpenLdapClientFactory"/> — not just the managed validation helper. On Linux
 /// (CI) this crosses the native libldap boundary via <c>TrustedCertificatesDirectory</c>; on
-/// Windows it exercises the <c>VerifyServerCertificate</c> callback. Regression guard for the
-/// review finding that generated-CA LDAPS failed on Linux before the first request.
+/// Windows it exercises the <c>VerifyServerCertificate</c> callback.
 /// </summary>
 [Collection(AppHostCollection.Name)]
 [Trait("Category", "Integration")]
@@ -39,7 +38,7 @@ public class TlsIntegrationTests(AppHostFixture appHost, ITestOutputHelper outpu
         Assert.True(settings.UsesLdaps);
         Assert.NotNull(settings.CaCertFile);
 
-        // #72: Build() is a second emitter of this format, in the client package, and the
+        // Build() is a second emitter of this format, in the client package, and the
         // hosting emitter cannot use it (the password is a deferred ParameterResource). This
         // pins the two against REAL emitted output — including the CaCertFile arm — so key
         // names, order, and quoting cannot drift apart across the package boundary.
@@ -48,7 +47,7 @@ public class TlsIntegrationTests(AppHostFixture appHost, ITestOutputHelper outpu
         if (OperatingSystem.IsMacOS())
         {
             // macOS reaches here with LESS coverage than Linux/Windows, and that reduction is
-            // asserted rather than silently returned (#64): Apple's LDAP.framework supports
+            // asserted rather than silently returned: Apple's LDAP.framework supports
             // neither the managed verification callback nor OpenSSL-style trust options, so the
             // client factory refuses custom CA trust up front with an actionable message. If
             // that refusal ever stops happening, this test must fail rather than quietly skip
@@ -117,7 +116,7 @@ public class TlsIntegrationTests(AppHostFixture appHost, ITestOutputHelper outpu
     public async Task OptionalTls_Serves_Plain_Ldap_And_Ldaps_Side_By_Side()
     {
         // WithTls() WITHOUT WithRequiredTls(): the documented "LDAPS available, plain LDAP
-        // still accepted" mode, previously only the required-TLS path had a runtime witness.
+        // still accepted" mode.
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
         var started = await appHost.StartAsync(TestAppHostScenarios.TlsOptional, cts.Token);
@@ -155,8 +154,8 @@ public class TlsIntegrationTests(AppHostFixture appHost, ITestOutputHelper outpu
 
         if (OperatingSystem.IsMacOS())
         {
-            // Same reduction as the required-TLS test, asserted rather than silently returned
-            // (#64): the refusal is the macOS behavior, so it is what gets pinned here.
+            // Same reduction as the required-TLS test, asserted rather than silently returned:
+            // the refusal is the macOS behavior, so it is what gets pinned here.
             var unsupported = Assert.Throws<PlatformNotSupportedException>(
                 () => ldapsFactory.CreateConnection());
             Assert.Contains(

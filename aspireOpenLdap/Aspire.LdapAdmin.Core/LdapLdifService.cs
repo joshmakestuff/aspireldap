@@ -4,7 +4,7 @@ using LdifDotNet;
 namespace Aspire.LdapAdmin.Core;
 
 /// <summary>
-/// The LDIF view's service layer (#110): subtree export as content records, and change-record
+/// The LDIF view's service layer: subtree export as content records, and change-record
 /// import applied through the existing write operations — so every guard the app enforces
 /// (bind-identity protection, DN validation, outcome modelling) applies to imported records
 /// exactly as it does to dialog edits. All LDIF reading/writing is LdifDotNet's; nothing here

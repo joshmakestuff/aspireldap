@@ -5,9 +5,8 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
 /// One container running the ppolicy bootstrap with both sub-toggles on, shared by every
-/// witness in <see cref="PpolicyRuntimeTests"/>. The witnesses used to be welded into a single
-/// mega-fact purely to avoid paying a second container start; a fixture buys the same saving
-/// without hiding later assertions behind an earlier failure.
+/// witness in <see cref="PpolicyRuntimeTests"/>. A fixture shares one container start
+/// across the witnesses without hiding later assertions behind an earlier failure.
 /// </summary>
 public sealed class PpolicyContainerFixture : IAsyncLifetime
 {
@@ -44,11 +43,10 @@ public sealed class PpolicyContainerFixture : IAsyncLifetime
 }
 
 /// <summary>
-/// Docker-driven runtime witnesses for the ppolicy bootstrap path (issue #38):
-/// <c>ldap_configure_ppolicy</c> performs privileged cn=config applies that previously had no
-/// container-level coverage. The facts assert both that the configuration landed in cn=config
-/// AND that the overlay actually changes server behavior (password hashing, lockout).
-/// (The sibling syncprov bootstrap path was removed from the image instead of tested — see #53.)
+/// Docker-driven runtime witnesses for the ppolicy bootstrap path:
+/// <c>ldap_configure_ppolicy</c> performs privileged cn=config applies. The facts assert both
+/// that the configuration landed in cn=config AND that the overlay actually changes server
+/// behavior (password hashing, lockout).
 /// </summary>
 /// <remarks>
 /// Each behavioral witness touches a different default-tree account (user01 for hashing,
@@ -69,7 +67,7 @@ public class PpolicyRuntimeTests(PpolicyContainerFixture fixture) : IClassFixtur
         // The overlay entry and BOTH sub-toggles (each a separate privileged ldapmodify in
         // ldap_configure_ppolicy) must have landed in cn=config. Attribute names come back in
         // slapd's canonical casing, not the spelling the bootstrap wrote — compare
-        // case-insensitively (the syncprov coverage hit exactly this before its removal).
+        // case-insensitively.
         var config = await DockerCli.RunAsync(cts.Token,
             "exec", fixture.Container, "ldapsearch", "-Q", "-Y", "EXTERNAL", "-H", "ldapi:///",
             "-b", OpenLdapResource.MdbDatabaseDn, "(objectClass=olcPPolicyConfig)");

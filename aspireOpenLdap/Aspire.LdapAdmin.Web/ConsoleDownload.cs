@@ -3,7 +3,7 @@ using Microsoft.JSInterop;
 namespace Aspire.LdapAdmin.Web;
 
 /// <summary>
-/// Client-side file save for text the component already holds (#110): a Blob URL and a
+/// Client-side file save for text the component already holds: a Blob URL and a
 /// synthetic anchor click, mirroring <see cref="ConsoleClipboard"/>'s guarantees —
 /// <see cref="SaveAsync"/> never throws; false means the caller should say so. Scoped per
 /// circuit, like the clipboard.

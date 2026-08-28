@@ -5,7 +5,7 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The #118 contract: a server sizelimit must not stop a subtree delete. The AppHost caps
+/// A server sizelimit must not stop a subtree delete. The AppHost caps
 /// uid=svc-sweeper's searches at 10 entries (olcLimits) and grants it write only under
 /// ou=bulk-del — the rootdn the other tests bind with is exempt from both limits and ACLs,
 /// so this account is the only witness of the sweep-past-sizelimit behavior.
@@ -45,7 +45,7 @@ public class SizeLimitSweepTests(LdapAdminAppHostFixture fixture)
     public async Task Sweeper_listing_is_actually_size_limited()
     {
         // The precondition that keeps the sweep test falsifiable: if the limit never binds,
-        // a passing subtree delete proves nothing about #118.
+        // a passing subtree delete proves nothing.
         using var cts = TestCancellation.Source();
         var parent = await SeedBulkContainerAsync(cts.Token);
         try
@@ -64,8 +64,8 @@ public class SizeLimitSweepTests(LdapAdminAppHostFixture fixture)
     [Fact]
     public async Task Subtree_delete_converges_past_the_server_sizelimit()
     {
-        // aspireldap#118: 25 children against a size=10 limit forces at least three
-        // size-limited sweeps; before the fix the first sweep failed and deleted nothing.
+        // 25 children against a size=10 limit forces at least three
+        // size-limited sweeps.
         using var cts = TestCancellation.Source();
         var parent = await SeedBulkContainerAsync(cts.Token);
         try

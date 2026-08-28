@@ -50,9 +50,9 @@ switch (scenario)
         {
             // Overlay + access-control scenario: a memberof overlay over a typed seed, an extra
             // raw-record subtree, and a complete access policy, so integration tests can witness
-            // the privileged cn=config apply paths against a live slapd (issue #38).
-            // The access rules define the FULL policy — verified empirically against the bundled
-            // image: the mdb database ships with no olcAccess, and the moment one rule exists
+            // the privileged cn=config apply paths against a live slapd.
+            // The access rules define the FULL policy: the mdb database ships with no olcAccess,
+            // and the moment one rule exists
             // slapd's implicit final rule is "to * by * none" (unmatched targets AND rules
             // exhausted via "by * break" are both denied, including the auth access simple binds
             // need on userPassword). Rule order matters: the attrs=userPassword auth rule comes

@@ -6,7 +6,7 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The LDIF view's pure logic (#110): the import plan — what parses, what is refused before
+/// The LDIF view's pure logic: the import plan — what parses, what is refused before
 /// anything runs, and what the plan table says about each record — plus the export filename.
 /// The live export/import round-trip is <see cref="LdifViewLiveTests"/>.
 /// </summary>

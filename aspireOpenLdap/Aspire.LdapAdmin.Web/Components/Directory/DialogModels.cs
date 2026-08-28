@@ -19,7 +19,7 @@ public sealed class AttributeDialogModel
     /// The entry being edited, snapshotted when the dialog opens: its object classes and
     /// present attributes feed the picker. A snapshot, not the shell's live field — the
     /// save delegate's own reselect nulls that field mid-save, and the dialog's lifetime
-    /// must not depend on it (#117).
+    /// must not depend on it.
     /// </summary>
     public required LdapEntry Entry { get; init; }
 
@@ -27,7 +27,7 @@ public sealed class AttributeDialogModel
 }
 
 /// <summary>
-/// The new-entry wizard's contract (#105): the wizard composes the whole
+/// The new-entry wizard's contract: the wizard composes the whole
 /// <see cref="Aspire.LdapAdmin.Core.LdapNewEntry"/> (chained object classes, RDN, fields)
 /// and hands it to the shell's save delegate.
 /// </summary>
@@ -38,11 +38,11 @@ public sealed class NewEntryModel
 }
 
 /// <summary>
-/// The rename/move dialog's contract (#106): guided RDN attribute + value inputs (prefilled
+/// The rename/move dialog's contract: guided RDN attribute + value inputs (prefilled
 /// with the entry's current RDN by the shell) instead of a raw RDN string — the dialog
 /// composes the escaped RDN via <c>Dn.Rdn</c>, so a typed comma is a value, never structure.
 /// Multi-valued current RDNs prefill from their first component; composing one is not
-/// possible here (accepted trade-off).
+/// possible here.
 /// </summary>
 public sealed class RenameDialogModel
 {
@@ -55,7 +55,7 @@ public sealed class RenameDialogModel
     /// <summary>
     /// The entry being renamed, snapshotted when the dialog opens: its object classes and
     /// value counts feed the delete-old-RDN hazard prediction. A snapshot for the same
-    /// reason as <see cref="AttributeDialogModel.Entry"/> (#117).
+    /// reason as <see cref="AttributeDialogModel.Entry"/>.
     /// </summary>
     public required LdapEntry Entry { get; init; }
 

@@ -1,4 +1,4 @@
-// The console's whole JS interop surface (design handoff § Porting notes): rail resize with
+// The console's whole JS interop surface: rail resize with
 // persisted width, theme toggle with persisted choice, clipboard copy, and a focus trap for
 // the owned dialogs. Everything else is Blazor.
 
@@ -73,10 +73,10 @@ export function currentTheme() {
   return document.documentElement.dataset.theme || 'light';
 }
 
-// Never throws: a rejection here used to escape the Blazor event handler and kill the
-// circuit (#119). Rejections are real even on localhost (document not focused,
+// Never throws: a rejection escaping the Blazor event handler would kill the
+// circuit. Rejections are real even on localhost (document not focused,
 // permissions policy); a missing navigator.clipboard (non-secure origins) reports the
-// same clean false — no legacy execCommand fallback by decision, callers toast it.
+// same clean false — no execCommand fallback; callers toast it.
 export async function copyText(text) {
   try {
     if (!navigator.clipboard?.writeText) return false;
@@ -87,15 +87,15 @@ export async function copyText(text) {
   }
 }
 
-// The toast is a manual popover so it joins the top layer above any open modal dialog
-// (#117): promotion order decides stacking, and the toast is always promoted after the
+// The toast is a manual popover so it joins the top layer above any open modal dialog:
+// promotion order decides stacking, and the toast is always promoted after the
 // dialog it must overlay. Idempotent — Blazor calls this on every render while a toast
 // is up, and the element re-enters the DOM on each new message.
 export function showToastPopover(el) {
   if (el?.isConnected && !el.matches(':popover-open')) el.showPopover();
 }
 
-// ── Modal dialogs (#117) ─────────────────────────────────────────────────────
+// ── Modal dialogs ─────────────────────────────────────────────────────────────
 // The <dialog> element + showModal() owns modality: top layer, background inertness,
 // Escape as a "cancel" close request, ::backdrop. This module only relays close requests
 // and backdrop clicks to .NET — the server decides whether the dialog actually closes,
@@ -128,8 +128,8 @@ export function openModal(el, dotnetRef) {
   el.showModal();
   // Focus the panel itself, not its first field: showModal's default focusing steps pick
   // the first focusable control, and programmatic focus on an input triggers
-  // :focus-visible in Chromium — the ring flashing on dialog open reads as a glitch
-  // (#109). The panel carries tabindex="-1"; Tab moves into the first control normally.
+  // :focus-visible in Chromium — the ring flashing on dialog open reads as a glitch.
+  // The panel carries tabindex="-1"; Tab moves into the first control normally.
   el.focus({ preventScroll: true });
   el.addEventListener('cancel', e => {
     e.preventDefault(); // .NET owns closing; the element never closes itself

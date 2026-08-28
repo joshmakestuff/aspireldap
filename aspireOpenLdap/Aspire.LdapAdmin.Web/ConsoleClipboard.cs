@@ -3,7 +3,7 @@ using Microsoft.JSInterop;
 namespace Aspire.LdapAdmin.Web;
 
 /// <summary>
-/// The console's one copy-to-clipboard path (#119): both Browse and the search panel go
+/// The console's one copy-to-clipboard path: both Browse and the search panel go
 /// through here, so the guarantee lives in a single place — <see cref="CopyAsync"/> never
 /// throws. The JS side already reports failure as <c>false</c> instead of rejecting; the
 /// catches below are the authoritative circuit protection should the interop itself fault

@@ -1,7 +1,7 @@
 namespace Aspire.LdapAdmin.Web;
 
 /// <summary>
-/// The console's toast slot (design handoff § Toast): one message at a time, bottom center,
+/// The console's toast slot: one message at a time, bottom center,
 /// announced via aria-live. Panels raise messages here; the shell page subscribes and
 /// renders. Scoped per circuit — a toast belongs to the user who caused it.
 /// </summary>

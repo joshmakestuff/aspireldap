@@ -5,7 +5,7 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The DN equivalence contract behind the bind-identity password guard (#94): two spellings
+/// The DN equivalence contract behind the bind-identity password guard: two spellings
 /// of the same name must compare equal however they differ in case, whitespace, escaping or
 /// multi-valued component order — and anything unparsable is equivalent to nothing.
 /// </summary>

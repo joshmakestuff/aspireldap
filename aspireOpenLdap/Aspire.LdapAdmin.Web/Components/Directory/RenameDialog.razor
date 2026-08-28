@@ -1,6 +1,6 @@
 @*
-    Rename/move dialog on the owned ConsoleDialog frame, schema-aware (#106). The DN renders
-    in body markup with word-break, never in the title (docs/findings.md). Save semantics as
+    Rename/move dialog on the owned ConsoleDialog frame, schema-aware. The DN renders
+    in body markup with word-break, never in the title. Save semantics as
     AttributeDialog.
 
     The RDN is attribute + value, prefilled with the entry's current name (renaming edits a
@@ -142,7 +142,7 @@
     /// <summary>
     /// True when delete-old-RDN is a guaranteed objectClassViolation: the RDN moves to a
     /// different attribute, the old attribute is in the entry's effective MUST set, and the
-    /// entry holds no other value of it (#106).
+    /// entry holds no other value of it.
     /// </summary>
     private bool HazardousToDeleteOldRdn
     {

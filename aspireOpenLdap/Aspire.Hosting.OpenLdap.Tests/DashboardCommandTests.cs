@@ -7,7 +7,7 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Execution-level witnesses for the dashboard commands (#58): runtime awareness
+/// Execution-level witnesses for the dashboard commands: runtime awareness
 /// (docker vs podman), actionable missing-CLI failures, and kill-on-cancel. Handlers run
 /// against a fake <see cref="IContainerCliRunner"/>, so nothing here depends on a
 /// developer's global docker/podman state; the one real-container witness lives in
@@ -352,10 +352,9 @@ public class DashboardCommandTests
     [Fact]
     public async Task Process_Runner_Kills_The_Whole_Process_Tree_On_Cancellation()
     {
-        // Two regressions must fail here: the old implementation abandoned the CLI process
-        // entirely (WaitForExitAsync threw, everything kept running), and a Kill() without
-        // entireProcessTree would reap the shell but leave its child alive — so the spawned
-        // command is a shell PARENT with a real CHILD, and both PIDs must die.
+        // The spawned command is a shell PARENT with a real CHILD, and both PIDs must die:
+        // a Kill() without entireProcessTree reaps the shell but leaves the child alive,
+        // and abandoning the process entirely leaves both running.
         var (fileName, args) = OperatingSystem.IsWindows()
             ? ("cmd", new[] { "/c", "ping -n 60 127.0.0.1" })
             : ("sh", new[] { "-c", "sleep 60; true" }); // '; true' forces sh to fork, not exec
