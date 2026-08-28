@@ -7,7 +7,7 @@ namespace Aspire.LdapAdmin.Core;
 // simple conditions under one &/| join. Anything richer (nesting, !, ~=, extensible
 // match) is beyond what the builder can represent and is reported as such.
 /// <summary>
-/// The search query builder's filter model (design handoff § 2): a flat list of simple
+/// The search query builder's filter model: a flat list of simple
 /// conditions joined by one <c>&amp;</c> or <c>|</c>, composable to an RFC 4515 string and
 /// parseable back from one. Parsing is honest about its limits: a filter the flat shape
 /// cannot fully represent comes back with <see cref="LdapFilterParse.Lossy"/> set, so the
@@ -100,7 +100,7 @@ public static class LdapFilterConditions
     };
 }
 
-/// <summary>The condition operators the builder offers (design handoff § 2).</summary>
+/// <summary>The condition operators the builder offers.</summary>
 public enum LdapFilterOperator
 {
     /// <summary>Equality / substring match — the value may carry <c>*</c> wildcards.</summary>

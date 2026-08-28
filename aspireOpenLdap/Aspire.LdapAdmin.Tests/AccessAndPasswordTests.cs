@@ -84,7 +84,7 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
         using var cts = TestCancellation.Source();
 
         // A case/whitespace variant of the bind DN: surviving this mutation is what separates
-        // a real DN comparison from string.Equals (#94).
+        // a real DN comparison from string.Equals.
         var variant = fixture.Settings.BindDn.ToUpperInvariant().Replace(",", ", ");
 
         var result = await fixture.Directory.SetPasswordAsync(variant, "would-brick-the-console", cts.Token);
@@ -101,9 +101,9 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
     [Fact]
     public async Task Every_write_that_would_invalidate_the_bind_identity_is_rejected_without_a_round_trip()
     {
-        // The #94 class, closed (#136): rename and delete of the identity, rename and
-        // subtree-delete of a container holding it, and the password change through the
-        // modify door. Each uses a case/whitespace variant so string.Equals cannot pass.
+        // Rename and delete of the identity, rename and subtree-delete of a container holding
+        // it, and the password change through the modify door. Each uses a case/whitespace
+        // variant so string.Equals cannot pass.
         using var cts = TestCancellation.Source();
         var variant = fixture.Settings.BindDn.ToUpperInvariant().Replace(",", ", ");
         var baseVariant = fixture.BaseDn.ToUpperInvariant().Replace(",", ", ");

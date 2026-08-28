@@ -187,9 +187,8 @@ public class FakeDataSeedTests
     [Fact]
     public void DanglingMemberRatio_Emits_Members_Outside_The_Pool()
     {
-        // Witnesses the docs/fake-data.md claim about LdifGeneratorOptions.DanglingMemberRatio,
-        // which only exists from LdifDotNet.Generator 0.7.0 — the guide documented it while the
-        // pinned package was 0.6.0. Fails to compile if the bump is ever reverted.
+        // LdifGeneratorOptions.DanglingMemberRatio only exists from LdifDotNet.Generator
+        // 0.7.0; fails to compile if the bump is ever reverted.
         var people = new LdifDotNet.Generator.LdifGenerator(
             new LdifDotNet.Generator.LdifGeneratorOptions { Seed = 3 })
             .People(10, "ou=people,dc=example,dc=org");
@@ -207,9 +206,8 @@ public class FakeDataSeedTests
     [Fact]
     public void Schema_Generated_Dn_Attributes_Resolve_To_Generated_Entries()
     {
-        // Witnesses the docs/fake-data.md claim that schema-driven DN attributes point at real
-        // entries, which needs LdifDotNet.Generator 0.8.0 (ldifdotnet#68). On 0.7.0 every value
-        // was the entry's own parent DN. Uses SchemaGeneratorOptions.DnPool, so this also fails
+        // Schema-driven DN attributes point at real entries, which needs
+        // LdifDotNet.Generator 0.8.0. Uses SchemaGeneratorOptions.DnPool, so this also fails
         // to compile if the bump is reverted.
         var schema = LdifDotNet.Schema.LdapSchema.Parse(
             "attributetype ( 1.2.3.9.1 NAME 'cn' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )\n" +
@@ -226,7 +224,7 @@ public class FakeDataSeedTests
 
         var members = groups.SelectMany(g => g["member"]!.Values.Select(v => v.AsString())).ToList();
         Assert.NotEmpty(members);
-        // Real membership, not the container: the 0.7.0 behaviour would fail both of these.
+        // Real membership, not the container entry.
         Assert.All(members, m => Assert.Contains(m, pool, StringComparer.OrdinalIgnoreCase));
         Assert.DoesNotContain("ou=groups,dc=example,dc=org", members, StringComparer.OrdinalIgnoreCase);
         Assert.Contains(groups, g => g["member"]!.Values.Count > 1);
@@ -235,7 +233,7 @@ public class FakeDataSeedTests
     [Fact]
     public void Materializer_Without_Specs_Is_A_No_Op()
     {
-        // Pins the WithSeedRecords pipeline refactor: pure record seeding never sees
+        // Pure record seeding never sees
         // fake-data materialization side effects.
         var builder = DistributedApplication.CreateBuilder();
         var ldap = builder.AddOpenLdap("ldap")

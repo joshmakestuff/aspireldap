@@ -59,7 +59,7 @@ internal static class PhpLdapAdminBuilder
             })
             // Deliberately a static asset, not the login page: the login page performs a real
             // admin bind + root-DSE query on every render, so health-polling it flooded the
-            // LDAP container's log with un-filterable query noise (#31). LDAP connectivity is
+            // LDAP container's log with un-filterable query noise. LDAP connectivity is
             // covered by the parent resource's own health check plus WaitFor below; this check
             // only proves the admin container serves HTTP.
             .WithHttpHealthCheck(path: "/robots.txt", statusCode: 200, endpointName: PhpLdapAdminResource.HttpEndpointName)

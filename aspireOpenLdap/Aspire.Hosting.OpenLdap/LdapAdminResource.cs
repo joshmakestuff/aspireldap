@@ -4,7 +4,7 @@ namespace Aspire.Hosting.ApplicationModel;
 /// Represents the LdapAdmin web UI container attached to an <see cref="OpenLdapResource"/>.
 /// The container is built locally from a build context bundled inside the
 /// JoshMakeStuff.Aspire.Hosting.OpenLdap package (the pack-time-published admin app plus a
-/// Dockerfile) — there is no registry-published image and no separate admin package, by decision.
+/// Dockerfile) — there is no registry-published image and no separate admin package.
 /// </summary>
 public sealed class LdapAdminResource : ContainerResource
 {

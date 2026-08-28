@@ -1,9 +1,8 @@
 @*
     App shell chrome only. The visible shell (topbar + view tabs + panes) is owned by the
-    single page (Browse) per the layout decision (docs/decisions.md § Product: persistent
-    tree + contextual pane; spec aspireldap#102).
+    single page (Browse): persistent tree + contextual pane.
 
-    There is no login gate by decision (docs/decisions.md § Scope): the app binds with the
+    There is no login gate: the app binds with the
     AppHost-provided credentials and opens straight onto the directory.
 
     Theming is the data-theme attribute App.razor's boot script stamps on <html> (persisted
@@ -12,9 +11,9 @@
 *@
 @inherits LayoutComponentBase
 
-@* The boundary keeps one escaped handler exception (an interop rejection was enough,
-   #119) from killing the whole circuit: the console degrades to an inline error with a
-   way back instead of the dead reload banner. Existing .bar.err treatment, tokens only. *@
+@* The boundary keeps one escaped handler exception from killing the whole circuit: the
+   console degrades to an inline error with a way back instead of the dead reload
+   banner. Existing .bar.err treatment, tokens only. *@
 <ErrorBoundary @ref="_errors">
     <ChildContent>@Body</ChildContent>
     <ErrorContent>

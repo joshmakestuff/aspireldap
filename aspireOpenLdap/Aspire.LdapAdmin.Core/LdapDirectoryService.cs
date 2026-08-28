@@ -225,7 +225,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
             return LdapOperationResult.Invalid("A modify must carry at least one change.");
         }
 
-        // The #94 password guard, at its second door: a userPassword modification on the
+        // The password guard, at its second door: a userPassword modification on the
         // bind identity is the same silent self-brick the RFC 3062 path refuses.
         if (changes.Any(static c => c.Name.Equals("userPassword", StringComparison.OrdinalIgnoreCase))
             && DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
@@ -258,10 +258,9 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
     /// Deletes an entry. A plain delete requires a leaf — the server refuses non-leaves.
     /// With <paramref name="subtree"/>, deletes the entry's whole subtree depth-first,
     /// children before parents: the bundled OpenLDAP does not advertise the Tree Delete
-    /// control (1.2.840.113556.1.4.805; root DSE measured 2026-08-10, workspace
-    /// findings.md), so the recursion is client-side, as <c>ldapdelete -r</c> does. A
+    /// control (1.2.840.113556.1.4.805), so the recursion is client-side, as <c>ldapdelete -r</c> does. A
     /// server sizelimit does not stop the walk: a size-limited listing's partial batch is
-    /// deleted and the walk re-lists until the container empties (#118). The walk stops at
+    /// deleted and the walk re-lists until the container empties. The walk stops at
     /// the first refusal and the result names the DN that failed — a partial delete is
     /// never silent.
     /// </summary>
@@ -280,7 +279,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         }
 
         // Deleting the bind identity severs every connection the console makes from then on;
-        // refused without a round trip (#136). The subtree walk gets the ancestor check too,
+        // refused without a round trip. The subtree walk gets the ancestor check too,
         // because its children are deleted through raw DeleteRequests that never re-enter
         // this method — without it the walk would sweep the identity away mid-recursion. A
         // plain delete of an ancestor needs no guard: the server refuses non-leaves.
@@ -334,7 +333,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
                 {
                     // slapd's sizelimit cut the listing short; keep what it did return and
                     // delete that batch — this outer sweep loop re-lists and converges, so
-                    // a container larger than the limit still empties sweep by sweep (#118).
+                    // a container larger than the limit still empties sweep by sweep.
                     foreach (SearchResultEntry entry in partial.Entries)
                     {
                         children.Add(entry.DistinguishedName);
@@ -399,7 +398,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
 
         // Renaming the bind identity — or a container it lives under, which renames it just
         // as surely — desyncs the AppHost's declared credentials from the directory; refused
-        // here without a round trip, like the password guard (#94, #136).
+        // here without a round trip, like the password guard.
         if (DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
         {
             return new LdapRenameResult(LdapOperationResult.Invalid(
@@ -460,7 +459,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
 
         // A password change aimed at the console's own bind identity is refused here, without
         // a round trip: it would sever every connection the console makes from then on, and
-        // silently desync the AppHost's declared credentials from the directory (#94).
+        // silently desync the AppHost's declared credentials from the directory.
         if (DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
         {
             return LdapOperationResult.Invalid(

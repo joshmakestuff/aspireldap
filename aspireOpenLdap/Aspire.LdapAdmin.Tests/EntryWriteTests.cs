@@ -275,7 +275,7 @@ public class EntryWriteTests(LdapAdminAppHostFixture fixture)
         Assert.Equal(LdapOperationStatus.NotAllowedOnNonLeaf, refused.Status);
 
         // The subtree delete recurses children-first (the server has no Tree Delete
-        // control — workspace findings.md 2026-08-10) and takes the whole branch.
+        // control) and takes the whole branch.
         var deleted = await fixture.Directory.DeleteEntryAsync(parent, subtree: true, cts.Token);
         Assert.True(deleted.Succeeded, deleted.Message);
 

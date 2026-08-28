@@ -5,11 +5,9 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Fast witnesses for the seed model's REJECTION contracts. Before #64 the fast suite only ever
-/// called <see cref="LdapSeedValidator.Validate"/> on models that pass, so every rule below —
-/// and the "did you mean" hint that makes a rejection actionable — was unwitnessed outside the
-/// Docker-backed suite. Each test asserts the message the rule owns, so a rejection produced by
-/// a different rule (or a message that decays to nothing) is a failure.
+/// Fast witnesses for the seed model's REJECTION contracts. Each test asserts the message
+/// the rule owns, so a rejection produced by a different rule (or a message that decays to
+/// nothing) is a failure.
 /// </summary>
 public class LdapSeedValidatorTests
 {
@@ -142,7 +140,7 @@ public class LdapSeedValidatorTests
 
         Assert.Contains("references undeclared organizational unit 'peple'", message, StringComparison.Ordinal);
         // Shape #2 (near match) and the suggested candidate are the contract; the exact
-        // hint prose is not (docs/testing.md § survivor policy, aspireldap#125). "people"
+        // hint prose is not. "people"
         // appears nowhere else in this message, so the candidate assertion cannot pass by
         // accident.
         Assert.Contains("Did you mean", message, StringComparison.Ordinal);
@@ -191,7 +189,7 @@ public class LdapSeedValidatorTests
         var message = ValidateAndCaptureMessage(ldap);
 
         Assert.Contains("references undeclared user uid 'alic'", message, StringComparison.Ordinal);
-        // Shape + candidate, not prose (aspireldap#125): "alice" appears only in the
+        // Shape + candidate, not prose: "alice" appears only in the
         // suggestion — the typo'd input and the remedy both carry 'alic'.
         Assert.Contains("Did you mean", message, StringComparison.Ordinal);
         Assert.Contains("alice", message, StringComparison.Ordinal);
@@ -210,8 +208,8 @@ public class LdapSeedValidatorTests
 
         var message = ValidateAndCaptureMessage(ldap);
 
-        // The candidate choice is this test's whole point; the hint prose is not
-        // (aspireldap#125). Shape #2 carries no declared-list, so "warehouses" can only
+        // The candidate choice is this test's whole point; the hint prose is not.
+        // Shape #2 carries no declared-list, so "warehouses" can only
         // appear here if it was wrongly suggested.
         Assert.Contains("Did you mean", message, StringComparison.Ordinal);
         Assert.Contains("people", message, StringComparison.Ordinal);

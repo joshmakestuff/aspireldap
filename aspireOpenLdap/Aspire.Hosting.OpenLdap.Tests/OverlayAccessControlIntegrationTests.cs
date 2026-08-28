@@ -9,7 +9,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
 /// Docker-backed runtime witnesses for the privileged cn=config apply paths behind
-/// <c>WithOverlay(...)</c> and <c>WithAccessControl(...)</c> (issue #38). LDIF generation for
+/// <c>WithOverlay(...)</c> and <c>WithAccessControl(...)</c>. LDIF generation for
 /// both is unit-tested; these tests prove the generated files actually apply inside the
 /// container and change server behavior — overlay population and ACL enforcement — via the
 /// TestAppHost's <c>config-witness</c> scenario.
@@ -47,7 +47,7 @@ public class OverlayAccessControlIntegrationTests(AppHostFixture appHost)
         Assert.Contains("cn=devs,ou=groups,dc=example,dc=org",
             memberOf.GetValues(typeof(string)).Cast<string>());
 
-        // (#58) export-ldif dashboard-command witness, folded in here so the suite doesn't
+        // export-ldif dashboard-command witness, folded in here so the suite doesn't
         // pay another container start. Executing through ResourceCommandService proves the
         // whole chain — container-runtime resolution, `exec` against the live container, and
         // slapcat reading the seeded directory — not just the handler wiring.
@@ -66,7 +66,7 @@ public class OverlayAccessControlIntegrationTests(AppHostFixture appHost)
 
         // Explicit Bind() is the auth-rule witness. CreateConnection never binds (SDS.P binds
         // lazily on the first request), and with the rules applied slapd's implicit default is
-        // deny — verified empirically: without the generated "attrs=userPassword ... by
+        // deny — without the generated "attrs=userPassword ... by
         // anonymous auth" rule these binds fail with invalid credentials, so succeeding here
         // proves that rule landed.
         using var svcConnection = CreateUserConnection(admin, SvcDn, "svc-password");

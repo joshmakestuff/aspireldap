@@ -6,7 +6,7 @@ namespace Aspire.LdapAdmin.Core;
 /// <summary>
 /// The per-entry LDIF surface: renders an entry as a content record, and turns an edited
 /// draft back into the <see cref="LdapAttributeChange"/>s that make the entry match it.
-/// Shared by the entry detail's LDIF tab (#113) and the LDIF view (#110).
+/// Shared by the entry detail's LDIF tab and the LDIF view.
 /// </summary>
 public static class LdapEntryLdif
 {

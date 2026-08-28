@@ -9,7 +9,7 @@ using MainLayout = Aspire.LdapAdmin.Web.Components.Layout.MainLayout;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The #119 contract: no clipboard failure — missing API, rejection, dead circuit — may
+/// No clipboard failure — missing API, rejection, dead circuit — may
 /// ever escape into a Blazor event handler. The guarantee lives in ConsoleClipboard, the
 /// single copy path both Browse and the search panel use.
 /// </summary>
@@ -41,12 +41,12 @@ public sealed class ConsoleClipboardTests : TestContext
 }
 
 /// <summary>
-/// The layout's ErrorBoundary (#119): an exception escaping any handler inside the shell
+/// The layout's ErrorBoundary: an exception escaping any handler inside the shell
 /// degrades to an inline error with a way back, never a dead circuit.
 /// </summary>
 public sealed class MainLayoutErrorBoundaryTests : TestContext
 {
-    /// <summary>A component whose click handler throws — the #119 failure shape, owned by
+    /// <summary>A component whose click handler throws, owned by
     /// a real component so the renderer routes the exception to the nearest boundary.</summary>
     private sealed class Boom : ComponentBase
     {

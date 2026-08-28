@@ -5,11 +5,11 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Witnesses for #57: relative schema/seed/TLS paths resolve against the AppHost project
+/// Relative schema/seed/TLS paths resolve against the AppHost project
 /// directory (matching Aspire's own WithBindMount), not the process working directory.
 /// Every test here creates its files ONLY under a temp AppHost directory while the test
-/// process CWD points elsewhere — under the old CWD-based resolution these calls threw
-/// FileNotFoundException, so a passing mount-source assertion proves the new base.
+/// process CWD points elsewhere, so a passing mount-source assertion proves AppHost-dir
+/// resolution.
 /// </summary>
 public class AppHostRelativePathTests
 {

@@ -24,15 +24,13 @@ internal static class OpenLdapDnValidation
     /// </summary>
     [SuppressMessage("Design", "MA0051:Method is too long",
         Justification = "A linear list of validation rules, each with the message it produces; " +
-        "splitting it separates a rule from its rationale (#63).")]
+        "splitting it separates a rule from its rationale.")]
     public static void ValidateBaseDn(string baseDn, string paramName)
     {
         RejectControlCharacters(baseDn, paramName, "Base DN");
 
-        // An unescaped ';' inside a value is rejected by Dn.Parse itself since LdifDotNet 0.5.0
-        // (ldifdotnet#43) — RFC 4514 requires '\;', and slapd rejects the unescaped form as an
-        // olcSuffix value. The string-level pre-parser guard this integration carried for that
-        // case is gone; the parse below covers it.
+        // An unescaped ';' inside a value is rejected by Dn.Parse itself — RFC 4514 requires
+        // '\;', and slapd rejects the unescaped form as an olcSuffix value.
         IReadOnlyList<RelativeDistinguishedName> rdns;
         try
         {

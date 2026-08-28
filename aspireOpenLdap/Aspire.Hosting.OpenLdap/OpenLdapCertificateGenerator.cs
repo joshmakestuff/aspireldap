@@ -16,11 +16,10 @@ internal static class OpenLdapCertificateGenerator
     private static readonly TimeSpan RegenWithinExpiry = TimeSpan.FromDays(30);
 
     /// <summary>
-    /// Generation takes well under a second, so this bounds only the wait on a stuck peer
-    /// (paused under a debugger, leaked handle — a killed process releases its handle).
-    /// The fresh path pays the same wait when a peer holds the lock, which is why the
-    /// window is short: EnsureCertificates runs synchronously during AppHost model
-    /// construction, and a stuck peer must become a prompt, named error, not a half-minute
+    /// Bounds only the wait on a stuck peer (paused under a debugger, leaked handle — a killed
+    /// process releases its handle). The fresh path pays the same wait when a peer holds the
+    /// lock, which is why the window is short: EnsureCertificates runs synchronously during
+    /// AppHost model construction, and a stuck peer must become a prompt, named error, not a
     /// silent stall.
     /// </summary>
     private const int LockAcquireTimeoutMs = 10_000;
@@ -207,8 +206,8 @@ internal static class OpenLdapCertificateGenerator
         RandomNumberGenerator.Fill(serialNumber);
         using var serverCert = serverRequest.Create(caCert, notBefore, notAfter, serialNumber);
 
-        // Write the whole set to temp files first, then move into place — an interruption can
-        // no longer leave a mixed old/new set behind, and CertsAreFresh rejects any mix that
+        // Write the whole set to temp files first, then move into place — an interruption
+        // cannot leave a mixed old/new set behind, and CertsAreFresh rejects any mix that
         // does slip through (e.g. a crash between the moves).
         //
         // The private key deliberately keeps default (umask, typically world-readable)

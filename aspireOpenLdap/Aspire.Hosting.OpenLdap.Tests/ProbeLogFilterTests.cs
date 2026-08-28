@@ -181,7 +181,7 @@ public class ProbeLogFilterTests : IDisposable
 
         // The filter's fail-open contract deliberately releases a withheld probe block whole
         // on any surprise — including a delivery stall past MAX_PENDING_SECONDS, which a
-        // loaded CI runner can produce (#143). So "sentinel absent" is not a guaranteed
+        // loaded CI runner can produce. So "sentinel absent" is not a guaranteed
         // property of a single probe. Distinguish the two outcomes instead: a legitimate
         // fail-open flush surfaces the COMPLETE block (ACCEPT through closed) and merely
         // costs a retry; a fragment — sentinel without its block, or the root-DSE line

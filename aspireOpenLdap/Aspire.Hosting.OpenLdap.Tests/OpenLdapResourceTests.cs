@@ -4,8 +4,6 @@ using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
 
-// The becomes-healthy smoke test that used to live here was deleted (#41): the telemetry
-// integration starts the same default AppHost, waits for health, and performs a real search.
 public class OpenLdapResourceTests
 {
     [Fact]
@@ -20,7 +18,7 @@ public class OpenLdapResourceTests
 
         Assert.Equal(ContainerMountType.Volume, mount.Type);
         Assert.Equal(VolumeNameGenerator.Generate(ldap, "data"), mount.Source);
-        // The old default was the globally shared "{resourceName}-data".
+        // The default is AppHost-scoped, not the globally shared "{resourceName}-data".
         Assert.NotEqual("ldap-data", mount.Source);
         Assert.EndsWith("-ldap-data", mount.Source);
     }

@@ -5,7 +5,7 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// Pure tests for the per-entry LDIF surface (#113/#110): the entry renders as one content
+/// Pure tests for the per-entry LDIF surface: the entry renders as one content
 /// record, and an edited draft diffs back into exactly the changes that make the entry
 /// match — with everything the diff cannot honestly apply refused, never guessed at.
 /// </summary>

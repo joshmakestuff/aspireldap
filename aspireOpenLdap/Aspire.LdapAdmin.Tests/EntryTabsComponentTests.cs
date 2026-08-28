@@ -9,10 +9,9 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// Component and display-logic tests for the entry detail tabs (#113): the Overview tab's
-/// kind-driven field sets and honest save semantics, the LDIF tab's draft/apply flow, and
-/// the entry-semantic stat strip. Browser verification in both themes remains a separate,
-/// mandatory gate (docs/method.md); these tests do not replace it.
+/// Component and display-logic tests for the entry detail tabs: the Overview tab's
+/// kind-driven field sets and save semantics, the LDIF tab's draft/apply flow, and the
+/// entry-semantic stat strip.
 /// </summary>
 public sealed class EntryTabsComponentTests : TestContext
 {

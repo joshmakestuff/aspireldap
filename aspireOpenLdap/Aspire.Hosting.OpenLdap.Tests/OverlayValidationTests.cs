@@ -5,7 +5,7 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Witnesses for #61: invalid overlay declarations fail at the factory or fluent call
+/// Invalid overlay declarations fail at the factory or fluent call
 /// (AppHost model construction), not later inside the container bootstrap.
 /// </summary>
 public class OverlayValidationTests

@@ -10,8 +10,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%92%3C/text%3E%3C/svg%3E" />
     @* Theme boot: stamps data-theme on <html> before first paint so neither theme flashes.
        A persisted choice wins; otherwise the AppHost default (LdapAdmin__Theme), with
-       System resolving through prefers-color-scheme. Dark is a token-override layer only
-       (docs/decisions.md § Product, 2026-08-10). *@
+       System resolving through prefers-color-scheme. Dark is a token-override layer only. *@
     <script>
         (function () {
             var mode = null;
@@ -26,8 +25,8 @@
         })();
     </script>
     <ResourcePreloader />
-    @* The Industry design system (docs/decisions.md § Product, 2026-08-10): self-hosted
-       fonts, the vendored token sheet, then the console styles that build on it. *@
+    @* The Industry design system: self-hosted fonts, the vendored token sheet, then the
+       console styles that build on it. *@
     <link rel="stylesheet" href="@Assets["css/fonts.css"]" />
     <link rel="stylesheet" href="@Assets["css/industry-styles.css"]" />
     <link rel="stylesheet" href="@Assets["css/console.css"]" />

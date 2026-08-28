@@ -1,6 +1,6 @@
 @*
-    The handoff's three-step new-entry wizard (§ 5) on the ConsoleDialog frame, schema-aware
-    (#105): object classes → attributes → review-as-LDIF.
+    A three-step new-entry wizard on the ConsoleDialog frame, schema-aware:
+    object classes → attributes → review-as-LDIF.
 
     Step 1 chains object classes: picking inetOrgPerson brings organizationalPerson, person
     and top with it (SchemaGuide.WithSuperiors) — an entry cannot be composed without its
@@ -219,7 +219,7 @@
 
     // The schema-derived sets recompute only when their inputs change (picked classes,
     // RDN attribute, added MAYs), not per render: typing in a step-2 field re-renders on
-    // every keystroke, and re-walking the schema each time was the measured hotspot (#123).
+    // every keystroke, so the schema walk is deferred to those inputs.
     private IReadOnlyList<string>? _chainedCache;
     private (IReadOnlyList<string> Must, IReadOnlyList<string> May)? _setsCache;
     private IReadOnlyList<string>? _rdnChoicesCache;
@@ -418,7 +418,7 @@
             }
             // Default the RDN attribute once classes are known, and re-default it when a
             // class change removed the current one — a stale attribute would compose an
-            // RDN the select never offered (#120).
+            // RDN the select never offered.
             var choices = RdnChoices;
             if (choices.Count > 0 && !choices.Contains(_rdnAttribute, StringComparer.OrdinalIgnoreCase))
             {

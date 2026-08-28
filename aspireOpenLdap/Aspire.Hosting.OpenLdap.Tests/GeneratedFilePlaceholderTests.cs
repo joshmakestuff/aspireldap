@@ -5,7 +5,7 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// Witnesses for #128: <see cref="OpenLdapMounts.PrepareGeneratedFile"/> is called on a
+/// <see cref="OpenLdapMounts.PrepareGeneratedFile"/> is called on a
 /// deterministic path shared by every parallel builder in this test process (and by
 /// concurrent test processes in the mutation run), so it must create the placeholder
 /// atomically, tolerate concurrent callers, and never truncate content a prior run wrote.

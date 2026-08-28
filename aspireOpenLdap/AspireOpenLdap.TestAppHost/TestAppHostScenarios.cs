@@ -5,7 +5,7 @@ namespace AspireOpenLdap.TestAppHost;
 /// <c>--OpenLdap:Scenario=&lt;name&gt;</c> switch. Modelling them as one selector rather than a
 /// set of independent boolean flags makes the exclusivity structural: combinations that are
 /// concretely broken (a seed directory plus the config-witness seed both mounting root-bearing
-/// LDIFs into <c>/ldifs</c>, which aborts slapd with err 68) are no longer expressible.
+/// LDIFs into <c>/ldifs</c>, which aborts slapd with err 68) cannot be expressed.
 /// </summary>
 public static class TestAppHostScenarios
 {

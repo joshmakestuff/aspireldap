@@ -2,7 +2,7 @@ namespace Aspire.LdapAdmin.Core;
 
 /// <summary>
 /// The broad kind of an entry, decided from its objectClass values. Drives which Overview
-/// field set and which stat tiles the detail pane renders (design handoff § 1); it never
+/// field set and which stat tiles the detail pane renders; it never
 /// gates what an entry may contain — the schema does that.
 /// </summary>
 public enum LdapEntryKind

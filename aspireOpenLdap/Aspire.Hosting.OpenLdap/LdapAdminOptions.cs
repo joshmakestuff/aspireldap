@@ -8,7 +8,7 @@ namespace Aspire.Hosting.ApplicationModel;
 /// </summary>
 /// <remarks>
 /// These are dev-AppHost-set defaults, not end-user chrome — the admin UI deliberately grows no
-/// settings pages (docs/decisions.md). This object is the single home for future defaulted
+/// settings pages. This object is the single home for future defaulted
 /// behavior; new knobs join it instead of becoming ad-hoc <c>WithLdapAdmin</c> parameters.
 /// </remarks>
 public sealed class LdapAdminOptions

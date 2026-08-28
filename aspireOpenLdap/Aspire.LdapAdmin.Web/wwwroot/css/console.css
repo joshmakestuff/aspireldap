@@ -1,18 +1,17 @@
-/* LdapAdmin console styles — the app-shell and screen classes from the design handoff
-   (design_handoff_ldap_admin/reference/LdapAdmin.dc.html), ported as written. Every color,
+/* LdapAdmin console styles — the app-shell and screen classes. Every color,
    font, spacing, radius and shadow resolves through the industry-styles.css tokens; this
-   file adds no literals the tokens already carry (industry-ui skill).
+   file adds no literals the tokens already carry.
 
    Shared across components on purpose (rail, pane, dialogs, toast), so it is global CSS,
    not a scoped .razor.css. */
 
 :root { --rail-w: 292px; }
 
-/* ── Dark theme — a token-override layer, never per-component rules (docs/decisions.md
-      § Product, 2026-08-10). The tonal ramps are redefined dark-for-light (100 ↔ 900), so
-      every usage flip the design needs happens by token resolution alone: hover/pressed
-      land on the old 400, tinted fills on the old 800/900, text-on-tint on the old
-      100/200, body-size accent text on the old 300. The divider re-derives from
+/* ── Dark theme — a token-override layer, never per-component rules. The tonal ramps
+      are redefined dark-for-light (100 ↔ 900), so every usage flip the design needs
+      happens by token resolution alone: hover/pressed land on the light theme's 400,
+      tinted fills on the light 800/900, text-on-tint on the light
+      100/200, body-size accent text on the light 300. The divider re-derives from
       --color-text and inverts for free; the shadows become a hairline light edge plus
       ambient darkness, as the token sheet's own comment specifies for a dark ground.
       neutral-900 is the one non-mirrored step: only the dialog backdrop consumes it, and
@@ -102,7 +101,7 @@
 .trow.more{color:color-mix(in srgb,var(--color-text) 55%,transparent);font-size:12px;font-style:italic}
 .trow.more.cap{color:var(--color-accent-700);font-style:normal} /* 12px body text: the base
    accent is ~3.8:1 on the light bg — chrome-only per the design system; 700 reads in both themes */
-/* .tk badges no longer render in the tree (removed by decision — the RDN already names its
+/* .tk badges do not render in the tree (the RDN already names its
    attribute type); the class remains for the entry/schema tables' small badges. */
 .tk{font-size:9px;letter-spacing:.06em;padding:0 4px;flex:none;border:1px solid var(--color-divider);color:color-mix(in srgb,var(--color-text) 60%,transparent)}
 .tlabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -145,7 +144,7 @@
    overflows, thin and token-tinted, which also suits the wireframe language. */
 .rail,.pane,.ta,.dbody,.pre{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--color-text) 35%,transparent) transparent}
 
-/* ── Owned picker (schema-aware dialogs, #103/#105) ────────────────────────
+/* ── Owned picker (schema-aware dialogs) ──────────────────────────────────
    A filterable dropdown on native elements: .input above an absolutely positioned
    option list. Guidance, not enforcement — free text stays valid. */
 .combo{position:relative}
@@ -173,7 +172,7 @@
    accent color the design system does not have. */
 .bar.err{border-color:color-mix(in srgb,var(--color-text) 60%,transparent);background:color-mix(in srgb,var(--color-text) 7%,transparent)}
 .toast{position:fixed;left:50%;bottom:var(--space-8);transform:translateX(-50%);padding:10px 18px;font-size:13px;border:1px solid var(--color-accent);background:var(--color-bg);box-shadow:var(--shadow-md);z-index:40}
-/* As a manual popover (top layer, above modal dialogs — #117) the popover UA styles
+/* As a manual popover (top layer, above modal dialogs) the popover UA styles
    (inset:0;margin:auto;border:solid;padding:0.25em;background:canvas;overflow:auto) must
    be beaten back to the toast's own token treatment above. */
 .toast[popover]{inset:auto;left:50%;bottom:var(--space-8);margin:0;overflow:visible;padding:10px 18px;border:1px solid var(--color-accent);background:var(--color-bg);color:var(--color-text)}
@@ -182,23 +181,24 @@
 .step[aria-current=true]{color:var(--color-accent)}
 /* The panel never scrolls itself: its corner registration marks sit 6px outside the frame
    by design, so a scrolling .wide permanently "overflows" by 6px and its auto scrollbars
-   flip on every re-render (measured — the per-keystroke flicker). Only .dbody scrolls;
+   flip on every re-render (the per-keystroke flicker). Only .dbody scrolls;
    the title and actions stay pinned on the frame. */
 .wide{width:min(720px,100%);display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-6);border:1px solid var(--color-divider);background:var(--color-bg);box-shadow:var(--shadow-lg);max-height:88vh;min-height:0}
 .dbody{display:flex;flex-direction:column;gap:var(--space-3);overflow:auto;min-height:0;flex:1 1 auto;scrollbar-gutter:stable}
 /* Inside a dialog the flex gap owns vertical rhythm; paragraph margins would double it. */
 .dbody p{margin:0}
-/* Native <dialog> UA overrides (#117): dialog:modal ships overflow:auto — the −6px corner
-   marks would re-trigger the measured scrollbar oscillation above, so the panel stays
+/* Native <dialog> UA overrides: dialog:modal ships overflow:auto — the −6px corner
+   marks would re-trigger the scrollbar oscillation above, so the panel stays
    overflow:visible and .dbody remains the only scroll container. The UA's color:CanvasText
    would also bypass the dark-mode token layer; text color comes from the token. */
 dialog.wide{overflow:visible;color:var(--color-text)}
-/* The scrim the .dialog-backdrop div used to paint; ::backdrop inherits custom properties
+/* ::backdrop paints the scrim and inherits custom properties
    from the dialog. neutral-900 stays the one non-mirrored dark step — a scrim must darken,
-   not fog (see the token block). Top-layer stacking replaces the old z-index ladder. */
+   not fog (see the token block). Top-layer stacking puts the dialog above page content
+   with no z-index management. */
 dialog.wide::backdrop{background:color-mix(in srgb,var(--color-neutral-900) 50%,transparent)}
 /* The dialog panel takes initial focus (tabindex=-1) so opening a modal does not flash the
-   2px ring on its first field (#109). The panel is a container, not a control — the ring
+   2px ring on its first field. The panel is a container, not a control — the ring
    rule ("never removed") applies to interactive elements; Tab moves focus onward and every
    control keeps its ring. */
 dialog.wide:focus-visible{outline:none}

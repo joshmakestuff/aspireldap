@@ -97,9 +97,9 @@ public class InitializationIntegrityTests : IDisposable
             "-e", $"LDAP_ADMIN_PASSWORD={password}",
             image);
 
-        // Wait for init to finish, then bind with the EXACT caller-supplied bytes. Before the
-        // printf fix, unquoted expansion collapsed whitespace / expanded globs before hashing,
-        // so this bind failed with err=49 even though the env round-tripped the value.
+        // Wait for init to finish, then bind with the EXACT caller-supplied bytes: shell
+        // expansion of an unquoted value would collapse whitespace / expand globs before
+        // hashing, so the bind must fail with err=49 if the password loses fidelity.
         var deadline = DateTime.UtcNow.AddMinutes(5);
         DockerResult whoami;
         do
@@ -121,9 +121,8 @@ public class InitializationIntegrityTests : IDisposable
     [Fact]
     public async Task Country_Base_Dn_Initializes_With_Country_Root_Entry()
     {
-        // c=US is a valid suffix that previously killed the container at "Creating LDAP
-        // default tree": the generated root entry assumed dcObject/organization and never
-        // emitted the naming c attribute (F04).
+        // c=US is a valid suffix: the generated root entry must use the country object class
+        // and emit the naming c attribute, not assume dcObject/organization.
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var image = await BundledImage.GetAsync(cts.Token);
 
@@ -158,7 +157,7 @@ public class InitializationIntegrityTests : IDisposable
     [Fact]
     public async Task Seeded_User_Password_Is_Hashed_At_Rest_And_Binds_With_Cleartext()
     {
-        // F05: the typed seed generator stores userPassword as {SSHA}. Prove end-to-end that
+        // The typed seed generator stores userPassword as {SSHA}. Prove end-to-end that
         // (a) the seeded user can still bind with the original cleartext password and
         // (b) the directory holds only the hash at rest.
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));

@@ -1,7 +1,7 @@
 @*
-    The app shell and directory browser in one page, in the Industry design handoff's
-    layout: top bar (brand + connection chip + refresh + theme), view tabs (Directory /
-    Search / Schema), then the work grid — tree rail, drag-handle separator, contextual
+    The app shell and directory browser in one page: top bar (brand + connection chip +
+    refresh + theme), view tabs (Directory / Search / Schema), then the work grid — tree
+    rail, drag-handle separator, contextual
     pane. The tree lives here and is never re-created on a view switch, so browse context
     survives searching and reading the schema. Search and Schema render as always-alive
     panels toggled by display, not @if — their state survives view switches too.
@@ -9,7 +9,7 @@
     Scroll model: the page NEVER scrolls. The .app grid is viewport-sized with definite
     rows; .rail and .pane are the two scroll regions (console.css).
 
-    Tree behavior (design handoff § Tree, deliberate substitute for virtualization):
+    Tree behavior (caps instead of virtualization):
     children load on first expand via one-level searches with SizeLimit = CAP + 1; an
     expanded node renders at most PAGE children at a time behind a "show more" row; at CAP
     the row becomes "search this container", which lands on the Search view preset to that
@@ -137,8 +137,7 @@
                         }
                     </div>
 
-                    @* Entry tabs (design handoff § 1). The relationship tab (Members /
-                       Member of) arrives with #101. Panels toggle by display so the
+                    @* Entry tabs. Panels toggle by display so the
                        Attributes tab's expand state survives a tab switch. *@
                     <div class="dtabs" role="tablist" aria-label="Entry detail">
                         <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Overview)"
@@ -199,7 +198,7 @@
     <DeleteDialog Model="deleteDialog" OnClose="CloseDialogs" />
 }
 
-@* popover=manual: dialogs are top-layer natives now (#117), and the design rule is that
+@* popover=manual: dialogs are top-layer natives, and the design rule is that
    write confirmations stay visible over an open dialog — the toast joins the top layer
    after the dialog, so it paints above. Known limit: a toast already showing when a
    dialog opens sits under it for its remaining ≤2.6 s. *@
@@ -209,11 +208,11 @@
 }
 
 @code {
-    /// <summary>Children an expanded node reveals per "show more" click (design handoff).</summary>
+    /// <summary>Children an expanded node reveals per "show more" click.</summary>
     internal const int Page = 12;
 
     /// <summary>
-    /// The most children a node ever renders (design handoff): past it, the row hands off to
+    /// The most children a node ever renders: past it, the row hands off to
     /// the Search view. Child fetches use Cap + 1 so "more than Cap exist" is knowable.
     /// </summary>
     internal const int Cap = 48;
@@ -273,7 +272,7 @@
     /// </summary>
     private bool _schemaVisited;
 
-    /// <summary>Same lazy-then-alive pattern for the LDIF view (#110).</summary>
+    /// <summary>Same lazy-then-alive pattern for the LDIF view.</summary>
     private bool _ldifVisited;
 
     private string ViewTitle => _view switch
@@ -289,7 +288,7 @@
     /// <summary>Hides an inactive panel without destroying it; the wrapper div is owned markup.</summary>
     private string? PanelDisplay(AdminView view) => _view == view ? null : "display: none;";
 
-    // ---- Entry tabs (#113) --------------------------------------------------------------
+    // ---- Entry tabs ----------------------------------------------------------------------
 
     private enum EntryTab
     {
@@ -360,8 +359,8 @@
     {
         try
         {
-            // The root row shows its first RDN like every other row (design reference:
-            // "dc=aspire", not the whole base DN); the full DN stays in the topbar's model.
+            // The root row shows its first RDN like every other row ("dc=aspire", not the
+            // whole base DN); the full DN stays in the topbar's model.
             var root = new TreeNode { Dn = Directory.BaseDn, Rdn = FirstRdn(Directory.BaseDn), HasChildren = true };
             await ExpandAsync(root, AutoExpandDepth);
             _root = root;
@@ -371,7 +370,7 @@
             _error = Describe(ex);
         }
 
-        // For the schema-aware dialogs (#103/#105). Process-lifetime cached in the service;
+        // For the schema-aware dialogs. Process-lifetime cached in the service;
         // an unreadable subschema comes back as data (Available = false), never a throw.
         var schema = await SchemaService.GetSchemaAsync();
         _dialogSchema = schema.Available ? schema.Schema : null;
@@ -428,7 +427,7 @@
         if (node.Children is null)
         {
             var children = await Directory.GetChildrenAsync(node.Dn, limit: Cap + 1);
-            // Display order only — the AppHost-set default (#98); truncation semantics are
+            // Display order only — the AppHost-set default; truncation semantics are
             // the server's and are not affected by how the returned children are ordered.
             var ordered = Settings.DefaultSortOrder == LdapAdminSortOrder.Rdn
                 ? children.Children.OrderBy(static c => c.Rdn, StringComparer.OrdinalIgnoreCase)
@@ -485,9 +484,8 @@
         return rows;
     }
 
-    // Static and internal so the row contract is testable without a renderer (EntryView
-    // precedent) — Browse cannot render under bUnit, and the filter/cap interplay is
-    // exactly the kind of logic that must not be witness-free (#121).
+    // Static and internal so the row contract is testable without a renderer — Browse
+    // cannot render under bUnit, and the filter/cap interplay is unit-tested.
     internal static void Walk(TreeNode node, int depth, string query, string? selectedDn, List<Row> rows)
     {
         var filtering = query.Length > 0;
@@ -514,7 +512,7 @@
         {
             // A capped node stays in the rail under a filter even with no loaded match (it
             // cannot prove one is absent); it renders closed with its "N+" badge, and the cap
-            // row beneath is the escape hatch into Search (#121).
+            // row beneath is the escape hatch into Search.
             if (filtering && node.Capped)
             {
                 rows.Add(CapRow(node, depth));
@@ -548,7 +546,7 @@
 
     /// <summary>
     /// The directory has more children than Cap; the row hands off to Search scoped to this
-    /// container, which pages properly (design handoff § Tree behavior).
+    /// container, which pages properly.
     /// </summary>
     private static Row CapRow(TreeNode node, int depth) => new(
         Key: node.Dn + "::cap", Node: node,
@@ -560,7 +558,7 @@
     /// <summary>
     /// A node is visible under the filter when its RDN matches or a loaded descendant's does —
     /// or when it is capped: unloaded children may match, so a capped node can never prove a
-    /// non-match, and hiding it would read as "no such entry" (#121).
+    /// non-match, and hiding it would read as "no such entry".
     /// </summary>
     internal static bool FilterVisible(TreeNode node, string query) =>
         node.Capped
@@ -580,11 +578,10 @@
         if (row.IsCap)
         {
             // Land on real results: base = this container, one level, match-all filter. The
-            // URL names the same container the search runs against (it used to carry the
-            // lingering selection, so the address bar named a different DN than the results).
-            // Selection comes FIRST: once DeepLinkDn equals the selection, the deep-link
-            // cascade in OnParametersSetAsync has nothing to re-select, so it cannot bounce
-            // the view back to the browser through SelectAsync's view-dropping URL rewrite.
+            // URL names the container the search runs against. Select first: once DeepLinkDn
+            // equals the selection, the deep-link cascade in OnParametersSetAsync has nothing
+            // to re-select and cannot bounce the view back to the browser through
+            // SelectAsync's view-dropping URL rewrite.
             await SelectAsync(row.Node!.Dn, reveal: false);
             Navigation.NavigateTo(Url(AdminView.Search, row.Node!.Dn), forceLoad: false);
             if (_searchPanel is not null)
@@ -666,7 +663,7 @@
     {
         // Keep the address bar naming the entry on screen; replace, not push — selecting is
         // view state, and pushing would make Back step through every entry visited. The view
-        // param is dropped deliberately: selecting an entry is a browse action, so a tree
+        // param is dropped: selecting an entry is a browse action, so a tree
         // click while the search or schema panel is open switches the pane to the editor.
         if (!string.Equals(DeepLinkDn, dn, StringComparison.Ordinal) || _view != AdminView.Browse)
         {
@@ -828,7 +825,7 @@
         _ = InvokeAsync(() => ShowToast(args.Message));
     }
 
-    /// <summary>One toast at a time, bottom center, auto-cleared (design handoff § Toast).</summary>
+    /// <summary>One toast at a time, bottom center, auto-cleared.</summary>
     private void ShowToast(string message)
     {
         _toastCts?.Cancel();
@@ -885,7 +882,7 @@
 
     /// <summary>
     /// One dialog at a time is a shell invariant, not a UI accident: the toolbar stays
-    /// live while a dialog is open, and a second open would orphan the first mid-save (#117).
+    /// live while a dialog is open, and a second open would orphan the first mid-save.
     /// </summary>
     private bool DialogOpen =>
         _attributeDialog is not null || _newEntry is not null
@@ -930,7 +927,7 @@
         if (!DialogOpen && _selectedDn is { } dn && _entry is { } entry)
         {
             // Prefill with the current RDN — renaming usually edits a name, not retypes it.
-            // A multi-valued RDN prefills from its first component (#106).
+            // A multi-valued RDN prefills from its first component.
             var attribute = string.Empty;
             var value = string.Empty;
             try
@@ -1017,7 +1014,7 @@
     {
         var newParent = dialog.NewParentDn.Length > 0 ? dialog.NewParentDn : null;
         // The dialog validated attribute and value; Dn.Rdn escapes, so a typed comma or
-        // plus is a value character, never DN structure (#106).
+        // plus is a value character, never DN structure.
         var newRdn = Dn.Rdn(dialog.RdnAttribute.Trim(), dialog.RdnValue.Trim());
         LdapRenameResult rename;
         try
@@ -1152,7 +1149,7 @@
     }
 
     /// <summary>
-    /// The entry header's human title (design reference: "Alice Chen", not "alice.chen"):
+    /// The entry header's human title ("Alice Chen", not "alice.chen"):
     /// the display name when the entry carries one, the RDN's value part otherwise. The
     /// attribute order matches SearchPanel's name column (cn before displayName) so both
     /// surfaces agree on an entry's name. Binary values are skipped — base64 is not a title.

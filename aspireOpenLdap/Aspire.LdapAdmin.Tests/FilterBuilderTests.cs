@@ -10,10 +10,9 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The search query builder (#111): the flat filter model's compose/parse contract, and the
+/// The search query builder: the flat filter model's compose/parse contract, and the
 /// two-way raw ⇄ builder sync in the rendered panel — the raw field wins once hand-edited,
-/// until a builder control is touched (design handoff § 2). Browser verification in both
-/// themes remains a separate, mandatory gate (docs/method.md).
+/// until a builder control is touched.
 /// </summary>
 public sealed class FilterBuilderTests
 {

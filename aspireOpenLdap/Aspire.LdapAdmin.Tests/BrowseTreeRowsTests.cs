@@ -4,8 +4,8 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The rail's row contract under the RDN filter (#121) — pure display logic, no renderer
-/// (EntryView precedent). The rule under test: a capped container is never hidden and never
+/// The rail's row contract under the RDN filter — pure display logic, no renderer.
+/// The rule under test: a capped container is never hidden and never
 /// silent. A filter cannot prove an unloaded child absent, so the node stays visible and the
 /// "search this container" row stays with it; anything less reads as "no such entry", the one
 /// wrong answer a directory browser must never give.
@@ -62,8 +62,8 @@ public class BrowseTreeRowsTests
     [Fact]
     public void A_capped_child_is_never_filtered_out_of_its_parent()
     {
-        // Case B of the finding: pre-fix, FilterVisible dropped the whole capped container and
-        // the rail collapsed to the root — the literal "no such entry" misread.
+        // A capped container with no loaded match stays in the rail; hiding it would read
+        // as "no such entry".
         var root = Node("dc=example", capped: false, open: true,
             Node("ou=hosts", capped: true, open: true, Node("uid=host-1")),
             Node("ou=people", capped: false, open: true, Node("uid=alice")));

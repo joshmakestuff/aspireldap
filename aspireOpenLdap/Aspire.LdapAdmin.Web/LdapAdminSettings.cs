@@ -7,7 +7,7 @@ namespace Aspire.LdapAdmin.Web;
 /// Defaults here equal the hosting-side defaults, so a host started without the variables
 /// (an older hosting package, a bare launch) behaves identically to one given the defaults
 /// explicitly. Deliberately not user-editable: defaults are AppHost-set, and the UI grows no
-/// settings pages (docs/decisions.md).
+/// settings pages.
 /// </summary>
 public sealed class LdapAdminSettings
 {

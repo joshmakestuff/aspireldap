@@ -7,11 +7,11 @@ using Xunit.Abstractions;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 /// <summary>
-/// The clean-consumer test (#82): packs JoshMakeStuff.Aspire.Hosting.OpenLdap, restores the pack
+/// The clean-consumer test: packs JoshMakeStuff.Aspire.Hosting.OpenLdap, restores the pack
 /// into a minimal consumer AppHost scaffolded in an isolated temp workspace (no project
 /// references, no source-checkout paths), and runs <c>AddOpenLdap(...).WithLdapAdmin()</c> end to
-/// end — proving the packed artifact alone delivers the OpenLDAP build context, the admin
-/// container payload (#78), and a working admin→LDAP path over required TLS.
+/// end — the packed artifact alone must deliver the OpenLDAP build context, the admin
+/// container payload, and a working admin→LDAP path over required TLS.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,7 +24,7 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// Category=CleanConsumer (not Integration): CI runs it as its own publish-gating job, and both
 /// suite filters plus the stryker configs exclude it. It joins <see cref="AppHostCollection"/>
 /// and holds <see cref="DockerHostGate"/> for the consumer's full run — the run boots a DCP host
-/// and builds two images, exactly the overlap the gate exists to prevent (#54).
+/// and builds two images, exactly the overlap the gate exists to prevent.
 /// </para>
 /// </remarks>
 [Collection(AppHostCollection.Name)]
@@ -157,7 +157,7 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
                 .WithUser("alice", "alice-password", ou: "people")
                 .WithTls()
                 .WithRequiredTls()
-                // The options overload (#98) rides along at no extra cost: the packed artifact
+                // The options overload rides along: the packed artifact
                 // must deliver it, and the admin host must bind the LdapAdmin__* values it
                 // emits — a bad binding fails startup, which the health/home probes catch.
                 .WithLdapAdmin(admin => admin.Theme = LdapAdminTheme.Dark);

@@ -8,7 +8,7 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The DN display contract from issue #83 (old #55): the suffix every result row shares is
+/// The DN display contract: the suffix every result row shares is
 /// stated once, rows show the relative form, and stripping never introduces ambiguity —
 /// escaped commas are not split points, and a row whose whole DN is the suffix keeps it.
 /// </summary>
@@ -143,7 +143,7 @@ public class BinaryValueLabelTests
 }
 
 /// <summary>
-/// The attribute value display cap (#98, absorbed #100): at most the AppHost-set cap of values
+/// The attribute value display cap: at most the AppHost-set cap of values
 /// renders, and a cap in effect is always surfaced — "N of M values" plus an explicit expand —
 /// never silent.
 /// </summary>
