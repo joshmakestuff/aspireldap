@@ -53,12 +53,12 @@
   per-file moves into a mismatched CA/server pair, or race a `File.Move(overwrite: true)` against
   a concurrent freshness read. Covered by a fast two-process concurrency test.
 
-- **Schema filter is single-sourced and regression-pinned**
-  ([#116](https://github.com/joshmakestuff/aspireldap/issues/116)): the filter's
-  name/OID/description predicate is now one shared implementation used by both the text filter
-  and the rows the tables render, so the two paths cannot disagree about a definition. Partial
-  and whole OID matches are pinned by fast-tier tests and by component tests that drive the
-  debounced filter against the live subschema.
+- **Schema OID filtering accepts pasted values and is regression-pinned**
+  ([#116](https://github.com/joshmakestuff/aspireldap/issues/116)): the shared
+  name/OID/description predicate now ignores surrounding query whitespace, so a copied OID
+  matches the same definitions as a typed value. Partial and whole OID matches, including a
+  pasted OID, are pinned by fast-tier tests and component tests that drive the debounced filter
+  against the live subschema.
 
 ## 0.7.0-preview.1 — 2026-08-08
 

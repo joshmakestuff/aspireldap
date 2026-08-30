@@ -78,14 +78,16 @@ public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) :
             TimeSpan.FromSeconds(5));
     }
 
-    [Fact]
-    public void Attribute_Types_Are_Matchable_By_A_Bare_Oid()
+    [Theory]
+    [InlineData(CnOid)]
+    [InlineData(" 2.5.4.3 ")]
+    public void Attribute_Types_Are_Matchable_By_A_Bare_Or_Pasted_Oid(string query)
     {
         using var ctx = Context();
         var cut = ctx.RenderComponent<SchemaPanel>();
         var filter = cut.WaitForElement("input[aria-label='Filter the schema']", TimeSpan.FromSeconds(10));
 
-        filter.Input(CnOid);
+        filter.Input(query);
 
         cut.WaitForAssertion(
             () =>
@@ -138,12 +140,25 @@ public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) :
         // Each toggle is re-queried fresh: bUnit's element collections go stale the moment
         // the first Change re-renders and detaches them.
         KindToggle(cut, "Classes").Change(false);
+        cut.WaitForAssertion(
+            () => Assert.DoesNotContain(cut.FindAll(".sec"), s => s.TextContent.StartsWith("Object classes", StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(5));
+
         KindToggle(cut, "Attribute types").Change(false);
+        cut.WaitForAssertion(
+            () => Assert.DoesNotContain(cut.FindAll(".sec"), s => s.TextContent.StartsWith("Attribute types", StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(5));
+
         KindToggle(cut, "Syntaxes").Change(false);
 
-        Assert.Empty(cut.FindAll(".sec"));
-        Assert.Contains(
-            cut.FindAll("p"),
-            p => p.TextContent.Contains("enable at least one kind", StringComparison.OrdinalIgnoreCase));
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.Empty(cut.FindAll(".sec"));
+                Assert.Contains(
+                    cut.FindAll("p"),
+                    p => p.TextContent.Contains("enable at least one kind", StringComparison.OrdinalIgnoreCase));
+            },
+            TimeSpan.FromSeconds(5));
     }
 }

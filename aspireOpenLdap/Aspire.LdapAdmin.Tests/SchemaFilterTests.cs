@@ -24,7 +24,8 @@ public sealed class SchemaFilterTests
     [InlineData("2.5.4")]   // a prefix of the OID
     [InlineData("5.4.3")]   // an infix of the OID
     [InlineData("2.5")]     // a fragment shared with other definitions in the same subtree
-    public void Attribute_Type_Matches_A_Partial_Oid_Query(string query) =>
+    [InlineData(" 2.5.4.3 ")] // an OID pasted with surrounding whitespace
+    public void Attribute_Type_Matches_A_Partial_Or_Pasted_Oid_Query(string query) =>
         Assert.True(SchemaFilter.Matches(query, Cn.Names, Cn.Oid, Cn.Description));
 
     [Theory]

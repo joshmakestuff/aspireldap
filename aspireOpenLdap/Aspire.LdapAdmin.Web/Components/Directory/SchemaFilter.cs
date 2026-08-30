@@ -15,12 +15,14 @@ public static class SchemaFilter
 {
     /// <summary>
     /// Whether the definition matches the query: a case-insensitive substring of any name,
-    /// the OID, or the description. An empty or whitespace query is not a filter at all —
+    /// the OID, or the description. Surrounding whitespace is ignored so a copied OID is
+    /// treated the same as one typed into the filter. An empty query is not a filter at all —
     /// everything matches.
     /// </summary>
     public static bool Matches(string query, IReadOnlyList<string> names, string oid, string? description)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        query = query.Trim();
+        if (query.Length == 0)
         {
             return true;
         }
