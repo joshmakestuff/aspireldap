@@ -37,6 +37,12 @@
   `AddOpenLdap(...).WithLdapAdmin()` end to end — admin startup, `/health` over HTTP, the
   admin→LDAP round trip, required TLS. Wired into CI as its own job gating publish.
 
+- **Schema view: per-kind show/hide toggles**
+  ([#116](https://github.com/joshmakestuff/aspireldap/issues/116)): a segmented control above
+  the schema tables shows or hides each definition kind (object classes, attribute types,
+  syntaxes, unparsed when present) independently, so "just the attribute types matching x"
+  is expressible; hiding every kind states so instead of rendering an empty page.
+
 ### Fixed
 
 - **Cross-process certificate generation** ([#139](https://github.com/joshmakestuff/aspireldap/issues/139)):
@@ -46,6 +52,13 @@
   concurrent `WithTls()` runs on the same AppHost directory can no longer interleave their
   per-file moves into a mismatched CA/server pair, or race a `File.Move(overwrite: true)` against
   a concurrent freshness read. Covered by a fast two-process concurrency test.
+
+- **Schema OID filtering accepts pasted values and is regression-pinned**
+  ([#116](https://github.com/joshmakestuff/aspireldap/issues/116)): the shared
+  name/OID/description predicate now ignores surrounding query whitespace, so a copied OID
+  matches the same definitions as a typed value. Partial and whole OID matches, including a
+  pasted OID, are pinned by fast-tier tests and component tests that drive the debounced filter
+  against the live subschema.
 
 ## 0.7.0-preview.1 — 2026-08-08
 

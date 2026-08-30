@@ -4,8 +4,9 @@
     contextual pane of the shell page — a panel, not a routed page, so the browse
     tree stays alive while the schema is open, and the loaded schema survives view switches.
 
-    Layout: stacked .sec-headed Industry tables (object
-    classes, attribute types, syntaxes) filtered by one client-side query.
+    Layout: stacked .sec-headed Industry tables (object classes, attribute types,
+    syntaxes, unparsed) filtered by one client-side query; a .seg of per-kind toggles
+    shows or hides each definition kind independently (#116).
 
     The unavailable state is shown, not inferred: an unreadable subschema and a directory
     that defines nothing look identical as data, so the service flags it and this panel says
@@ -47,112 +48,151 @@ else
                aria-label="Filter the schema" />
     </div>
 
-    <div class="sec">Object classes — @_filteredClasses.Count</div>
-    <table class="table">
-        <thead>
-            <tr>
-                <th style="width: 22%;">Name</th>
-                <th style="width: 12%;">Kind</th>
-                <th>MUST / MAY</th>
-                <th style="width: 18%;">SUP</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var objectClass in _filteredClasses)
-            {
-                <tr>
-                    <td class="mono">
-                        @PrimaryName(objectClass.Names, objectClass.Oid)
-                        @if (objectClass.Obsolete)
-                        {
-                            <i class="tk mono" style="margin-left: 6px;">obsolete</i>
-                        }
-                    </td>
-                    <td class="mono text-muted">@objectClass.Kind</td>
-                    <td class="mono">
-                        @if (objectClass.Must.Count > 0)
-                        {
-                            <div><b>MUST</b> @string.Join(", ", objectClass.Must)</div>
-                        }
-                        @if (objectClass.May.Count > 0)
-                        {
-                            <div class="text-muted" title="@string.Join(", ", objectClass.May)">MAY @Summarize(objectClass.May)</div>
-                        }
-                    </td>
-                    <td class="mono text-muted">@string.Join(", ", objectClass.SuperiorNames)</td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    <div class="seg" role="group" aria-label="Show schema definition kinds"
+         style="margin-top: var(--space-3);">
+        <label class="seg-opt mono">
+            <input type="checkbox" @bind="_showClasses" />
+            Classes
+        </label>
+        <label class="seg-opt mono">
+            <input type="checkbox" @bind="_showAttributes" />
+            Attribute types
+        </label>
+        <label class="seg-opt mono">
+            <input type="checkbox" @bind="_showSyntaxes" />
+            Syntaxes
+        </label>
+        @if (HasUnparsed)
+        {
+            <label class="seg-opt mono">
+                <input type="checkbox" @bind="_showUnparsed" />
+                Unparsed
+            </label>
+        }
+    </div>
 
-    <div class="sec">Attribute types — @_filteredAttributes.Count</div>
-    <table class="table">
-        <thead>
-            <tr>
-                <th style="width: 22%;">Name</th>
-                <th>Description</th>
-                <th style="width: 20%;">Syntax</th>
-                <th style="width: 14%;">SUP</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var attributeType in _filteredAttributes)
-            {
-                <tr>
-                    <td class="mono">
-                        @PrimaryName(attributeType.Names, attributeType.Oid)
-                        @if (attributeType.SingleValue)
-                        {
-                            <i class="tk mono" style="margin-left: 6px;">single</i>
-                        }
-                        @if (attributeType.NoUserModification)
-                        {
-                            <i class="tk mono" style="margin-left: 6px;">read-only</i>
-                        }
-                        @if (attributeType.Obsolete)
-                        {
-                            <i class="tk mono" style="margin-left: 6px;">obsolete</i>
-                        }
-                    </td>
-                    <td class="note">@attributeType.Description</td>
-                    <td class="mono text-muted"><span title="@attributeType.Syntax">@SyntaxLabel(attributeType.Syntax)</span></td>
-                    <td class="mono text-muted">@attributeType.SuperiorName</td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    @if (!AnyKindShown)
+    {
+        <p class="text-muted note" style="margin-top: var(--space-4);">
+            No definition kinds are shown — enable at least one kind above.
+        </p>
+    }
 
-    <div class="sec">Syntaxes — @_filteredSyntaxes.Count</div>
-    <table class="table">
-        <thead>
-            <tr>
-                <th style="width: 28%;">OID</th>
-                <th>Description</th>
-                <th style="width: 22%;">Transfer</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var syntax in _filteredSyntaxes)
-            {
+    @if (_showClasses)
+    {
+        <div class="sec">Object classes — @_filteredClasses.Count</div>
+        <table class="table">
+            <thead>
                 <tr>
-                    <td class="mono">@syntax.Oid</td>
-                    <td class="note">@syntax.Description</td>
-                    <td>
-                        @if (syntax.NotHumanReadable)
-                        {
-                            <i class="tk mono">binary</i>
-                        }
-                        @if (syntax.BinaryTransferRequired)
-                        {
-                            <i class="tk mono" style="margin-left: 6px;">;binary required</i>
-                        }
-                    </td>
+                    <th style="width: 22%;">Name</th>
+                    <th style="width: 12%;">Kind</th>
+                    <th>MUST / MAY</th>
+                    <th style="width: 18%;">SUP</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var objectClass in _filteredClasses)
+                {
+                    <tr>
+                        <td class="mono">
+                            @PrimaryName(objectClass.Names, objectClass.Oid)
+                            @if (objectClass.Obsolete)
+                            {
+                                <i class="tk mono" style="margin-left: 6px;">obsolete</i>
+                            }
+                        </td>
+                        <td class="mono text-muted">@objectClass.Kind</td>
+                        <td class="mono">
+                            @if (objectClass.Must.Count > 0)
+                            {
+                                <div><b>MUST</b> @string.Join(", ", objectClass.Must)</div>
+                            }
+                            @if (objectClass.May.Count > 0)
+                            {
+                                <div class="text-muted" title="@string.Join(", ", objectClass.May)">MAY @Summarize(objectClass.May)</div>
+                            }
+                        </td>
+                        <td class="mono text-muted">@string.Join(", ", objectClass.SuperiorNames)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
 
-    @if (_schema.Schema.UnparsedDefinitions.Count > 0)
+    @if (_showAttributes)
+    {
+        <div class="sec">Attribute types — @_filteredAttributes.Count</div>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th style="width: 22%;">Name</th>
+                    <th>Description</th>
+                    <th style="width: 20%;">Syntax</th>
+                    <th style="width: 14%;">SUP</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var attributeType in _filteredAttributes)
+                {
+                    <tr>
+                        <td class="mono">
+                            @PrimaryName(attributeType.Names, attributeType.Oid)
+                            @if (attributeType.SingleValue)
+                            {
+                                <i class="tk mono" style="margin-left: 6px;">single</i>
+                            }
+                            @if (attributeType.NoUserModification)
+                            {
+                                <i class="tk mono" style="margin-left: 6px;">read-only</i>
+                            }
+                            @if (attributeType.Obsolete)
+                            {
+                                <i class="tk mono" style="margin-left: 6px;">obsolete</i>
+                            }
+                        </td>
+                        <td class="note">@attributeType.Description</td>
+                        <td class="mono text-muted"><span title="@attributeType.Syntax">@SyntaxLabel(attributeType.Syntax)</span></td>
+                        <td class="mono text-muted">@attributeType.SuperiorName</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (_showSyntaxes)
+    {
+        <div class="sec">Syntaxes — @_filteredSyntaxes.Count</div>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th style="width: 28%;">OID</th>
+                    <th>Description</th>
+                    <th style="width: 22%;">Transfer</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var syntax in _filteredSyntaxes)
+                {
+                    <tr>
+                        <td class="mono">@syntax.Oid</td>
+                        <td class="note">@syntax.Description</td>
+                        <td>
+                            @if (syntax.NotHumanReadable)
+                            {
+                                <i class="tk mono">binary</i>
+                            }
+                            @if (syntax.BinaryTransferRequired)
+                            {
+                                <i class="tk mono" style="margin-left: 6px;">;binary required</i>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (HasUnparsed && _showUnparsed)
     {
         <div class="sec">Unparsed — @_schema.Schema.UnparsedDefinitions.Count</div>
         <p class="text-muted note">
@@ -175,6 +215,23 @@ else
 
     /// <summary>The applied filter the three tables render from.</summary>
     private string _query = string.Empty;
+
+    /// <summary>Per-kind visibility, all shown by default (#116).</summary>
+    private bool _showClasses = true;
+    private bool _showAttributes = true;
+    private bool _showSyntaxes = true;
+    private bool _showUnparsed = true;
+
+    /// <summary>Whether the server published any definitions the parser could not handle.</summary>
+    private bool HasUnparsed => _schema?.Schema.UnparsedDefinitions.Count > 0;
+
+    /// <summary>
+    /// Whether at least one definition kind has a visible section. When the server has no
+    /// unparsed definitions there is no Unparsed section at all, so the Unparsed flag only
+    /// counts when such a section exists.
+    /// </summary>
+    private bool AnyKindShown =>
+        _showClasses || _showAttributes || _showSyntaxes || (HasUnparsed && _showUnparsed);
 
     private CancellationTokenSource? _debounceCts;
 
@@ -236,17 +293,14 @@ else
             : [.. _schema.Schema.Syntaxes.Where(s => Matches(s.Names, s.Oid, s.Description))];
     }
 
-    private bool Matches(IReadOnlyList<string> names, string oid, string? description)
-    {
-        if (string.IsNullOrWhiteSpace(_query))
-        {
-            return true;
-        }
-
-        return names.Any(n => n.Contains(_query, StringComparison.OrdinalIgnoreCase))
-            || oid.Contains(_query, StringComparison.OrdinalIgnoreCase)
-            || (description?.Contains(_query, StringComparison.OrdinalIgnoreCase) ?? false);
-    }
+    /// <summary>
+    /// One match implementation shared with the rows the tables render
+    /// (<see cref="SchemaFilter.Matches"/>), so the filter path and the display path
+    /// cannot disagree about a definition (aspireldap#116 — "filtering by OID returns
+    /// nothing" while the predicate source looked right).
+    /// </summary>
+    private bool Matches(IReadOnlyList<string> names, string oid, string? description) =>
+        SchemaFilter.Matches(_query, names, oid, description);
 
     private static string PrimaryName(IReadOnlyList<string> names, string oid) =>
         names.Count > 0 ? names[0] : oid;
