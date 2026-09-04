@@ -1,4 +1,5 @@
 using Aspire.Hosting;
+using Aspire.OpenLdap.Testing;
 
 // Test AppHost for the admin: an OpenLDAP resource seeded with a small directory the service
 // integration tests browse, search, read and rewrite, plus the admin web host wired to it by
@@ -8,6 +9,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 const string baseDn = "dc=example,dc=org";
 
 var ldap = builder.AddOpenLdap("openldap")
+    .WithTestContainerOwnership(builder.Configuration)
     // Typed tree: two OUs the tests own outright. ou=people carries the bindable accounts —
     // the admin service itself binds with the AppHost's admin credentials, but the ACL tests
     // need a second, unprivileged identity, and only WithUser produces one (generated fake

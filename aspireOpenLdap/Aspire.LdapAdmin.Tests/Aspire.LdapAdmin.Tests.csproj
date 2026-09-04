@@ -24,6 +24,7 @@
     <ProjectReference Include="..\Aspire.LdapAdmin.AppHost\Aspire.LdapAdmin.AppHost.csproj" />
     <ProjectReference Include="..\Aspire.LdapAdmin.Core\Aspire.LdapAdmin.Core.csproj" />
     <ProjectReference Include="..\Aspire.OpenLdap\Aspire.OpenLdap.csproj" />
+    <ProjectReference Include="..\Aspire.OpenLdap.Testing\Aspire.OpenLdap.Testing.csproj" />
     <ProjectReference Include="..\Aspire.LdapAdmin.Web\Aspire.LdapAdmin.Web.csproj" />
   </ItemGroup>
 
