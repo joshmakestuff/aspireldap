@@ -5,6 +5,7 @@ using Xunit;
 namespace Aspire.Hosting.OpenLdap.Tests;
 
 [Collection(AppHostCollection.Name)]
+[Trait("Category", "Integration")]
 public sealed class AppHostCleanupTests(AppHostFixture appHost)
 {
     [Fact]
