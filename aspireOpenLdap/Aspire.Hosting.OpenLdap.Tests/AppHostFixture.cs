@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Aspire.OpenLdap;
+using Aspire.OpenLdap.Testing;
 using AspireOpenLdap.TestAppHost;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -38,7 +39,11 @@ public sealed class AppHostFixture : IAsyncLifetime
     private DistributedApplication? _app;
     private string? _key;
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        await TestContainerOwnership.RemoveOrphansAsync(cancellation.Token);
+    }
 
     /// <summary>
     /// Returns a healthy AppHost running <paramref name="scenario"/>, reusing the currently
@@ -92,7 +97,12 @@ public sealed class AppHostFixture : IAsyncLifetime
     private static async Task<DistributedApplication> StartScenarioAsync(
         string scenario, string[] extraArgs, CancellationToken cancellationToken)
     {
-        string[] args = [$"--{TestAppHostScenarios.ScenarioKey}={scenario}", .. extraArgs];
+        string[] args =
+        [
+            $"--{TestAppHostScenarios.ScenarioKey}={scenario}",
+            .. TestContainerOwnership.AppHostArguments,
+            .. extraArgs,
+        ];
 
         // Held from builder creation through healthy: DCP startup (and the image build it may
         // trigger) must never overlap the direct-docker bundled-image build.

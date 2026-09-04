@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Aspire.OpenLdap\Aspire.OpenLdap.csproj" />
     <ProjectReference Include="..\AspireOpenLdap.TestAppHost\AspireOpenLdap.TestAppHost.csproj" />
+    <ProjectReference Include="..\Aspire.OpenLdap.Testing\Aspire.OpenLdap.Testing.csproj" />
     <ProjectReference Include="..\Aspire.Hosting.OpenLdap.Tests.Worker\Aspire.Hosting.OpenLdap.Tests.Worker.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

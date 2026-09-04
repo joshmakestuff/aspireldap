@@ -3,6 +3,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Aspire.LdapAdmin.Core;
 using Aspire.OpenLdap;
+using Aspire.OpenLdap.Testing;
 using LdifDotNet;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -94,8 +95,12 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(15));
         var cancellationToken = cts.Token;
 
+        await TestContainerOwnership.RemoveOrphansAsync(cancellationToken);
+
         var appHost = await DistributedApplicationTestingBuilder
-            .CreateAsync<Projects.Aspire_LdapAdmin_AppHost>([], cancellationToken);
+            .CreateAsync<Projects.Aspire_LdapAdmin_AppHost>(
+                TestContainerOwnership.AppHostArguments,
+                cancellationToken);
 
         DistributedApplication app;
         try
