@@ -105,7 +105,7 @@ public static class TestContainerOwnership
             }
 
             var owner = TestContainerOwner.FromLabels(labels);
-            if (owner is not null && IsProcessInstanceAlive(owner))
+            if (owner is not null && IsOwnerProcessAlive(owner))
             {
                 continue;
             }
@@ -132,13 +132,15 @@ public static class TestContainerOwnership
         args.Add($"{name}={value}");
     }
 
-    private static bool IsProcessInstanceAlive(TestContainerOwner owner)
+    private static bool IsOwnerProcessAlive(TestContainerOwner owner)
     {
         try
         {
             using var process = Process.GetProcessById(owner.ProcessId);
-            return !process.HasExited
-                && process.StartTime.ToUniversalTime().Ticks == owner.ProcessStartUtcTicks;
+            // Process.StartTime is reconstructed with platform-dependent precision. Exact
+            // comparison can misclassify a live Linux test host and destroy its container.
+            // PID reuse can only postpone cleanup; preserving a live process is the safe side.
+            return !process.HasExited;
         }
         catch (ArgumentException)
         {
