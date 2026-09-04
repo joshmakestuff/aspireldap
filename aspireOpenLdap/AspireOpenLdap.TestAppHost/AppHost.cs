@@ -1,11 +1,13 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.OpenLdap.Testing;
 using AspireOpenLdap.TestAppHost;
 using LdifDotNet;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-var ldap = builder.AddOpenLdap("openldap");
+var ldap = builder.AddOpenLdap("openldap")
+    .WithTestContainerOwnership(builder.Configuration);
 
 // Exactly one scenario runs, selected by --OpenLdap:Scenario=<name>. An unknown name is a
 // test-authoring bug, so fail loudly here instead of silently running the default scenario

@@ -13,5 +13,6 @@
     <Project Path="Aspire.Hosting.OpenLdap.Tests/Aspire.Hosting.OpenLdap.Tests.csproj" />
     <Project Path="Aspire.LdapAdmin.Tests/Aspire.LdapAdmin.Tests.csproj" />
     <Project Path="Aspire.Hosting.OpenLdap.Tests.Worker/Aspire.Hosting.OpenLdap.Tests.Worker.csproj" />
+    <Project Path="Aspire.OpenLdap.Testing/Aspire.OpenLdap.Testing.csproj" />
   </Folder>
 </Solution>
