@@ -131,7 +131,7 @@ For a runnable end-to-end demo (AppHost + Web API + dashboard), see the [`exampl
 
 ## AI coding agents
 
-This package ships an agent-facing API reference covering both the client and hosting integrations. After restore it is at `~/.nuget/packages/joshmakestuff.aspire.openldap/<version>/AGENTS.md` (also `skills/SKILL.md`). Add a pointer to it from your repo's `AGENTS.md` / `CLAUDE.md`, or copy it in as a skill, so coding agents find it.
+This package ships an agent-facing API reference covering both the client and hosting integrations. After restore it is at `~/.nuget/packages/joshmakestuff.aspire.openldap/<version>/AGENTS.md` (also `skills/SKILL.md`). Add a pointer to it from your repo's `AGENTS.md`, or copy it to `.agents/skills/aspire-openldap/SKILL.md`, so coding agents find it.
 
 ## Requirements on Linux
 

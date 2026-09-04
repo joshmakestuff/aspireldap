@@ -85,7 +85,7 @@ See each package's README for the full API: [hosting](aspireOpenLdap/Aspire.Host
 
 ## AI coding agents
 
-Both packages ship a condensed agent-facing API reference — [aspireOpenLdap/AGENTS.md](aspireOpenLdap/AGENTS.md) — in the nupkg root and as `skills/SKILL.md`, landing in the NuGet cache at `~/.nuget/packages/<package-id>/<version>/AGENTS.md` after restore. Point your consuming repo's `AGENTS.md`/`CLAUDE.md` at that file (or copy it in as a skill) so coding agents can discover the integration's capabilities; the package READMEs show a ready-made pointer snippet.
+Both packages ship a condensed agent-facing API reference — [aspireOpenLdap/AGENTS.md](aspireOpenLdap/AGENTS.md) — in the nupkg root and as `skills/SKILL.md`, landing in the NuGet cache at `~/.nuget/packages/<package-id>/<version>/AGENTS.md` after restore. Point your consuming repo's `AGENTS.md` at that file (or copy it in as a skill) so coding agents can discover the integration's capabilities; the package READMEs show a ready-made pointer snippet.
 
 ## Examples
 

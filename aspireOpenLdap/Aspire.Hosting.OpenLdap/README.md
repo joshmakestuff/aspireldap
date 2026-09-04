@@ -132,7 +132,7 @@ This package ships an agent-facing API reference covering both the hosting and c
 ~/.nuget/packages/joshmakestuff.aspire.hosting.openldap/<version>/AGENTS.md   (also skills/SKILL.md)
 ```
 
-To make it discoverable in a consuming repo, add a pointer to your `AGENTS.md` / `CLAUDE.md`:
+To make it discoverable in a consuming repo, add a pointer to your `AGENTS.md`:
 
 ```markdown
 ## LDAP (Aspire OpenLDAP integration)
@@ -140,7 +140,8 @@ Before working with AddOpenLdap/AddOpenLdapClient, read the packaged reference:
 ~/.nuget/packages/joshmakestuff.aspire.hosting.openldap/*/AGENTS.md
 ```
 
-Or copy it into the repo as a skill (e.g. `.claude/skills/aspire-openldap/SKILL.md`).
+Or copy it into the repo as a skill (for example,
+`.agents/skills/aspire-openldap/SKILL.md`).
 
 ## Notes
 

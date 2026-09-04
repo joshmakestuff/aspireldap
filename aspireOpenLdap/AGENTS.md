@@ -132,4 +132,4 @@ var connectionString = new OpenLdapConnectionStringBuilder
 
 ## Where this file lives
 
-Both packages ship this file in the nupkg root and as `skills/SKILL.md`, so after restore it is at `~/.nuget/packages/<package-id>/<version>/AGENTS.md`. For best results, copy it (or add a pointer) into the consuming repo's `AGENTS.md` / `CLAUDE.md` / `.claude/skills/aspire-openldap/SKILL.md`.
+Both packages ship this file in the nupkg root and as `skills/SKILL.md`, so after restore it is at `~/.nuget/packages/<package-id>/<version>/AGENTS.md`. For best results, add a pointer to it from the consuming repo's `AGENTS.md`, or copy it to `.agents/skills/aspire-openldap/SKILL.md`.
