@@ -13,8 +13,9 @@
        the list is anchor-positioned fixed in Chromium so it escapes the dialog's scroll
        region instead of extending it — see .combo-list in console.css. *@
     <input class="input mono" style="anchor-name: @_anchor;" value="@Value" placeholder="@Placeholder"
-           spellcheck="false" aria-label="@AriaLabel" role="combobox" aria-expanded="@(_open ? "true" : "false")"
-           @oninput="OnInput" @onfocus="@(() => _open = true)" @onblur="@(() => _open = false)"
+            spellcheck="false" aria-label="@AriaLabel" role="combobox" aria-expanded="@(_open ? "true" : "false")"
+            disabled="@Disabled"
+            @oninput="OnInput" @onfocus="@(() => _open = true)" @onblur="@(() => _open = false)"
            @onkeydown="OnKeyDown" />
     @if (_open && Filtered.Count > 0)
     {
@@ -26,6 +27,7 @@
                 @* mousedown (not click) with preventDefault: picking must beat the input's
                    blur, which closes the list before a click could land. *@
                 <button type="button" class="combo-opt" role="option"
+                        disabled="@Disabled"
                         aria-selected="@(index == _highlight ? "true" : "false")"
                         @onmousedown="@(() => Pick(candidate))" @onmousedown:preventDefault="true">
                     <span class="mono">@candidate.Name</span>
@@ -55,6 +57,9 @@
     public EventCallback<string> ValueChanged { get; set; }
 
     [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
     public string Placeholder { get; set; } = "attribute";
 
     [Parameter]
@@ -65,6 +70,14 @@
 
     /// <summary>Per-instance CSS anchor name; anchor names are global, so instances must not share.</summary>
     private readonly string _anchor = $"--combo-{Guid.NewGuid():N}";
+
+    protected override void OnParametersSet()
+    {
+        if (Disabled)
+        {
+            _open = false;
+        }
+    }
 
     private IReadOnlyList<AttributeGuidance> Filtered =>
         string.IsNullOrWhiteSpace(Value)

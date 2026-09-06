@@ -79,6 +79,79 @@ public sealed class LdifViewPlanTests
         Assert.Equal("ou-people-dc-example-dc-org.ldif", LdifPanel.ExportFileName("ou=people,dc=example,dc=org", "dc=example,dc=org"));
         Assert.Equal("dc-example-dc-org.ldif", LdifPanel.ExportFileName("", "dc=example,dc=org"));
     }
+
+    public static TheoryData<string, string> ControlledChanges()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var change in new[]
+        {
+            "changetype: add\nobjectClass: organizationalUnit\nou: controlled\n",
+            "changetype: modify\nreplace: description\ndescription: changed\n-\n",
+            "changetype: delete\n",
+            "changetype: moddn\nnewrdn: ou=renamed\ndeleteoldrdn: 1\n",
+            "changetype: modrdn\nnewrdn: ou=renamed\ndeleteoldrdn: 1\n",
+        })
+        {
+            foreach (var criticality in new[] { "", " false", " true" })
+            {
+                data.Add(change, criticality);
+            }
+        }
+
+        return data;
+    }
+
+    [Fact]
+    public async Task Direct_Apply_Preflights_Increments_Using_The_Plan_Error()
+    {
+        const string ldif = "dn: ou=first,dc=example,dc=org\nchangetype: delete\n\n" +
+            "dn: uid=second,dc=example,dc=org\nchangetype: modify\nincrement: uidNumber\nuidNumber: 1\n-\n";
+        var plan = LdapLdifService.ParsePlan(ldif);
+        Assert.Empty(plan.Items);
+        Assert.Contains("increment", plan.Error, StringComparison.Ordinal);
+
+        var items = LdifReader.Parse(ldif).Select(static r => new LdifImportItem(r, "ignored", r.Dn, 0)).ToArray();
+        var result = await new LdapLdifService(null!).ApplyAsync(items);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(0, result.Applied);
+        Assert.Equal(2, result.Total);
+        Assert.Equal(items[1].Record.Dn, result.FailedDn);
+        Assert.Equal(LdapOperationStatus.InvalidRequest, result.Outcome.Status);
+        Assert.Equal(plan.Error, result.Outcome.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(ControlledChanges))]
+    public async Task Controls_Reject_The_Whole_Plan_And_Direct_Apply_Before_Directory_Access(string change, string criticality)
+    {
+        const string controlledDn = "ou=controlled,dc=example,dc=org";
+        var ldif = "dn: ou=first,dc=example,dc=org\nchangetype: add\nobjectClass: organizationalUnit\nou: first\n\n" +
+            $"dn: {controlledDn}\ncontrol: 1.2.840.113556.1.4.805{criticality}\n{change}";
+
+        // Verify the pinned reader preserves the control rather than rejecting the fixture's syntax.
+        var records = LdifReader.Parse(ldif);
+        var controlled = Assert.IsAssignableFrom<LdifChangeRecord>(records[1]);
+        var control = Assert.Single(controlled.Controls);
+        Assert.Equal(criticality == "" ? (bool?)null : criticality == " true", control.Criticality);
+
+        var plan = LdapLdifService.ParsePlan(ldif);
+        Assert.Empty(plan.Items);
+        Assert.Contains("controls are not supported", plan.Error, StringComparison.Ordinal);
+        Assert.Contains(controlledDn, plan.Error, StringComparison.Ordinal);
+
+        // Deliberately bypass ParsePlan. A null directory makes any dispatch, including
+        // the supported first record, fail the test without touching a live server.
+        var service = new LdapLdifService(null!);
+        var result = await service.ApplyAsync(records.Select(static r => new LdifImportItem(r, "ignored", r.Dn, 0)).ToArray());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(0, result.Applied);
+        Assert.Equal(2, result.Total);
+        Assert.Equal(controlledDn, result.FailedDn);
+        Assert.Equal(LdapOperationStatus.InvalidRequest, result.Outcome.Status);
+        Assert.Equal(plan.Error, result.Outcome.Message);
+    }
 }
 
 /// <summary>

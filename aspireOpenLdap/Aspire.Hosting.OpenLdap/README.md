@@ -19,7 +19,9 @@ Install this package in your **AppHost** project.
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-var ldap = builder.AddOpenLdap("ldap");
+var ldap = builder.AddOpenLdap("ldap")
+    .WithFakeDirectory(seed: 42)
+    .WithLdapAdmin();
 
 builder.AddProject<Projects.MyApi>("api")
        .WithReference(ldap);
@@ -38,12 +40,27 @@ builder.Build().Run();
 - `WithChangeNotifications(...)` — enable LDAP change notifications: loads the `syncprov` overlay so the server is an RFC 4533 sync provider (syncrepl / refreshAndPersist). Point any RFC 4533 client at the resource's endpoint — e.g. `ldapsearch -E sync=rp`. This is server-side enablement only; there is deliberately no first-party .NET subscribe API, because `System.DirectoryServices.Protocols` cannot implement RFC 4533 (see [aspireldap#88](https://github.com/joshmakestuff/aspireldap/issues/88)). Defaults (`checkpoint: "1 1"`, `sessionLog: 100`) are tuned for dev containers: a durable `contextCSN` across unclean stops and delta deletes on cookie resume.
 - `WithAnonymousBinding(...)` — allow unauthenticated binds.
 - `WithTls(...)` / `WithRequiredTls(...)` — enable LDAPS; auto-generates a self-signed cert if you don't supply one.
-- `WithLdapAdmin(...)` — add the bundled LdapAdmin web UI as a sibling container. The app and its Dockerfile ship inside this package and the container is built locally (no registry pull). No login: it opens straight onto the directory with the AppHost admin credentials. Requires consuming this package as a `PackageReference` (the payload arrives via NuGet contentFiles). Defaulted behavior is configured through `WithLdapAdmin(options => ...)` with a single `LdapAdminOptions` object — `Theme` (`System`/`Light`/`Dark`; the UI has no in-app theme chooser), `DefaultSearchLimit` (default 100), `DefaultSortOrder` (`ServerOrder`/`Rdn`), `AttributeValueDisplayCap` (default 20; capped attributes always show "N of M values" with an explicit expand). Every option has a sane default and the callback is optional; values flow to the container as `LdapAdmin__*` environment configuration. Future admin defaults join this options object — the UI deliberately has no settings pages.
+- `WithLdapAdmin(...)` — add the bundled LdapAdmin web UI as a sibling container. The app and its Dockerfile ship inside this package and the container is built locally (no registry pull). No login: it opens straight onto the directory with the AppHost admin credentials. Requires consuming this package as a `PackageReference` (the payload arrives via NuGet contentFiles). Defaulted behavior is configured through `WithLdapAdmin(options => ...)` with a single `LdapAdminOptions` object: `Theme` (`System`/`Light`/`Dark`; no in-app chooser), `EnableRestApi` (default `false`), `DefaultSearchLimit` (default 100), `DefaultSortOrder` (`ServerOrder`/`Rdn`), and `AttributeValueDisplayCap` (default 20).
 - `WithPhpLdapAdmin(...)` — add a sibling phpLDAPadmin UI container.
 - `WithLogLevel(...)` — set slapd's debug log level (default `Stats`: connection/operation/result lines).
 - `WithHealthCheckProbeLogging(...)` — keep the health-check probe's connections in the container log. By default the container filters out each wholly-successful probe block so the dashboard console does not fill with probe noise; probes that fail in any way always log in full.
 
 Relative file/directory paths passed to `WithSchema(s)`, `WithSeedData`, and `WithTls` resolve against the AppHost project directory — the same base Aspire uses for bind mounts — so they work identically whether the AppHost is launched from an IDE, its own directory, or the repository root.
+
+### LdapAdmin REST API
+
+The UI's REST surface is disabled by default. Enable it only for local development automation:
+
+```csharp
+builder.AddOpenLdap("ldap")
+    .WithLdapAdmin(options => options.EnableRestApi = true);
+```
+
+The unauthenticated API uses the same AppHost-provided administrator credentials as the UI and
+does not configure CORS. It exposes JSON endpoints under `/api/v1` for directory metadata and
+children, search, entry read/add/modify/delete/rename, password reset, schema inspection, and LDIF
+export/plan/import. LDAP and validation failures use RFC 9457 problem details. Keep the resource on
+the local development network.
 
 ### Seeding with fake data
 
@@ -132,7 +149,7 @@ This package ships an agent-facing API reference covering both the hosting and c
 ~/.nuget/packages/joshmakestuff.aspire.hosting.openldap/<version>/AGENTS.md   (also skills/SKILL.md)
 ```
 
-To make it discoverable in a consuming repo, add a pointer to your `AGENTS.md` / `CLAUDE.md`:
+To make it discoverable in a consuming repo, add a pointer to your `AGENTS.md`:
 
 ```markdown
 ## LDAP (Aspire OpenLDAP integration)
@@ -140,7 +157,8 @@ Before working with AddOpenLdap/AddOpenLdapClient, read the packaged reference:
 ~/.nuget/packages/joshmakestuff.aspire.hosting.openldap/*/AGENTS.md
 ```
 
-Or copy it into the repo as a skill (e.g. `.claude/skills/aspire-openldap/SKILL.md`).
+Or copy it into the repo as a skill (for example,
+`.agents/skills/aspire-openldap/SKILL.md`).
 
 ## Notes
 

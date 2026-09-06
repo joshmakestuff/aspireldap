@@ -82,8 +82,8 @@
                 @if (OnEdit.HasDelegate)
                 {
                     <td>
-                        <button class="btn btn-ghost btn-sm" title="@($"Edit {attr.Name}")"
-                                @onclick="@(() => OnEdit.InvokeAsync(attr))">Edit</button>
+                        <button class="btn btn-ghost btn-sm" title="@(ManagedAttributes.Contains(attr.Name) ? "Manage this attribute in the Members tab" : $"Edit {attr.Name}")"
+                                disabled="@ManagedAttributes.Contains(attr.Name)" @onclick="@(() => OnEdit.InvokeAsync(attr))">@(ManagedAttributes.Contains(attr.Name) ? "Members" : "Edit")</button>
                     </td>
                 }
             </tr>
@@ -101,6 +101,9 @@
     /// <summary>Raised with the attribute the user asked to edit; absent = read-only view.</summary>
     [Parameter]
     public EventCallback<LdapAttributeValues> OnEdit { get; set; }
+
+    [Parameter]
+    public IReadOnlySet<string> ManagedAttributes { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The entry's attributes in display order, sorted once per parameter change
     /// (OnParametersSet) rather than on every render.</summary>

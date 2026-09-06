@@ -8,7 +8,7 @@ The OpenLDAP container image is **built locally from a Dockerfile bundled in the
 
 | Package | Install in | Purpose |
 | --- | --- | --- |
-| [`JoshMakeStuff.Aspire.Hosting.OpenLdap`](https://www.nuget.org/packages/JoshMakeStuff.Aspire.Hosting.OpenLdap) | AppHost | Adds an OpenLDAP container resource (TLS, seeding, schemas, overlays, health checks, phpLDAPadmin sidecar). |
+| [`JoshMakeStuff.Aspire.Hosting.OpenLdap`](https://www.nuget.org/packages/JoshMakeStuff.Aspire.Hosting.OpenLdap) | AppHost | Adds an OpenLDAP container resource with TLS, seeding, schemas, health checks, and the bundled LdapAdmin UI. |
 | [`JoshMakeStuff.Aspire.OpenLdap`](https://www.nuget.org/packages/JoshMakeStuff.Aspire.OpenLdap) | Service project | Registers an `LdapConnection` wired to the resource's connection string, with a health check. |
 
 ```sh
@@ -54,8 +54,8 @@ var ldap = builder.AddOpenLdap("openldap")
     // A hand-declared group; members reference the users above by uid.
     .WithGroup("developers", members: ["alice", "bob"], ou: "groups")
 
-    // phpLDAPadmin sidecar — browse the seeded directory from the Aspire dashboard.
-    .WithPhpLdapAdmin();
+    // Bundled LdapAdmin UI — browse and edit the directory from the Aspire dashboard.
+    .WithLdapAdmin();
 
 builder.AddProject<Projects.MyApi>("api")
        .WithReference(ldap);
@@ -68,7 +68,7 @@ builder.Build().Run();
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-builder.AddOpenLdapClient("ldap");
+builder.AddOpenLdapClient("openldap");
 
 var app = builder.Build();
 
@@ -83,13 +83,18 @@ app.Run();
 
 See each package's README for the full API: [hosting](aspireOpenLdap/Aspire.Hosting.OpenLdap/README.md) · [client](aspireOpenLdap/Aspire.OpenLdap/README.md). For custom fake data — per-attribute format templates, example value pools, extra object classes — see [docs/fake-data.md](docs/fake-data.md).
 
+`WithLdapAdmin()` has no login and uses the AppHost-provided administrator credentials. Its
+REST API is disabled by default; enable it for local automation with
+`.WithLdapAdmin(options => options.EnableRestApi = true)`. Do not expose either surface beyond
+your development machine.
+
 ## AI coding agents
 
-Both packages ship a condensed agent-facing API reference — [aspireOpenLdap/AGENTS.md](aspireOpenLdap/AGENTS.md) — in the nupkg root and as `skills/SKILL.md`, landing in the NuGet cache at `~/.nuget/packages/<package-id>/<version>/AGENTS.md` after restore. Point your consuming repo's `AGENTS.md`/`CLAUDE.md` at that file (or copy it in as a skill) so coding agents can discover the integration's capabilities; the package READMEs show a ready-made pointer snippet.
+Both packages ship a condensed agent-facing API reference — [aspireOpenLdap/AGENTS.md](aspireOpenLdap/AGENTS.md) — in the nupkg root and as `skills/SKILL.md`, landing in the NuGet cache at `~/.nuget/packages/<package-id>/<version>/AGENTS.md` after restore. Point your consuming repo's `AGENTS.md` at that file (or copy it in as a skill) so coding agents can discover the integration's capabilities; the package READMEs show a ready-made pointer snippet.
 
 ## Examples
 
-A runnable end-to-end sample lives in [`examples/`](examples/): an AppHost running OpenLDAP plus a minimal Web API that queries it through the instrumented `OpenLdapClient`. Run it and watch `LDAP search` spans (nested under each HTTP request) and `db.client.operation.duration` metrics appear in the Aspire dashboard:
+A runnable source-tree sample lives in [`examples/`](examples/): an AppHost running OpenLDAP plus a minimal Web API that queries it through the instrumented `OpenLdapClient`. It uses phpLDAPadmin because the source sample project-references the hosting integration; the bundled LdapAdmin payload is delivered to package consumers. Run it and watch `LDAP search` spans (nested under each HTTP request) and `db.client.operation.duration` metrics appear in the Aspire dashboard:
 
 ```sh
 aspire run --apphost examples/AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj
@@ -104,7 +109,7 @@ cd aspireOpenLdap
 dotnet build AspireOpenLdap.slnx
 ```
 
-Running the sample AppHost or the integration tests requires a running Docker daemon (the OpenLDAP image is built on first run). The fast tier (`--filter "Category!=Integration"`) needs no Docker. What each test tier protects, how the coverage number should and should not be read, and the mutation-survivor policy are in [docs/testing.md](docs/testing.md).
+Running the sample AppHost or the integration tests requires a running Docker daemon (the OpenLDAP image is built on first run). The fast tier (`--filter "Category!=Integration&Category!=RestIntegration&Category!=CleanConsumer"`) needs no Docker. What each test tier protects, how the coverage number should and should not be read, and the mutation-survivor policy are in [docs/testing.md](docs/testing.md).
 
 On **Linux**, the client and the hosting health check use `System.DirectoryServices.Protocols`, which needs the native `libldap` client library installed (any of the 2.4/2.5/2.6 sonames — the integrations resolve whichever your distro ships automatically). See [Requirements on Linux](aspireOpenLdap/Aspire.OpenLdap/README.md#requirements-on-linux).
 

@@ -96,6 +96,7 @@ public class LdapAdminModelTests
         // The options contract is always emitted, defaults included, so the env the
         // admin binds states the whole surface even when no options were configured.
         Assert.Equal("System", env["LdapAdmin__Theme"]);
+        Assert.Equal("False", env["LdapAdmin__EnableRestApi"]);
         Assert.Equal("100", env["LdapAdmin__DefaultSearchLimit"]);
         Assert.Equal("ServerOrder", env["LdapAdmin__DefaultSortOrder"]);
         Assert.Equal("20", env["LdapAdmin__AttributeValueDisplayCap"]);
@@ -154,6 +155,7 @@ public class LdapAdminModelTests
         builder.AddOpenLdap("ldap").WithLdapAdmin(options =>
         {
             options.Theme = LdapAdminTheme.Dark;
+            options.EnableRestApi = true;
             options.DefaultSearchLimit = 250;
             options.DefaultSortOrder = LdapAdminSortOrder.Rdn;
             options.AttributeValueDisplayCap = 5;
@@ -165,6 +167,7 @@ public class LdapAdminModelTests
         // The env contract the admin host binds (LdapAdmin:* section): enum values travel by
         // name, numbers as invariant decimal strings.
         Assert.Equal("Dark", env["LdapAdmin__Theme"]);
+        Assert.Equal("True", env["LdapAdmin__EnableRestApi"]);
         Assert.Equal("250", env["LdapAdmin__DefaultSearchLimit"]);
         Assert.Equal("Rdn", env["LdapAdmin__DefaultSortOrder"]);
         Assert.Equal("5", env["LdapAdmin__AttributeValueDisplayCap"]);

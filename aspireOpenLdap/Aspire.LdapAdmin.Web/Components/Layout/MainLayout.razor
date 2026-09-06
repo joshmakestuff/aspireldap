@@ -5,8 +5,8 @@
     There is no login gate: the app binds with the
     AppHost-provided credentials and opens straight onto the directory.
 
-    Theming is the data-theme attribute App.razor's boot script stamps on <html> (persisted
-    choice, AppHost default, prefers-color-scheme fallback); dark is a token-override layer
+    Theming is the data-theme attribute App.razor's boot script stamps on <html> (the
+    AppHost setting, with prefers-color-scheme for System); dark is a token-override layer
     in console.css, so no theme component renders here.
 *@
 @inherits LayoutComponentBase

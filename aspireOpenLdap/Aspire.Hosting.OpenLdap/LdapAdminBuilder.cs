@@ -49,6 +49,8 @@ internal static class LdapAdminBuilder
                 // included — so the env the admin host binds always states the whole surface
                 // and a drifted default cannot hide behind an absent variable.
                 context.EnvironmentVariables["LdapAdmin__Theme"] = options.Theme.ToString();
+                context.EnvironmentVariables["LdapAdmin__EnableRestApi"] =
+                    options.EnableRestApi.ToString(CultureInfo.InvariantCulture);
                 context.EnvironmentVariables["LdapAdmin__DefaultSearchLimit"] =
                     options.DefaultSearchLimit.ToString(CultureInfo.InvariantCulture);
                 context.EnvironmentVariables["LdapAdmin__DefaultSortOrder"] = options.DefaultSortOrder.ToString();

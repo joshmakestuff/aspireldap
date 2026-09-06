@@ -94,6 +94,7 @@ public class OperationOutcomeDisplayTests
     [InlineData(LdapOperationStatus.ConstraintViolation)]
     [InlineData(LdapOperationStatus.InvalidRequest)]
     [InlineData(LdapOperationStatus.Refused)]
+    [InlineData(LdapOperationStatus.Cancelled)]
     [InlineData(LdapOperationStatus.Failed)]
     public void Every_failure_status_has_words(LdapOperationStatus status)
     {
@@ -122,6 +123,16 @@ public class OperationOutcomeDisplayTests
         var text = Browse.Describe(new LdapOperationResult(LdapOperationStatus.Failed, ResultCode.Busy));
 
         Assert.Contains(nameof(ResultCode.Busy), text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Cancelled_subtree_delete_names_acknowledged_progress_and_stopping_context()
+    {
+        var text = Browse.Describe(LdapOperationResult.Cancelled(
+            "stopped before listing children of 'ou=partial,dc=example,dc=org'", deletedCount: 3));
+
+        Assert.Contains("3 deletions were acknowledged", text, StringComparison.Ordinal);
+        Assert.Contains("ou=partial,dc=example,dc=org", text, StringComparison.Ordinal);
     }
 }
 
@@ -204,6 +215,36 @@ public class AttributeValueDisplayCapTests
 public class LdapAdminSettingsContractTests
 {
     [Fact]
+    public void Dialog_script_relays_busy_close_requests_without_breaking_picker_or_drag_protections()
+    {
+        var webRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "Aspire.LdapAdmin.Web"));
+        var script = File.ReadAllText(Path.Combine(webRoot, "wwwroot", "js", "console.js"));
+
+        Assert.Contains("if (!comboOpen()) relay();", script, StringComparison.Ordinal);
+        Assert.Contains("if (downOutside && outside(e)) relay();", script, StringComparison.Ordinal);
+        Assert.Contains("if (el.isConnected && !el.open) el.showModal()", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("!busy()", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Theme_is_controlled_by_the_AppHost_without_a_persisted_browser_override()
+    {
+        var webRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "Aspire.LdapAdmin.Web"));
+        var app = File.ReadAllText(Path.Combine(webRoot, "Components", "App.razor"));
+        var browse = File.ReadAllText(Path.Combine(webRoot, "Components", "Pages", "Browse.razor"));
+        var script = File.ReadAllText(Path.Combine(webRoot, "wwwroot", "js", "console.js"));
+
+        Assert.Contains("configured === 'Light' ? 'light'", app, StringComparison.Ordinal);
+        Assert.Contains("configured === 'Dark' ? 'dark'", app, StringComparison.Ordinal);
+        Assert.Contains("prefers-color-scheme: dark", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("aspireldap.theme", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("Toggle light/dark theme", browse, StringComparison.Ordinal);
+        Assert.DoesNotContain("toggleTheme", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Theme_names_match_the_hosting_options_enum()
     {
         Assert.Equal(
@@ -227,6 +268,7 @@ public class LdapAdminSettingsContractTests
         var hosting = new Aspire.Hosting.ApplicationModel.LdapAdminOptions();
         var web = new Web.LdapAdminSettings();
 
+        Assert.Equal(hosting.EnableRestApi, web.EnableRestApi);
         Assert.Equal(hosting.Theme.ToString(), web.Theme.ToString());
         Assert.Equal(hosting.DefaultSearchLimit, web.DefaultSearchLimit);
         Assert.Equal(hosting.DefaultSortOrder.ToString(), web.DefaultSortOrder.ToString());

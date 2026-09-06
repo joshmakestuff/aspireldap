@@ -1,0 +1,114 @@
+@inject LdapAdminSettings Settings
+
+@foreach (var membership in Memberships)
+{
+    var values = Values(membership.Name);
+    var shown = Expanded(membership.Name) ? values.Count : Math.Min(values.Count, Settings.AttributeValueDisplayCap);
+    <section style="margin-top: var(--space-4);">
+        <div class="sec">
+            <span><span class="mono">@membership.Name</span> — @shown of @values.Count members</span>
+            <button class="btn btn-primary btn-sm" disabled="@(_busyValue is not null)"
+                    @onclick="@(() => OnAdd.InvokeAsync(membership))">Add member</button>
+        </div>
+        @if (values.Count == 0)
+        {
+            <p class="text-muted note">No members are stored in this attribute.</p>
+        }
+        else
+        {
+            <table class="table">
+                <thead><tr><th>Member</th><th style="width: 90px;"></th></tr></thead>
+                <tbody>
+                    @foreach (var value in values.Take(shown))
+                    {
+                        <tr @key="value">
+                            <td class="mono" style="overflow-wrap: anywhere;">@value</td>
+                            <td><button class="btn btn-ghost btn-sm" disabled="@(_busyValue is not null)"
+                                        title="@($"Remove {value}")"
+                                        @onclick="@(() => RemoveAsync(membership, value))">Remove</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (shown < values.Count)
+            {
+                <button class="btn btn-ghost btn-sm" @onclick="@(() => _expanded.Add(membership.Name))">
+                    Showing @shown of @values.Count members — show all
+                </button>
+            }
+            else if (values.Count > Settings.AttributeValueDisplayCap)
+            {
+                <button class="btn btn-ghost btn-sm" @onclick="@(() => _expanded.Remove(membership.Name))">
+                    Show first @Settings.AttributeValueDisplayCap of @values.Count members
+                </button>
+            }
+        }
+    </section>
+}
+
+@if (_error is not null)
+{
+    <div class="bar err" role="alert" style="margin-top: var(--space-4);">@_error</div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public required LdapEntry Entry { get; set; }
+
+    [Parameter, EditorRequired]
+    public required IReadOnlyList<GroupMembershipAttribute> Memberships { get; set; }
+
+    [Parameter]
+    public EventCallback<GroupMembershipAttribute> OnAdd { get; set; }
+
+    [Parameter, EditorRequired]
+    public required Func<string, GroupMembershipAttribute, string, CancellationToken, Task<string?>> RemoveMemberAsync { get; set; }
+
+    private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
+    private string? _entryDn;
+    private string? _busyValue;
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(_entryDn, Entry.Dn, StringComparison.Ordinal))
+        {
+            _entryDn = Entry.Dn;
+            _expanded.Clear();
+            _error = null;
+            _busyValue = null;
+        }
+    }
+
+    private IReadOnlyList<string> Values(string name) => Entry.Attributes.FirstOrDefault(attribute =>
+        attribute.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Values ?? [];
+
+    private bool Expanded(string name) => _expanded.Contains(name);
+
+    private async Task RemoveAsync(GroupMembershipAttribute membership, string value)
+    {
+        if (_busyValue is not null)
+        {
+            return;
+        }
+
+        _busyValue = value;
+        _error = null;
+        var entryDn = Entry.Dn;
+        try
+        {
+            var error = await RemoveMemberAsync(entryDn, membership, value, CancellationToken.None);
+            if (string.Equals(_entryDn, entryDn, StringComparison.Ordinal))
+            {
+                _error = error;
+            }
+        }
+        finally
+        {
+            if (string.Equals(_entryDn, entryDn, StringComparison.Ordinal))
+            {
+                _busyValue = null;
+            }
+        }
+    }
+}

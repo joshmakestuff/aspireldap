@@ -44,8 +44,8 @@ jobs:
         run: dotnet build AspireOpenLdap.slnx --configuration Release --no-restore
 
       # The fast suite must pass without Docker; nothing in it may start a container.
-      # Category=CleanConsumer is excluded too — it packs and boots a full AppHost, and runs
-      # as its own publish-gating job below.
+      # REST transport and CleanConsumer each boot a full AppHost in their own process-level
+      # gate below, so both categories are excluded here.
       # Coverage (#64): first-party assemblies only (see coverage.runsettings for the
       # denominator and limitations — container/child-process work is not in this number,
       # and there is deliberately no threshold). Published as a diagnostic artifact.
@@ -53,7 +53,7 @@ jobs:
         working-directory: aspireOpenLdap
         run: >
           dotnet test AspireOpenLdap.slnx --configuration Release --no-build
-          --filter "Category!=Integration&Category!=CleanConsumer"
+          --filter "Category!=Integration&Category!=RestIntegration&Category!=CleanConsumer"
           --collect "XPlat Code Coverage" --settings coverage.runsettings
           --results-directory ../artifacts/test-results
 
@@ -128,6 +128,13 @@ jobs:
       - name: Integration tests
         working-directory: aspireOpenLdap
         run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category=Integration"
+
+      # Aspire's testing host keeps process-wide orchestration state. The REST transport suite
+      # therefore gets its own process and fresh admin host rather than a second fixture in the
+      # mutation-heavy LDAP integration run.
+      - name: REST API integration tests
+        working-directory: aspireOpenLdap
+        run: dotnet test Aspire.LdapAdmin.Tests/Aspire.LdapAdmin.Tests.csproj --configuration Release --no-build --filter "Category=RestIntegration"
 
       # Build the examples so they can't rot against the library. Build-only (no Docker / no run).
       - name: Build examples
@@ -206,7 +213,7 @@ jobs:
 
       - name: Fast tests
         working-directory: aspireOpenLdap
-        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category!=Integration&Category!=CleanConsumer"
+        run: dotnet test AspireOpenLdap.slnx --configuration Release --no-build --filter "Category!=Integration&Category!=RestIntegration&Category!=CleanConsumer"
 
   # The clean-consumer packed-artifact test (#82): packs the hosting package, restores it into
   # a scaffolded consumer AppHost in an isolated temp workspace (local feed + nuget.org only),

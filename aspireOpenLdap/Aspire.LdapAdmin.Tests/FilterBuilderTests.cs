@@ -113,7 +113,9 @@ public sealed class FilterBuilderTests
         var factory = new OpenLdapClientFactory(
             OpenLdapConnectionStringBuilder.Parse(connectionString),
             new OpenLdapClientSettings { ConnectionString = connectionString });
-        ctx.Services.AddSingleton(new LdapDirectoryService(factory, new LdapSchemaService(factory, NullLogger<LdapSchemaService>.Instance)));
+        var schema = new LdapSchemaService(factory, NullLogger<LdapSchemaService>.Instance);
+        ctx.Services.AddSingleton(schema);
+        ctx.Services.AddSingleton(new LdapDirectoryService(factory, schema));
         ctx.Services.AddSingleton(new LdapAdminSettings());
         ctx.Services.AddSingleton(new ConsoleToastService());
         ctx.Services.AddSingleton(new ConsoleClipboard(ctx.JSInterop.JSRuntime));

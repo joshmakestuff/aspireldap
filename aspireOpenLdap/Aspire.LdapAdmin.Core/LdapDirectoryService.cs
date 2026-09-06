@@ -227,7 +227,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
 
         // The password guard, at its second door: a userPassword modification on the
         // bind identity is the same silent self-brick the RFC 3062 path refuses.
-        if (changes.Any(static c => c.Name.Equals("userPassword", StringComparison.OrdinalIgnoreCase))
+        if (changes.Any(static c => IsPasswordAttribute(c.Name))
             && DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
         {
             return LdapOperationResult.Invalid(
@@ -252,6 +252,20 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         }
 
         return await SendWriteAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool IsPasswordAttribute(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return false; // The shared attribute validation reports malformed names.
+        }
+
+        // Options do not change the underlying attribute type. Both its descriptor and
+        // standard OID must take the same guard, including on the LDIF and REST paths.
+        var type = AttributeDescription.TypeOf(name);
+        return type.Equals("userPassword", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("2.5.4.35", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -302,71 +316,105 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         // One client for the whole walk: paging cookies are connection-scoped, and a
         // subtree delete is one logical operation.
         using var client = factory.CreateClient();
-        return await DeleteSubtreeAsync(client, dn, cancellationToken).ConfigureAwait(false);
+        return await DeleteSubtreeAsync(client, dn, cancellationToken, deleteAcknowledged: null).ConfigureAwait(false);
+    }
+
+    internal async Task<LdapOperationResult> DeleteSubtreeAsync(
+        string dn,
+        CancellationToken cancellationToken,
+        Action deleteAcknowledged)
+    {
+        using var client = factory.CreateClient();
+        return await DeleteSubtreeAsync(client, dn, cancellationToken, deleteAcknowledged).ConfigureAwait(false);
     }
 
     private static async Task<LdapOperationResult> DeleteSubtreeAsync(
         OpenLdapClient client,
         string dn,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? deleteAcknowledged)
     {
+        var deletedCount = 0;
+
         // Children first. Re-list after each sweep — the final DeleteRequest below is the
         // authoritative "now empty" check either way.
         while (true)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            List<string> children = [];
-            byte[] cookie = [];
-            do
+            if (cancellationToken.IsCancellationRequested)
             {
-                // "1.1" = no attributes; only the DNs matter here.
-                var request = new SearchRequest(dn, "(objectClass=*)", SearchScope.OneLevel, "1.1");
-                request.Controls.Add(new PageResultRequestControl(MaxPageSize) { Cookie = cookie });
-                SearchResponse response;
-                try
-                {
-                    response = (SearchResponse)await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-                }
-                catch (DirectoryOperationException ex) when (
-                    ex.Response is SearchResponse partial && partial.ResultCode == ResultCode.SizeLimitExceeded)
-                {
-                    // slapd's sizelimit cut the listing short; keep what it did return and
-                    // delete that batch — this outer sweep loop re-lists and converges, so
-                    // a container larger than the limit still empties sweep by sweep.
-                    foreach (SearchResultEntry entry in partial.Entries)
-                    {
-                        children.Add(entry.DistinguishedName);
-                    }
-                    break; // the paging cookie is dead after the error; next sweep re-lists
-                }
-                catch (DirectoryOperationException ex) when (ex.Response is not null)
-                {
-                    return FromError(ex, $"listing children of '{dn}'");
-                }
-                foreach (SearchResultEntry entry in response.Entries)
-                {
-                    children.Add(entry.DistinguishedName);
-                }
-                cookie = response.Controls.OfType<PageResultResponseControl>().FirstOrDefault()?.Cookie ?? [];
+                return LdapOperationResult.Cancelled($"stopped before listing children of '{dn}'", deletedCount);
             }
-            while (cookie.Length > 0);
 
-            if (children.Count == 0)
+            var (children, listingFailure) = await ListChildrenForDeleteAsync(client, dn, cancellationToken)
+                .ConfigureAwait(false);
+            if (listingFailure is not null)
+            {
+                return listingFailure with { DeletedCount = deletedCount };
+            }
+
+            if (children!.Count == 0)
             {
                 break;
             }
             foreach (var child in children)
             {
-                var result = await DeleteSubtreeAsync(client, child, cancellationToken).ConfigureAwait(false);
+                var result = await DeleteSubtreeAsync(client, child, cancellationToken, deleteAcknowledged).ConfigureAwait(false);
+                deletedCount += result.DeletedCount;
                 if (!result.Succeeded)
                 {
-                    return result;
+                    return result with { DeletedCount = deletedCount };
                 }
             }
         }
 
-        return await DeleteOneAsync(client, dn, cancellationToken).ConfigureAwait(false);
+        var deletion = await DeleteOneAsync(client, dn, cancellationToken).ConfigureAwait(false);
+        if (!deletion.Succeeded)
+        {
+            return deletion with { DeletedCount = deletedCount };
+        }
+
+        deleteAcknowledged?.Invoke();
+        return deletion with { DeletedCount = deletedCount + 1 };
+    }
+
+    private static async Task<(List<string>? Children, LdapOperationResult? Failure)> ListChildrenForDeleteAsync(
+        OpenLdapClient client,
+        string dn,
+        CancellationToken cancellationToken)
+    {
+        List<string> children = [];
+        byte[] cookie = [];
+        do
+        {
+            // "1.1" = no attributes; only the DNs matter here.
+            var request = new SearchRequest(dn, "(objectClass=*)", SearchScope.OneLevel, "1.1");
+            request.Controls.Add(new PageResultRequestControl(MaxPageSize) { Cookie = cookie });
+            SearchResponse response;
+            try
+            {
+                response = (SearchResponse)await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return (null, LdapOperationResult.Cancelled($"stopped before listing children of '{dn}'"));
+            }
+            catch (DirectoryOperationException ex) when (
+                ex.Response is SearchResponse partial && partial.ResultCode == ResultCode.SizeLimitExceeded)
+            {
+                // Delete the partial batch; the outer sweep re-lists and converges.
+                children.AddRange(partial.Entries.Cast<SearchResultEntry>().Select(static entry => entry.DistinguishedName));
+                break;
+            }
+            catch (DirectoryOperationException ex) when (ex.Response is not null)
+            {
+                return (null, FromError(ex, $"listing children of '{dn}'"));
+            }
+            children.AddRange(response.Entries.Cast<SearchResultEntry>().Select(static entry => entry.DistinguishedName));
+            cookie = response.Controls.OfType<PageResultResponseControl>().FirstOrDefault()?.Cookie ?? [];
+        }
+        while (cookie.Length > 0);
+
+        return (children, null);
     }
 
     /// <summary>One delete on the walk's shared client; the result names the DN on failure.</summary>
@@ -510,6 +558,10 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
         catch (DirectoryOperationException ex) when (ex.Response is not null)
         {
             return FromError(ex, context);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return LdapOperationResult.Cancelled(context ?? "stopped before sending the request");
         }
     }
 

@@ -14,7 +14,6 @@
     handle is listed rather than dropped.
 *@
 @using LdifDotNet.Schema
-@implements IDisposable
 @inject LdapSchemaService SchemaService
 
 <div class="dh">
@@ -38,14 +37,13 @@ else if (!_schema.Available)
 }
 else
 {
-    @* The filter is client-side over an already-loaded schema, so it narrows as you type;
-       bound on 'change' it would only apply on blur. Debounced: applying on every keystroke
-       re-filters all three tables synchronously per key. *@
+    @* Raw typing stays inside DebouncedInput. The panel re-renders and filters only after
+       the user pauses, rather than sweeping all three tables per key. *@
     <div style="margin-top: var(--space-4);">
-        <input class="input mono" style="max-width: 30rem;" @bind="_queryInput" @bind:event="oninput"
-               @bind:after="DebounceFilterAsync"
-               placeholder="Filter by name, OID, or description" spellcheck="false"
-               aria-label="Filter the schema" />
+        <DebouncedInput class="input mono" style="max-width: 30rem;" @bind-Value="_query"
+                        @bind-Value:after="ApplyFilter"
+                        placeholder="Filter by name, OID, or description" spellcheck="false"
+                        aria-label="Filter the schema" />
     </div>
 
     <div class="seg" role="group" aria-label="Show schema definition kinds"
@@ -210,9 +208,6 @@ else
 @code {
     private LdapSchemaResult? _schema;
 
-    /// <summary>What the input holds right now; becomes the applied filter after the debounce.</summary>
-    private string _queryInput = string.Empty;
-
     /// <summary>The applied filter the three tables render from.</summary>
     private string _query = string.Empty;
 
@@ -233,37 +228,7 @@ else
     private bool AnyKindShown =>
         _showClasses || _showAttributes || _showSyntaxes || (HasUnparsed && _showUnparsed);
 
-    private CancellationTokenSource? _debounceCts;
-
     protected override Task OnInitializedAsync() => LoadAsync();
-
-    /// <summary>
-    /// Applies the typed query 200 ms after the last keystroke: each keystroke cancels the
-    /// pending apply, so the three tables
-    /// re-filter once per pause instead of once per key.
-    /// </summary>
-    private async Task DebounceFilterAsync()
-    {
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-        var cts = _debounceCts = new CancellationTokenSource();
-        try
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(200), cts.Token);
-        }
-        catch (TaskCanceledException)
-        {
-            return; // A newer keystroke owns the apply.
-        }
-        _query = _queryInput;
-        ApplyFilter();
-    }
-
-    public void Dispose()
-    {
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-    }
 
     private async Task LoadAsync()
     {
@@ -273,9 +238,7 @@ else
         ApplyFilter();
     }
 
-    // Filtered once per applied query (ApplyFilter), not per render: renders happen on
-    // every keystroke, and computed-property filtering would still sweep all three lists
-    // each time even while the debounce holds the query steady.
+    // Filtered once per applied query (ApplyFilter), not per unrelated panel render.
     private IReadOnlyList<LdapObjectClass> _filteredClasses = [];
     private IReadOnlyList<LdapAttributeType> _filteredAttributes = [];
     private IReadOnlyList<LdapSyntax> _filteredSyntaxes = [];

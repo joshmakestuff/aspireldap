@@ -1,0 +1,297 @@
+@inherits DialogBase
+@using System.Collections.Immutable
+@using System.DirectoryServices.Protocols
+
+<ConsoleDialog Title="@($"Bulk edit — {Model.Entries.Length} entries")" OnCancel="CancelAsync" Busy="Busy">
+    <ChildContent>
+        <div class="field">
+            <label>Operation</label>
+            <select class="input mono" value="@_operation" aria-label="Bulk operation"
+                    disabled="@(Busy || _plan is not null)" @onchange="ChangeOperation">
+                <option value="@BulkEditOperation.AddToGroup">Add selected entries to a group</option>
+                <option value="@BulkEditOperation.RemoveFromGroup">Remove selected entries from a group</option>
+                <option value="@BulkEditOperation.Attribute">Edit an attribute on selected entries</option>
+            </select>
+        </div>
+
+        @if (_operation is BulkEditOperation.AddToGroup or BulkEditOperation.RemoveFromGroup)
+        {
+            <div class="field">
+                <label>Search existing groups</label>
+                <div class="bulk-search-row">
+                    <input class="input mono" @bind="_groupQuery" @bind:event="oninput" @onkeydown="OnGroupSearchKeyDown"
+                           placeholder="group name" aria-label="Group search" spellcheck="false"
+                           disabled="@(Busy || _searching || _plan is not null)" />
+                    <button class="btn btn-secondary" @onclick="SearchGroupsAsync" disabled="@(Busy || _searching || _plan is not null)">
+                        @(_searching ? "Searching…" : "Search")
+                    </button>
+                </div>
+            </div>
+            @if (_groupSearchError is not null)
+            {
+                <div class="bar err" role="alert">@_groupSearchError</div>
+            }
+            @if (_groupResult is not null)
+            {
+                <div class="hint">
+                    @_groupResult.Entries.Count result(s)@(_groupResult.Truncated ? $" — truncated at {GroupMemberSearch.ResultLimit}; refine the search" : "")
+                </div>
+                <div class="picklist bulk-group-results">
+                    @foreach (var group in _groupResult.Entries)
+                    {
+                        var memberships = Model.DescribeGroup(group);
+                        if (memberships.Count == 0)
+                        {
+                            <div class="bulk-group-unavailable">
+                                <span class="mono">@group.Dn</span>
+                                <span class="text-muted"> — no supported membership attribute in the loaded schema</span>
+                            </div>
+                        }
+                        @foreach (var membership in memberships)
+                        {
+                            <label class="bulk-group-option">
+                                <input type="radio" name="bulk-group" disabled="@(Busy || _plan is not null)"
+                                       checked="@(ReferenceEquals(_group, group) && _membership == membership)"
+                                       @onchange="@(() => SelectGroup(group, membership))" />
+                                <span class="mono">@group.Dn</span>
+                                <span class="hint mono">@membership.Name · @(membership.ValueKind == GroupMemberValueKind.DistinguishedName ? "DN" : "uid")</span>
+                            </label>
+                        }
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            <div class="grid2">
+                <div class="field">
+                    <label>Attribute action</label>
+                    <select class="input mono" @bind="_attributeOperation" aria-label="Attribute action"
+                            disabled="@(Busy || _plan is not null)">
+                        <option value="@BulkAttributeOperation.Add">Add</option>
+                        <option value="@BulkAttributeOperation.Replace">Replace</option>
+                        <option value="@BulkAttributeOperation.Delete">Delete</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Attribute</label>
+                    <AttributePicker Candidates="Model.AttributeCandidates" @bind-Value="_attributeName"
+                                     Disabled="@(Busy || _plan is not null)" />
+                </div>
+            </div>
+            <div class="field">
+                <label>Values <span class="hint">one per line; empty Delete removes the whole attribute</span></label>
+                <textarea class="ta ta-sm" @bind="_attributeValues" aria-label="Attribute values"
+                          disabled="@(Busy || _plan is not null)"></textarea>
+            </div>
+        }
+
+        @if (_plan is not null)
+        {
+            <div class="sec">Preview</div>
+            <p class="hint">Only the explicitly selected fetched rows listed here will be changed.</p>
+            <div class="pre bulk-preview">@string.Join(Environment.NewLine, _plan.Items.Select(static item => item.Preview))</div>
+        }
+        @if (_run is not null)
+        {
+            <div class="bar bulk-summary" role="status">
+                @_run.CompletedCount completed · @_run.FailedCount failed · @_run.PendingCount pending@(_run.Cancelled ? " · cancelled" : "")
+            </div>
+            <div class="bulk-outcomes">
+                @foreach (var outcome in _run.Outcomes.Where(static outcome => outcome.Status != BulkEditItemStatus.Pending))
+                {
+                    <div class="bulk-outcome" data-status="@outcome.Status.ToString().ToLowerInvariant()">
+                        <b>@outcome.Status</b>
+                        <span class="mono">@outcome.Item.SelectedDn</span>
+                        @if (outcome.Reason is not null)
+                        {
+                            <span>@outcome.Reason</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        @if (Error is not null)
+        {
+            <div class="bar err" role="alert">@Error</div>
+        }
+    </ChildContent>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
+        @if (_plan is null)
+        {
+            <button class="btn btn-primary" disabled="@(Busy || _searching)" @onclick="BuildPreview">Preview changes</button>
+        }
+        else
+        {
+            <button class="btn btn-ghost" disabled="@(Busy || _run is not null)" @onclick="EditPlan">Edit</button>
+            <button class="btn btn-primary" disabled="@Busy" @onclick="ApplyAsync">
+                @(Busy ? (CancellationRequested ? "Cancelling…" : "Applying…") : _run is null ? "Apply changes" : "Retry failed and pending")
+            </button>
+        }
+    </Actions>
+</ConsoleDialog>
+
+@code {
+    [Parameter, EditorRequired]
+    public required BulkEditDialogModel Model { get; set; }
+
+    private BulkEditOperation _operation = BulkEditOperation.AddToGroup;
+    private BulkAttributeOperation _attributeOperation = BulkAttributeOperation.Add;
+    private string _attributeName = string.Empty;
+    private string _attributeValues = string.Empty;
+    private string _groupQuery = string.Empty;
+    private LdapSearchResult? _groupResult;
+    private string? _groupSearchError;
+    private bool _searching;
+    private int _searchSequence;
+    private LdapEntry? _group;
+    private GroupMembershipAttribute? _membership;
+    private BulkEditPlan? _plan;
+    private BulkEditRunResult? _run;
+
+    private void ChangeOperation(ChangeEventArgs args)
+    {
+        if (Enum.TryParse<BulkEditOperation>(args.Value?.ToString(), out var operation))
+        {
+            _operation = operation;
+            Error = null;
+        }
+    }
+
+    private async Task OnGroupSearchKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await SearchGroupsAsync();
+        }
+    }
+
+    private async Task SearchGroupsAsync()
+    {
+        var sequence = ++_searchSequence;
+        _searching = true;
+        _groupSearchError = null;
+        _group = null;
+        _membership = null;
+        try
+        {
+            var result = await Model.SearchGroupsAsync(_groupQuery, LifetimeToken);
+            if (sequence == _searchSequence)
+            {
+                _groupResult = result;
+            }
+        }
+        catch (OperationCanceledException) when (LifetimeToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex) when (ex is DirectoryException or ArgumentException)
+        {
+            if (sequence == _searchSequence)
+            {
+                _groupSearchError = ex.Message;
+            }
+        }
+        finally
+        {
+            if (sequence == _searchSequence)
+            {
+                _searching = false;
+            }
+        }
+    }
+
+    private void SelectGroup(LdapEntry group, GroupMembershipAttribute membership)
+    {
+        _group = group;
+        _membership = membership;
+    }
+
+    private void BuildPreview()
+    {
+        if (_operation == BulkEditOperation.Attribute
+            && !Model.AttributeCandidates.Any(candidate =>
+                candidate.Name.Equals(_attributeName.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            _plan = null;
+            _run = null;
+            Error = "Choose an attribute available for every selected entry.";
+            return;
+        }
+
+        var draft = new BulkEditDraft(
+            _operation,
+            Model.Entries,
+            _group,
+            _membership,
+            _attributeOperation,
+            _attributeName,
+            Lines(_attributeValues));
+        var built = BulkEditPlan.Build(draft);
+        _plan = built.Plan;
+        Error = built.Error;
+        _run = null;
+    }
+
+    private void EditPlan()
+    {
+        _plan = null;
+        Error = null;
+    }
+
+    private Task ApplyAsync() => SaveAsync(async cancellationToken =>
+    {
+        var prior = _run?.Outcomes.ToDictionary(static outcome => outcome.Item.SelectedDn, StringComparer.Ordinal)
+            ?? new Dictionary<string, BulkEditItemOutcome>(StringComparer.Ordinal);
+        var outcomes = _plan!.Items.Select(item =>
+            prior.TryGetValue(item.SelectedDn, out var outcome) ? outcome : new BulkEditItemOutcome(item, BulkEditItemStatus.Pending))
+            .ToArray();
+        var cancelled = false;
+
+        for (var index = 0; index < outcomes.Length; index++)
+        {
+            if (outcomes[index].Status == BulkEditItemStatus.Succeeded)
+            {
+                continue;
+            }
+            if (cancellationToken.IsCancellationRequested)
+            {
+                cancelled = true;
+                break;
+            }
+
+            var item = outcomes[index].Item;
+            try
+            {
+                // Once dispatched, let this modify reach a definite LDAP result. Cancellation
+                // is observed before the next item so an acknowledged success is never ambiguous.
+                var result = await Model.ApplyAsync(item);
+                outcomes[index] = result.Succeeded
+                    ? new BulkEditItemOutcome(item, BulkEditItemStatus.Succeeded)
+                    : new BulkEditItemOutcome(item, BulkEditItemStatus.Failed, Describe(result));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                outcomes[index] = new BulkEditItemOutcome(item, BulkEditItemStatus.Failed, ex.Message);
+            }
+        }
+
+        _run = new BulkEditRunResult([.. outcomes], cancelled);
+        await Model.RunFinishedAsync(_run);
+        if (_run.AllSucceeded)
+        {
+            return null;
+        }
+
+        return _run.Cancelled
+            ? $"Cancelled: {_run.CompletedCount} completed, {_run.FailedCount} failed, {_run.PendingCount} pending."
+            : $"Bulk edit incomplete: {_run.CompletedCount} completed, {_run.FailedCount} failed, {_run.PendingCount} pending.";
+    });
+
+    private static ImmutableArray<string> Lines(string value) =>
+        value.Length == 0 ? [] : [.. value.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')];
+
+    private static string Describe(LdapOperationResult result) => result.Message is { Length: > 0 } message
+        ? $"{result.Status}: {message}"
+        : result.ResultCode is { } resultCode ? $"{result.Status}: {resultCode}" : result.Status.ToString();
+}

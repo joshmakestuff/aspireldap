@@ -11,8 +11,8 @@
     <IsPackable>true</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>JoshMakeStuff.Aspire.Hosting.OpenLdap</PackageId>
-    <Description>.NET Aspire hosting integration for OpenLDAP. Adds an OpenLDAP container resource (with optional TLS, health checks, and phpLDAPadmin sidecar) to your AppHost.</Description>
-    <PackageTags>aspire;hosting;openldap;ldap;directory</PackageTags>
+    <Description>.NET Aspire hosting integration for OpenLDAP with TLS, seeding, health checks, and a bundled LDAP administration UI.</Description>
+    <PackageTags>aspire;hosting;openldap;ldap;directory;ldapadmin</PackageTags>
     <!-- The assemblies are MIT, but the bundled docker build context (contentFiles/…/openldap/)
          is Apache-2.0 (derived from Bitnami OpenLDAP) — see THIRD-PARTY-NOTICES.txt. -->
     <PackageLicenseExpression>MIT AND Apache-2.0</PackageLicenseExpression>
@@ -83,6 +83,12 @@
     <!-- Publish never deletes stale files from a previous PublishDir; start clean so the
          payload is exactly this publish. -->
     <RemoveDir Directories="$(LdapAdminPayloadDir)" />
+    <!-- Restore the private payload graph too. A distinct global-property set keeps Publish
+         from reusing the pre-restore evaluation (which lacks NuGet-generated imports). -->
+    <MSBuild
+      Projects="$(MSBuildThisFileDirectory)..\Aspire.LdapAdmin.Web\Aspire.LdapAdmin.Web.csproj"
+      Targets="Restore"
+      Properties="Configuration=$(Configuration);PublishDir=$(LdapAdminPayloadDir)app\;SelfContained=false;UseAppHost=false;RestoreRecursive=true;MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
     <MSBuild
       Projects="$(MSBuildThisFileDirectory)..\Aspire.LdapAdmin.Web\Aspire.LdapAdmin.Web.csproj"
       Targets="Publish"

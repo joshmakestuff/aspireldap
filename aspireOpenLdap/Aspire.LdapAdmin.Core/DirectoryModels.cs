@@ -132,6 +132,9 @@ public enum LdapOperationStatus
     /// <summary>The server understood the request and refused it (policy, extension unsupported).</summary>
     Refused,
 
+    /// <summary>The caller cancelled before the next request was dispatched.</summary>
+    Cancelled,
+
     /// <summary>The server reported a result code this layer does not model.</summary>
     Failed,
 }
@@ -140,18 +143,23 @@ public enum LdapOperationStatus
 public sealed record LdapOperationResult(
     LdapOperationStatus Status,
     ResultCode? ResultCode = null,
-    string? Message = null)
+    string? Message = null,
+    int DeletedCount = 0)
 {
     /// <summary>True when the server applied the change.</summary>
     public bool Succeeded => Status == LdapOperationStatus.Success;
 
     /// <summary>The result of a write the server applied.</summary>
-    public static LdapOperationResult Ok() =>
-        new(LdapOperationStatus.Success, System.DirectoryServices.Protocols.ResultCode.Success);
+    public static LdapOperationResult Ok(int deletedCount = 0) =>
+        new(LdapOperationStatus.Success, System.DirectoryServices.Protocols.ResultCode.Success, DeletedCount: deletedCount);
 
     /// <summary>A request this layer rejected before sending it, with the reason.</summary>
     public static LdapOperationResult Invalid(string message) =>
         new(LdapOperationStatus.InvalidRequest, null, message);
+
+    /// <summary>A request cancelled before dispatch, retaining any acknowledged subtree deletes.</summary>
+    public static LdapOperationResult Cancelled(string message, int deletedCount = 0) =>
+        new(LdapOperationStatus.Cancelled, null, message, deletedCount);
 }
 
 /// <summary>

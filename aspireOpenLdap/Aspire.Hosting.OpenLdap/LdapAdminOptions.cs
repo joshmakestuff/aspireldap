@@ -14,6 +14,12 @@ namespace Aspire.Hosting.ApplicationModel;
 public sealed class LdapAdminOptions
 {
     /// <summary>
+    /// Enables the unauthenticated REST surface under <c>/api/v1</c>. Defaults to false; the
+    /// server-rendered UI continues to call the admin services directly either way.
+    /// </summary>
+    public bool EnableRestApi { get; set; }
+
+    /// <summary>
     /// The admin UI theme. <see cref="LdapAdminTheme.System"/> (the default) follows the
     /// browser's color-scheme preference; there is no in-app theme chooser.
     /// </summary>

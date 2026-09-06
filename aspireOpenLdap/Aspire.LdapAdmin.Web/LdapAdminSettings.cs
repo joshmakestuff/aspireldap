@@ -14,6 +14,9 @@ public sealed class LdapAdminSettings
     /// <summary>The configuration section the settings bind from.</summary>
     public const string SectionName = "LdapAdmin";
 
+    /// <summary>Whether the unauthenticated REST surface under /api/v1 is mapped.</summary>
+    public bool EnableRestApi { get; set; }
+
     /// <summary>The UI theme; System follows the browser's color-scheme preference.</summary>
     public LdapAdminTheme Theme { get; set; } = LdapAdminTheme.System;
 

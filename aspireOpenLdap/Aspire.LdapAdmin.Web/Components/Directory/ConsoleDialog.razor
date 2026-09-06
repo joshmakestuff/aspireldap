@@ -23,7 +23,7 @@
 @inject IJSRuntime Js
 
 <dialog class="wide blueprint" aria-label="@Title" tabindex="-1"
-        data-busy="@(Busy ? "true" : "false")" closedby="@(Busy ? "none" : null)" @ref="_panel">
+        data-busy="@(Busy ? "true" : "false")" @ref="_panel">
     <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
     <div class="dialog-title">@Title</div>
     <div class="dbody">@ChildContent</div>
@@ -40,15 +40,13 @@
     [Parameter]
     public RenderFragment? Actions { get; set; }
 
-    /// <summary>Raised on Escape or a backdrop click; the owner closes the dialog.</summary>
+    /// <summary>Raised for every close request; the owner closes or requests cancellation.</summary>
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
     /// <summary>
-    /// True while the owner's operation is in flight. A busy dialog refuses every dismissal
-    /// path (Escape, backdrop, Cancel) so a mid-flight save or subtree delete can never be
-    /// silently orphaned and its error always has a mounted dialog to land on. This
-    /// server-side guard is authoritative; the JS checks on data-busy are UX only.
+    /// True while the owner's operation is in flight. Native close attempts are relayed to
+    /// the owner and the dialog remains mounted until the operation acknowledges cancellation.
     /// </summary>
     [Parameter]
     public bool Busy { get; set; }
@@ -67,11 +65,9 @@
         }
     }
 
-    private Task Cancel() => Busy ? Task.CompletedTask : OnCancel.InvokeAsync();
-
     /// <summary>Called by console.js for a close request (Escape) or a backdrop click.</summary>
     [JSInvokable]
-    public Task CancelFromJs() => Cancel();
+    public Task CancelFromJs() => OnCancel.InvokeAsync();
 
     public async ValueTask DisposeAsync()
     {

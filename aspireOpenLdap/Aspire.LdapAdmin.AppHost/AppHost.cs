@@ -54,6 +54,9 @@ builder.AddProject<Projects.Aspire_LdapAdmin_Web>("ldapadmin")
     // Same configuration contract WithLdapAdmin() sets on the packaged container: the admin
     // host reads LdapAdmin:ConnectionName and binds with that connection string.
     .WithEnvironment("LdapAdmin__ConnectionName", "openldap")
+    // The integration fixture exercises the opt-in HTTP transport against this same LDAP
+    // container; production WithLdapAdmin() remains disabled unless its option is true.
+    .WithEnvironment("LdapAdmin__EnableRestApi", "true")
     // The options contract, mirrored for dev runs: any LdapAdmin__* value set on the
     // AppHost's own environment (LdapAdmin__Theme=Dark aspire start ...) passes through to
     // the admin host; unset values fall back to the admin host's own defaults.

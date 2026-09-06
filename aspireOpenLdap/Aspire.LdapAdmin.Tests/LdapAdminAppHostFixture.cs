@@ -46,6 +46,7 @@ public sealed class LdapAdminAppHostCollection : ICollectionFixture<LdapAdminApp
 public sealed class LdapAdminAppHostFixture : IAsyncLifetime
 {
     private const string ResourceName = "openldap";
+    private const string AdminResourceName = "ldapadmin";
 
     private DistributedApplication? _app;
     private IHost? _host;
@@ -61,6 +62,9 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
 
     /// <summary>The schema service under test, sharing the directory service's schema cache.</summary>
     public LdapSchemaService Schema { get; private set; } = null!;
+
+    /// <summary>The enabled admin web host, using the same directory container as the services.</summary>
+    public HttpClient Api { get; private set; } = null!;
 
     /// <summary>The directory's base DN.</summary>
     public string BaseDn => Settings.BaseDn;
@@ -120,6 +124,7 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
             var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
             await app.StartAsync(cancellationToken);
             await notifications.WaitForResourceHealthyAsync(ResourceName, cancellationToken);
+            await notifications.WaitForResourceHealthyAsync(AdminResourceName, cancellationToken);
 
             var connectionString = await app.GetConnectionStringAsync(ResourceName, cancellationToken);
             Assert.NotNull(connectionString);
@@ -129,6 +134,9 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
             _host = BuildServiceHost(ConnectionString);
             Directory = _host.Services.GetRequiredService<LdapDirectoryService>();
             Schema = _host.Services.GetRequiredService<LdapSchemaService>();
+            var admin = app.Services.GetRequiredService<DistributedApplicationModel>()
+                .Resources.OfType<ProjectResource>().Single(resource => resource.Name == AdminResourceName);
+            Api = new HttpClient { BaseAddress = new Uri(new EndpointReference(admin, "http").Url) };
             _app = app;
         }
         catch
@@ -150,6 +158,7 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _host?.Dispose();
+        Api?.Dispose();
         if (_app is not null)
         {
             await _app.DisposeAsync();

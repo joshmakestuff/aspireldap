@@ -1,8 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.8.0-preview.1 — 2026-09-04
 
 ### Added
+
+- **LdapAdmin administration workflows:** accessible local sorting and 25-row pagination for
+  bounded search results ([#95](https://github.com/joshmakestuff/aspireldap/issues/95));
+  schema-derived group membership editing for `member`, `uniqueMember`, and `memberUid`
+  ([#101](https://github.com/joshmakestuff/aspireldap/issues/101)); schema-derived password reset
+  ([#114](https://github.com/joshmakestuff/aspireldap/issues/114)); and cross-page bulk group and
+  attribute Add/Replace/Delete operations with immutable plans and partial-result reporting
+  ([#112](https://github.com/joshmakestuff/aspireldap/issues/112)).
+- **Opt-in LdapAdmin REST API** under `/api/v1`
+  ([#87](https://github.com/joshmakestuff/aspireldap/issues/87)). It covers directory browsing and
+  search, entry CRUD/rename/password, schema, and LDIF export/plan/import, with RFC 9457 problem
+  responses. `WithLdapAdmin(options => options.EnableRestApi = true)` enables it; it is disabled by
+  default and deliberately has no authentication or CORS for its local-development scope.
+- **Shared debounced input behavior** for tree, schema, and object-class filtering
+  ([#146](https://github.com/joshmakestuff/aspireldap/issues/146)).
 
 - **`WithLdapAdmin(options => ...)`** — one `LdapAdminOptions` object for the admin UI's
   defaulted behavior ([#98](https://github.com/joshmakestuff/aspireldap/issues/98)): `Theme`
@@ -44,6 +59,13 @@
   is expressible; hiding every kind states so instead of rendering an empty page.
 
 ### Fixed
+
+- Dialog cancellation now reaches LDAP operations through cancellation tokens, reports a distinct
+  cancelled outcome, and preserves acknowledged progress during subtree and bulk operations
+  ([#129](https://github.com/joshmakestuff/aspireldap/issues/129)).
+- AppHost theme selection is authoritative: Light and Dark stay fixed, while System follows the
+  browser color-scheme preference without a persisted browser override
+  ([#159](https://github.com/joshmakestuff/aspireldap/issues/159)).
 
 - **Cross-process certificate generation** ([#139](https://github.com/joshmakestuff/aspireldap/issues/139)):
   `EnsureCertificates` now serializes its freshness check and generation behind a per-directory

@@ -1,0 +1,6 @@
+# Keep text consistent across platforms, including Linux container scripts.
+* text=auto eol=lf
+
+# Binary assets must not undergo line-ending conversion.
+*.png binary
+*.woff2 binary
