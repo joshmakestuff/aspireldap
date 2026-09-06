@@ -46,7 +46,7 @@ public sealed class LdapLdifService(LdapDirectoryService directory)
 
     /// <summary>
     /// Parses import text into an apply plan. A parse failure is a plan-level error; a
-    /// record the importer cannot apply (controls or an increment modification) is refused here, before
+    /// record the importer cannot apply (controls, URL values, or an increment modification) is refused here, before
     /// anything runs, not midway through an apply.
     /// </summary>
     public static LdifImportPlan ParsePlan(string ldif)
@@ -131,7 +131,7 @@ public sealed class LdapLdifService(LdapDirectoryService directory)
             $"{ChangeTypeLabel(record)} {record.Dn}: LDIF controls are not supported here.",
         LdifModifyRecord modify when modify.Modifications.Any(static m => m.Type == LdifModificationType.Increment) =>
             $"modify {record.Dn}: increment modifications are not supported here.",
-        _ => null,
+        _ => LdifInputValidation.UnresolvedUrlError(record),
     };
 
     private Task<LdapOperationResult> ApplyOneAsync(LdifRecord record, CancellationToken cancellationToken) => record switch
