@@ -158,11 +158,13 @@ internal static class OpenLdapSeedPipeline
         builder.OnBeforeResourceStarted((res, _, ct) =>
         {
             MaterializeFakeDataSpecs(res);
-            if (res.SeedRecords is not { Count: > 0 } seedRecords || res.SeedRecordsFilePath is null)
+            if (res.SeedRecordsFilePath is null)
             {
                 return Task.CompletedTask;
             }
-            var ldif = LdifWriter.WriteToString(seedRecords, LdapSeedLdifGenerator.WriterOptions);
+            var ldif = res.SeedRecords is { Count: > 0 } seedRecords
+                ? LdifWriter.WriteToString(seedRecords, LdapSeedLdifGenerator.WriterOptions)
+                : string.Empty;
             return File.WriteAllTextAsync(res.SeedRecordsFilePath, ldif, ct);
         });
     }
@@ -190,9 +192,13 @@ internal static class OpenLdapSeedPipeline
 
         builder.OnBeforeResourceStarted((res, _, ct) =>
         {
-            if (res.SeedModel is not { } m || m.IsEmpty || res.SeedFilePath is null)
+            if (res.SeedFilePath is null)
             {
                 return Task.CompletedTask;
+            }
+            if (res.SeedModel is not { IsEmpty: false } m)
+            {
+                return File.WriteAllTextAsync(res.SeedFilePath, string.Empty, ct);
             }
             LdapSeedValidator.Validate(res, m);
             var ldif = LdapSeedLdifGenerator.Generate(res, m);

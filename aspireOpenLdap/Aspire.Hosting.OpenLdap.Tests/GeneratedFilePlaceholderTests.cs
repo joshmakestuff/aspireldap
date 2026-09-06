@@ -1,5 +1,6 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Aspire.Hosting.OpenLdap.Tests;
@@ -12,6 +13,79 @@ namespace Aspire.Hosting.OpenLdap.Tests;
 /// </summary>
 public class GeneratedFilePlaceholderTests
 {
+    [Theory]
+    [InlineData("access")]
+    [InlineData("limits")]
+    [InlineData("overlay")]
+    [InlineData("records")]
+    [InlineData("tree")]
+    public async Task Start_Callback_Replaces_Stale_File_With_Current_Model(string pipeline)
+    {
+        var dir = Directory.CreateTempSubdirectory("aspire-ldap-current-model-");
+        try
+        {
+            var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+            {
+                ProjectDirectory = dir.FullName,
+            });
+            var ldap = builder.AddOpenLdap("ldap");
+            var resource = ldap.Resource;
+            var path = pipeline switch
+            {
+                "access" => ldap.WithAccessControl().Resource.AccessFilePath!,
+                "limits" => ldap.WithLimits().Resource.AccessFilePath!,
+                "overlay" => ldap.WithOverlay(OpenLdapOverlay.SyncProv()).Resource.OverlayFilePath!,
+                "records" => ldap.WithSeedRecords().Resource.SeedRecordsFilePath!,
+                "tree" => ldap.WithOrganizationalUnit("people").Resource.SeedFilePath!,
+                _ => throw new ArgumentOutOfRangeException(nameof(pipeline)),
+            };
+            resource.Overlays?.Clear();
+            resource.SeedModel?.OrganizationalUnits.Clear();
+            using var services = builder.Services.BuildServiceProvider();
+            var beforeStart = new BeforeResourceStartedEvent(resource, services);
+
+            await File.WriteAllTextAsync(path, "stale config from a previous run");
+            await builder.Eventing.PublishAsync(beforeStart);
+            Assert.True(File.Exists(path)); // The bind mount must remain a file, not a directory.
+            Assert.Equal(string.Empty, await File.ReadAllTextAsync(path));
+
+            // The same registered callback must still emit later declarations and survive repeats.
+            switch (pipeline)
+            {
+                case "access": ldap.WithAccessControl("to * by * read"); break;
+                case "limits": ldap.WithLimits("* size=unlimited"); break;
+                case "overlay": ldap.WithOverlay(OpenLdapOverlay.SyncProv()); break;
+                case "records":
+                    ldap.WithSeedRecords(new LdifDotNet.LdifContentRecord(
+                    "ou=people,dc=example,dc=org", new LdifDotNet.LdifAttribute("objectClass", "organizationalUnit"))); break;
+                case "tree": ldap.WithOrganizationalUnit("people"); break;
+            }
+            await builder.Eventing.PublishAsync(beforeStart);
+            var generated = await File.ReadAllTextAsync(path);
+            Assert.Contains(pipeline switch
+            {
+                "access" => "olcAccess",
+                "limits" => "olcLimits",
+                "overlay" => "olcOverlay",
+                _ => "ou=people",
+            }, generated, StringComparison.Ordinal);
+            await builder.Eventing.PublishAsync(beforeStart);
+            Assert.Equal(generated, await File.ReadAllTextAsync(path));
+
+            resource.AccessRules?.Clear();
+            resource.LimitRules?.Clear();
+            resource.Overlays?.Clear();
+            resource.SeedRecords?.Clear();
+            resource.SeedModel?.OrganizationalUnits.Clear();
+            await builder.Eventing.PublishAsync(beforeStart);
+            Assert.Equal(string.Empty, await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
     private static IResourceBuilder<OpenLdapResource> LdapIn(string appHostDirectory) =>
         DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {

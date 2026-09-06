@@ -1,4 +1,5 @@
 using Aspire.LdapAdmin.Core;
+using System.Collections.Immutable;
 
 namespace Aspire.LdapAdmin.Web.Components.Directory;
 
@@ -12,7 +13,8 @@ public sealed class AttributeDialogModel
 {
     public bool IsNew { get; set; }
     public string Name { get; set; } = string.Empty;
-    public string ValuesText { get; set; } = string.Empty;
+    public IReadOnlyList<string> Values { get; set; } = [string.Empty];
+
     public bool IsBinary { get; set; }
 
     /// <summary>
@@ -23,7 +25,7 @@ public sealed class AttributeDialogModel
     /// </summary>
     public required LdapEntry Entry { get; init; }
 
-    public required Func<AttributeDialogModel, Task<string?>> SaveAsync { get; init; }
+    public required Func<AttributeDialogModel, CancellationToken, Task<string?>> SaveAsync { get; init; }
 }
 
 /// <summary>
@@ -34,7 +36,7 @@ public sealed class AttributeDialogModel
 public sealed class NewEntryModel
 {
     public required string ParentDn { get; init; }
-    public required Func<Aspire.LdapAdmin.Core.LdapNewEntry, Task<string?>> SaveAsync { get; init; }
+    public required Func<Aspire.LdapAdmin.Core.LdapNewEntry, CancellationToken, Task<string?>> SaveAsync { get; init; }
 }
 
 /// <summary>
@@ -63,7 +65,7 @@ public sealed class RenameDialogModel
     public string RdnValue { get; set; } = string.Empty;
     public string NewParentDn { get; set; } = string.Empty;
     public bool DeleteOldRdn { get; set; } = true;
-    public required Func<RenameDialogModel, Task<string?>> SaveAsync { get; init; }
+    public required Func<RenameDialogModel, CancellationToken, Task<string?>> SaveAsync { get; init; }
 }
 
 public sealed class DeleteDialogModel
@@ -75,5 +77,32 @@ public sealed class DeleteDialogModel
     /// non-leaf is refused by the server, never silently widened.</summary>
     public bool Subtree { get; set; }
 
-    public required Func<DeleteDialogModel, Task<string?>> SaveAsync { get; init; }
+    public required Func<DeleteDialogModel, CancellationToken, Task<string?>> SaveAsync { get; init; }
+}
+
+public sealed class PasswordDialogModel
+{
+    /// <summary>The target entry DN, snapshotted when the dialog opens.</summary>
+    public required string Dn { get; init; }
+
+    public required Func<string, CancellationToken, Task<string?>> SaveAsync { get; init; }
+}
+
+public sealed class AddGroupMemberDialogModel
+{
+    public required GroupMembershipAttribute Membership { get; init; }
+    public required IReadOnlySet<string> ExistingValues { get; init; }
+    public Func<string, bool>? IsExistingValue { get; init; }
+    public required Func<string, CancellationToken, Task<LdapSearchResult>> SearchAsync { get; init; }
+    public required Func<string, CancellationToken, Task<string?>> SaveAsync { get; init; }
+}
+
+public sealed class BulkEditDialogModel
+{
+    public required ImmutableArray<LdapEntry> Entries { get; init; }
+    public required IReadOnlyList<AttributeGuidance> AttributeCandidates { get; init; }
+    public required Func<string, CancellationToken, Task<LdapSearchResult>> SearchGroupsAsync { get; init; }
+    public required Func<LdapEntry, IReadOnlyList<GroupMembershipAttribute>> DescribeGroup { get; init; }
+    public required Func<BulkEditPlanItem, Task<LdapOperationResult>> ApplyAsync { get; init; }
+    public required Func<BulkEditRunResult, Task> RunFinishedAsync { get; init; }
 }

@@ -18,7 +18,7 @@
 @using LdifDotNet.Schema
 @inherits DialogBase
 
-<ConsoleDialog Title="New entry" OnCancel="CloseAsync" Busy="Busy">
+<ConsoleDialog Title="New entry" OnCancel="CancelAsync" Busy="Busy">
     <ChildContent>
     <div class="steps">
         <span class="step" aria-current="@Current(1)">1 — object class</span>
@@ -30,8 +30,8 @@
     {
         @if (Schema is { } schema)
         {
-            <input class="input mono" placeholder="filter object classes…" spellcheck="false"
-                   aria-label="Filter object classes" @bind="_classFilter" @bind:event="oninput" />
+            <DebouncedInput class="input mono" placeholder="filter object classes…" spellcheck="false"
+                            aria-label="Filter object classes" disabled="@Busy" @bind-Value="_classFilter" />
             @if (_picked.Count > 0)
             {
                 <div style="display: flex; flex-wrap: wrap; gap: var(--space-2);">
@@ -51,6 +51,7 @@
                     var name = objectClass.Name ?? objectClass.Oid;
                     var picked = _picked.Contains(name);
                     <button type="button" class="combo-opt" role="option"
+                            disabled="@Busy"
                             aria-selected="@(picked ? "true" : "false")"
                             @onclick="@(() => TogglePick(name))">
                         <i class="tw">@(picked ? "✓" : "·")</i>
@@ -72,7 +73,7 @@
             <div class="field">
                 <label>Object classes <span class="mono text-muted">comma-separated</span></label>
                 <input class="input mono" @bind="_freeClasses" spellcheck="false"
-                       placeholder="inetOrgPerson, posixAccount" />
+                       placeholder="inetOrgPerson, posixAccount" disabled="@Busy" />
             </div>
         }
     }
@@ -80,14 +81,14 @@
     {
         <div class="field">
             <label>Parent DN</label>
-            <input class="input mono" @bind="_parentDn" spellcheck="false" />
+            <input class="input mono" @bind="_parentDn" spellcheck="false" disabled="@Busy" />
         </div>
         <div class="frow frow-2">
             <div class="field">
                 <label>RDN attribute <span class="must">·must</span></label>
                 @if (Schema is not null)
                 {
-                    <select class="input mono" @bind="_rdnAttribute" @bind:after="InvalidateDerived">
+                    <select class="input mono" @bind="_rdnAttribute" @bind:after="InvalidateDerived" disabled="@Busy">
                         @foreach (var name in RdnChoices)
                         {
                             <option value="@name">@name</option>
@@ -96,12 +97,12 @@
                 }
                 else
                 {
-                    <input class="input mono" @bind="_rdnAttribute" @bind:after="InvalidateDerived" spellcheck="false" placeholder="uid" />
+                    <input class="input mono" @bind="_rdnAttribute" @bind:after="InvalidateDerived" spellcheck="false" placeholder="uid" disabled="@Busy" />
                 }
             </div>
             <div class="field">
                 <label>RDN value <span class="must">·must</span></label>
-                <input class="input mono" @bind="_rdnValue" @bind:event="oninput" spellcheck="false" />
+                <input class="input mono" @bind="_rdnValue" @bind:event="oninput" spellcheck="false" disabled="@Busy" />
             </div>
         </div>
         @if (PreviewDn is { } previewDn)
@@ -127,10 +128,11 @@
                             @if (!guidance.Required)
                             {
                                 <button type="button" class="btn btn-ghost btn-sm"
-                                        @onclick="@(() => RemoveMay(guidance.Name))">×</button>
+                                        @onclick="@(() => RemoveMay(guidance.Name))" disabled="@Busy">×</button>
                             }
                         </label>
                         <input class="input mono" spellcheck="false"
+                               disabled="@Busy"
                                value="@FieldValue(guidance.Name)"
                                @oninput="@(args => _values[guidance.Name] = args.Value?.ToString() ?? string.Empty)" />
                     </div>
@@ -139,10 +141,10 @@
             <div class="frow" style="grid-template-columns: minmax(180px, 1fr) auto; margin-bottom: 0;">
                 <div class="field">
                     <label>Add optional attribute</label>
-                    <AttributePicker Candidates="MayCandidates" @bind-Value="_mayName" Placeholder="attributeType" />
+                    <AttributePicker Candidates="MayCandidates" @bind-Value="_mayName" Placeholder="attributeType" Disabled="Busy" />
                 </div>
                 <button type="button" class="btn btn-secondary" @onclick="AddMay"
-                        disabled="@(_mayName.Length == 0)">Add</button>
+                        disabled="@(Busy || _mayName.Length == 0)">Add</button>
             </div>
         }
         else
@@ -150,7 +152,7 @@
             <div class="field">
                 <label>Attributes <span class="mono text-muted">name: value, one per line</span></label>
                 <textarea class="ta ta-sm" @bind="_freeAttributes" spellcheck="false"
-                          placeholder="cn: Jane Doe&#10;sn: Doe"></textarea>
+                          placeholder="cn: Jane Doe&#10;sn: Doe" disabled="@Busy"></textarea>
             </div>
         }
     }
@@ -172,14 +174,14 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
         @if (_step > 1)
         {
             <button class="btn btn-secondary" disabled="@Busy" @onclick="Back">Back</button>
         }
         @if (_step < 3)
         {
-            <button class="btn btn-primary" @onclick="ContinueStep">Continue</button>
+            <button class="btn btn-primary" disabled="@Busy" @onclick="ContinueStep">Continue</button>
         }
         else
         {
@@ -515,7 +517,7 @@
     {
         if (_plan is { } plan)
         {
-            await SaveAsync(() => Model.SaveAsync(plan));
+            await SaveAsync(token => Model.SaveAsync(plan, token));
         }
     }
 }

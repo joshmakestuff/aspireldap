@@ -9,19 +9,19 @@
        asset to the payload. *@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%92%3C/text%3E%3C/svg%3E" />
     @* Theme boot: stamps data-theme on <html> before first paint so neither theme flashes.
-       A persisted choice wins; otherwise the AppHost default (LdapAdmin__Theme), with
-       System resolving through prefers-color-scheme. Dark is a token-override layer only. *@
+       Explicit AppHost Light/Dark settings are authoritative; System follows the browser's
+       color-scheme preference. Dark is a token-override layer only. *@
     <script>
         (function () {
-            var mode = null;
-            try { mode = localStorage.getItem('aspireldap.theme'); } catch (e) { }
-            if (mode !== 'light' && mode !== 'dark') {
-                var configured = '@Settings.Theme';
-                mode = configured === 'Light' ? 'light'
+            var configured = '@Settings.Theme';
+            var preference = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+            function apply() {
+                document.documentElement.dataset.theme = configured === 'Light' ? 'light'
                     : configured === 'Dark' ? 'dark'
-                    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                    : (preference && preference.matches ? 'dark' : 'light');
             }
-            document.documentElement.dataset.theme = mode;
+            apply();
+            if (configured === 'System' && preference) preference.addEventListener('change', apply);
         })();
     </script>
     <ResourcePreloader />

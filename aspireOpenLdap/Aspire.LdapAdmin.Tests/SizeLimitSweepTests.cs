@@ -81,4 +81,37 @@ public class SizeLimitSweepTests(LdapAdminAppHostFixture fixture)
             await fixture.Directory.DeleteEntryAsync(parent, subtree: true, cts.Token);
         }
     }
+
+    [Fact]
+    public async Task Cancelled_subtree_delete_returns_exact_acknowledged_progress()
+    {
+        using var setup = TestCancellation.Source();
+        var parent = await SeedBulkContainerAsync(setup.Token);
+        try
+        {
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(setup.Token);
+            var acknowledgements = 0;
+
+            var deleted = await Sweeper().DeleteSubtreeAsync(parent, cancellation.Token, () =>
+            {
+                if (++acknowledgements == 3)
+                {
+                    cancellation.Cancel();
+                }
+            });
+
+            Assert.Equal(LdapOperationStatus.Cancelled, deleted.Status);
+            Assert.Equal(3, deleted.DeletedCount);
+            Assert.Contains("stopped before listing children of", deleted.Message, StringComparison.Ordinal);
+
+            var remaining = await fixture.Directory.GetChildrenAsync(parent, limit: 100, CancellationToken.None);
+            Assert.False(remaining.Truncated);
+            Assert.Equal(ChildCount - deleted.DeletedCount, remaining.Children.Count);
+        }
+        finally
+        {
+            using var cleanup = TestCancellation.Source();
+            await fixture.Directory.DeleteEntryAsync(parent, subtree: true, cleanup.Token);
+        }
+    }
 }

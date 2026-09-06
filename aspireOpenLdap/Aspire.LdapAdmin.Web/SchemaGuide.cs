@@ -25,6 +25,23 @@ public sealed record AttributeGuidance(
 public static class SchemaGuide
 {
     /// <summary>
+    /// True only when a loaded schema says at least one of the entry's effective object
+    /// classes permits the attribute. Missing schema and unknown classes never become a guess.
+    /// </summary>
+    public static bool PermitsAttribute(
+        LdapSchema? schema, IEnumerable<string> objectClasses, string attributeName)
+    {
+        if (schema is null || schema.FindAttributeType(attributeName) is null)
+        {
+            return false;
+        }
+
+        var (must, may) = EffectiveSets(schema, objectClasses);
+        return must.Contains(attributeName, StringComparer.OrdinalIgnoreCase)
+            || may.Contains(attributeName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The effective attribute sets for a set of object classes: MUST as the union of every
     /// class's required names (superiors included), MAY as the union of optional names minus
     /// anything some class requires.
@@ -155,4 +172,43 @@ public static class SchemaGuide
             : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
         return result;
     }
+
+    /// <summary>Attributes that every selected entry's effective schema permits a user to modify.</summary>
+    public static IReadOnlyList<AttributeGuidance> SharedEditableCandidates(
+        LdapSchema schema, IEnumerable<IEnumerable<string>> objectClassesByEntry)
+    {
+        var effective = objectClassesByEntry.Select(classes => EffectiveSets(schema, classes)).ToList();
+        if (effective.Count == 0)
+        {
+            return [];
+        }
+
+        var shared = new HashSet<string>(effective[0].Must.Concat(effective[0].May), StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in effective.Skip(1))
+        {
+            shared.IntersectWith(entry.Must.Concat(entry.May));
+        }
+
+        List<AttributeGuidance> result = [];
+        foreach (var name in shared)
+        {
+            var required = effective.Any(entry => entry.Must.Contains(name, StringComparer.OrdinalIgnoreCase));
+            if (!name.Equals("objectClass", StringComparison.OrdinalIgnoreCase)
+                && !RequiresBinaryTransfer(schema, name)
+                && Describe(schema, name, required) is { NoUserModification: false } guidance)
+            {
+                result.Add(guidance);
+            }
+        }
+        result.Sort(static (a, b) => a.Required != b.Required
+            ? (a.Required ? -1 : 1)
+            : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        return result;
+    }
+
+    private static bool RequiresBinaryTransfer(LdapSchema schema, string name) =>
+        schema.FindAttributeType(name) is { } type
+        && schema.ResolveSyntaxOid(type) is { } syntaxOid
+        && schema.FindSyntax(syntaxOid) is { } syntax
+        && (syntax.NotHumanReadable || syntax.BinaryTransferRequired);
 }

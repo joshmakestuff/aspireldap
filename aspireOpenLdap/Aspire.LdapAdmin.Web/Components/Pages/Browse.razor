@@ -1,6 +1,6 @@
 @*
     The app shell and directory browser in one page: top bar (brand + connection chip +
-    refresh + theme), view tabs (Directory / Search / Schema), then the work grid — tree
+    refresh), view tabs (Directory / Search / Schema), then the work grid — tree
     rail, drag-handle separator, contextual
     pane. The tree lives here and is never re-created on a view switch, so browse context
     survives searching and reading the schema. Search and Schema render as always-alive
@@ -41,9 +41,6 @@
         <div class="conn mono"><i class="led"></i>@Connection.ServerLabel</div>
         <div class="conn mono">bind: @Connection.BindDn</div>
         <button class="btn btn-secondary btn-sm" @onclick="RefreshAsync">Refresh</button>
-        <button class="btn btn-secondary btn-icon btn-sm"
-                title="Toggle light/dark theme" aria-label="Toggle light/dark theme"
-                @onclick="ToggleThemeAsync">◐</button>
     </div>
 
     <div class="vtabs" role="tablist" aria-label="Console views">
@@ -65,8 +62,8 @@
                     <button class="btn btn-secondary btn-sm" @onclick="OpenChildDialog"
                             disabled="@(_selectedDn is null)">New entry…</button>
                 </div>
-                <input class="input mono railfilter" placeholder="filter RDN…" spellcheck="false"
-                       aria-label="Filter tree rows by RDN" @bind="_treeFilter" @bind:event="oninput" />
+                <DebouncedInput class="input mono railfilter" placeholder="filter RDN…" spellcheck="false"
+                                aria-label="Filter tree rows by RDN" @bind-Value="_treeFilter" />
             </div>
             @if (_root is null)
             {
@@ -123,6 +120,10 @@
                             </div>
                         </div>
                         <div class="dhact">
+                            @if (CanResetPassword(_entry))
+                            {
+                                <button class="btn btn-secondary btn-sm" @onclick="OpenPasswordDialog">Reset password</button>
+                            }
                             <button class="btn btn-secondary btn-sm" @onclick="OpenAddAttributeDialog">Add attribute</button>
                             <button class="btn btn-secondary btn-sm" @onclick="OpenChildDialog">New child</button>
                             <button class="btn btn-secondary btn-sm" @onclick="OpenRenameDialog">Rename</button>
@@ -144,6 +145,11 @@
                                 @onclick="@(() => _entryTab = EntryTab.Overview)">Overview</button>
                         <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Attributes)"
                                 @onclick="@(() => _entryTab = EntryTab.Attributes)">Attributes</button>
+                        @if (_memberships.Count > 0)
+                        {
+                            <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Members)"
+                                    @onclick="@(() => _entryTab = EntryTab.Members)">Members</button>
+                        }
                         <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Ldif)"
                                 @onclick="@(() => _entryTab = EntryTab.Ldif)">LDIF</button>
                     </div>
@@ -151,10 +157,20 @@
                         <EntryOverview Entry="_entry" SaveAsync="ApplyEntryChangesAsync" />
                     </div>
                     <div style="@TabDisplay(EntryTab.Attributes)">
-                        <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
+                        <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog"
+                                   ManagedAttributes="_managedMembershipAttributes" />
                     </div>
+                    @if (_memberships.Count > 0)
+                    {
+                        <div style="@TabDisplay(EntryTab.Members)">
+                            <GroupMembersPanel Entry="_entry" Memberships="_memberships"
+                                               OnAdd="OpenAddMemberDialog"
+                                               RemoveMemberAsync="RemoveMemberAsync" />
+                        </div>
+                    }
                     <div style="@TabDisplay(EntryTab.Ldif)">
-                        <EntryLdifPanel Entry="_entry" ApplyAsync="ApplyEntryChangesAsync" />
+                        <EntryLdifPanel Entry="_entry" ApplyAsync="ApplyEntryChangesAsync"
+                                        ManagedAttributes="_managedMembershipAttributes" />
                     </div>
                 }
                 else if (_error is null)
@@ -183,7 +199,9 @@
 
 @if (_attributeDialog is { } attributeDialog)
 {
-    <AttributeDialog Model="attributeDialog" Schema="_dialogSchema" OnClose="CloseDialogs" />
+    <AttributeDialog Model="attributeDialog" Schema="_dialogSchema"
+                     ExcludedAttributes="@(GroupMembership.Detect(_dialogSchema, attributeDialog.Entry).Select(static membership => membership.Name).ToHashSet(StringComparer.OrdinalIgnoreCase))"
+                     OnClose="CloseDialogs" />
 }
 @if (_newEntry is { } newEntry)
 {
@@ -196,6 +214,14 @@
 @if (_deleteDialog is { } deleteDialog)
 {
     <DeleteDialog Model="deleteDialog" OnClose="CloseDialogs" />
+}
+@if (_passwordDialog is { } passwordDialog)
+{
+    <PasswordDialog Model="passwordDialog" OnClose="CloseDialogs" />
+}
+@if (_addMemberDialog is { } addMemberDialog)
+{
+    <AddGroupMemberDialog Model="addMemberDialog" OnClose="CloseDialogs" />
 }
 
 @* popover=manual: dialogs are top-layer natives, and the design rule is that
@@ -234,13 +260,17 @@
     private NewEntryModel? _newEntry;
     private RenameDialogModel? _renameDialog;
     private DeleteDialogModel? _deleteDialog;
+    private PasswordDialogModel? _passwordDialog;
+    private AddGroupMemberDialogModel? _addMemberDialog;
 
     /// <summary>The subschema for the schema-aware dialogs; null degrades them to free text.</summary>
     private LdifDotNet.Schema.LdapSchema? _dialogSchema;
+    private IReadOnlyList<GroupMembershipAttribute> _memberships = [];
+    private IReadOnlySet<string> _managedMembershipAttributes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private string? _toast;
     private ElementReference _toastElement;
-    private CancellationTokenSource? _toastCts;
+    private readonly Debouncer _toastClear = new();
 
     /// <summary>
     /// The stale-response guard: each selection takes the next token, and every await in
@@ -294,6 +324,7 @@
     {
         Overview,
         Attributes,
+        Members,
         Ldif,
     }
 
@@ -316,14 +347,23 @@
             return "No entry is selected.";
         }
 
-        var result = await GuardedAsync(() => Directory.ModifyEntryAsync(dn, changes));
+        if (changes.FirstOrDefault(change => _managedMembershipAttributes.Contains(change.Name)) is { } managed)
+        {
+            return $"{managed.Name} is managed in the Members tab; edit individual members there.";
+        }
+
+        var selection = _selectSeq;
+        var result = await GuardedAsync(() => ModifyEntryAsync(dn, changes, CancellationToken.None));
         if (!result.Succeeded)
         {
             return Describe(result);
         }
 
         ShowToast($"modify {dn} — {changes.Count} {(changes.Count == 1 ? "change" : "changes")} applied");
-        await SelectAsync(dn, reveal: false);
+        if (selection == _selectSeq && DnEquality.AreEquivalent(_selectedDn, dn))
+        {
+            await SelectAsync(dn, reveal: false);
+        }
         return null;
     }
 
@@ -374,6 +414,7 @@
         // an unreadable subschema comes back as data (Available = false), never a throw.
         var schema = await SchemaService.GetSchemaAsync();
         _dialogSchema = schema.Available ? schema.Schema : null;
+        UpdateMemberships();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -417,7 +458,7 @@
     /// Loads one node's children (SizeLimit = Cap + 1, so "more than Cap" is knowable) and,
     /// while <paramref name="depth"/> allows, theirs too. The node is left expanded.
     /// </summary>
-    private async Task ExpandAsync(TreeNode node, int depth)
+    private async Task ExpandAsync(TreeNode node, int depth, CancellationToken cancellationToken = default)
     {
         if (depth <= 0)
         {
@@ -426,7 +467,7 @@
 
         if (node.Children is null)
         {
-            var children = await Directory.GetChildrenAsync(node.Dn, limit: Cap + 1);
+            var children = await Directory.GetChildrenAsync(node.Dn, limit: Cap + 1, cancellationToken);
             // Display order only — the AppHost-set default; truncation semantics are
             // the server's and are not affected by how the returned children are ordered.
             var ordered = Settings.DefaultSortOrder == LdapAdminSortOrder.Rdn
@@ -447,7 +488,7 @@
 
         foreach (var child in node.Children.Where(static c => c.HasChildren))
         {
-            await ExpandAsync(child, depth - 1);
+            await ExpandAsync(child, depth - 1, cancellationToken);
         }
     }
 
@@ -659,7 +700,7 @@
     private void OnSearchEntrySelected(string dn) =>
         Navigation.NavigateTo(Url(AdminView.Browse, dn), forceLoad: false);
 
-    private async Task SelectAsync(string dn, bool reveal)
+    private async Task SelectAsync(string dn, bool reveal, CancellationToken cancellationToken = default)
     {
         // Keep the address bar naming the entry on screen; replace, not push — selecting is
         // view state, and pushing would make Back step through every entry visited. The view
@@ -679,7 +720,7 @@
         string? error = null;
         try
         {
-            entry = await Directory.GetEntryAsync(dn);
+            entry = await GetEntryAsync(dn, cancellationToken);
         }
         catch (DirectoryException ex)
         {
@@ -699,10 +740,11 @@
         _loadingEntry = false;
         _entry = entry;
         _error = error ?? (entry is null ? $"No entry exists at '{dn}' (or this bind cannot see it)." : null);
+        UpdateMemberships();
 
         if (reveal && entry is not null)
         {
-            await RevealAsync(dn, token);
+            await RevealAsync(dn, token, cancellationToken);
         }
     }
 
@@ -711,7 +753,7 @@
     /// lands on a visible row rather than a collapsed root. Paged-out rows are paged in;
     /// a row past the cap stays unrevealed — the entry pane already shows the entry.
     /// </summary>
-    private async Task RevealAsync(string dn, int token)
+    private async Task RevealAsync(string dn, int token, CancellationToken cancellationToken)
     {
         if (_root is not { } root)
         {
@@ -744,7 +786,7 @@
             {
                 try
                 {
-                    await ExpandAsync(current, depth: 1);
+                    await ExpandAsync(current, depth: 1, cancellationToken);
                 }
                 catch (DirectoryException)
                 {
@@ -805,14 +847,6 @@
         ShowToast("directory reloaded");
     }
 
-    private async Task ToggleThemeAsync()
-    {
-        if (_js is not null)
-        {
-            await _js.InvokeVoidAsync("toggleTheme");
-        }
-    }
-
     private async Task CopyDnAsync(string dn) =>
         ShowToast(await Clipboard.CopyAsync(dn) ? "DN copied" : "copy failed — clipboard unavailable");
 
@@ -828,46 +862,18 @@
     /// <summary>One toast at a time, bottom center, auto-cleared.</summary>
     private void ShowToast(string message)
     {
-        _toastCts?.Cancel();
-        _toastCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _toastCts = cts;
         _toast = message;
         StateHasChanged();
-        _ = ClearToastLaterAsync(cts);
-    }
-
-    /// <summary>
-    /// Clears the toast after its dwell — only if it is still the current one. The cancel
-    /// in ShowToast cannot cover the window where an elapsed timer's clear is already in
-    /// flight when the next toast shows; without the ownership check that stale clear would
-    /// cut the new toast short. The check runs under InvokeAsync, serialized with ShowToast
-    /// on the sync context, so ownership cannot change mid-decision.
-    /// </summary>
-    private async Task ClearToastLaterAsync(CancellationTokenSource cts)
-    {
-        try
+        _ = _toastClear.DebounceAsync(TimeSpan.FromSeconds(2.6), () => InvokeAsync(() =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(2.6), cts.Token);
-        }
-        catch (TaskCanceledException)
-        {
-            return; // A newer toast replaced this one; its own timer owns the clear.
-        }
-
-        await InvokeAsync(() =>
-        {
-            if (ReferenceEquals(_toastCts, cts))
-            {
-                _toast = null;
-                StateHasChanged();
-            }
-        });
+            _toast = null;
+            StateHasChanged();
+        }));
     }
 
     // ---- Entry editing ------------------------------------------------------------------
     //
-    // The four dialogs render inline on the owned ConsoleDialog frame (one at a time). Each
+    // Dialogs render inline on the owned ConsoleDialog frame (one at a time). Each
     // model carries its save delegate; the dialog shows a returned error inline and closes
     // only on null (success). Closing raises OnClose here, which re-renders this page — so
     // the editor always shows post-save state.
@@ -878,6 +884,8 @@
         _newEntry = null;
         _renameDialog = null;
         _deleteDialog = null;
+        _passwordDialog = null;
+        _addMemberDialog = null;
     }
 
     /// <summary>
@@ -886,7 +894,8 @@
     /// </summary>
     private bool DialogOpen =>
         _attributeDialog is not null || _newEntry is not null
-        || _renameDialog is not null || _deleteDialog is not null;
+        || _renameDialog is not null || _deleteDialog is not null || _passwordDialog is not null
+        || _addMemberDialog is not null;
 
     private void OpenEditAttributeDialog(LdapAttributeValues attribute)
     {
@@ -894,12 +903,17 @@
         {
             return;
         }
+        if (_managedMembershipAttributes.Contains(attribute.Name))
+        {
+            _entryTab = EntryTab.Members;
+            return;
+        }
         _attributeDialog = new AttributeDialogModel
         {
             IsNew = false,
             Name = attribute.Name,
             IsBinary = attribute.IsBinary,
-            ValuesText = string.Join('\n', attribute.Values),
+            Values = attribute.Values,
             Entry = entry,
             SaveAsync = SaveAttributeAsync,
         };
@@ -960,15 +974,115 @@
         }
     }
 
-    /// <summary>Save delegates: null = success (the dialog closes); a string = shown inline.</summary>
-    private async Task<string?> SaveAttributeAsync(AttributeDialogModel dialog)
+    private bool CanResetPassword(LdapEntry entry)
     {
-        if (_selectedDn is not { } dn)
+        var objectClasses = entry.Attributes.FirstOrDefault(static attribute =>
+            attribute.Name.Equals("objectClass", StringComparison.OrdinalIgnoreCase))?.Values ?? [];
+        return SchemaGuide.PermitsAttribute(_dialogSchema, objectClasses, "userPassword");
+    }
+
+    private void OpenPasswordDialog()
+    {
+        if (!DialogOpen && _entry is { } entry && CanResetPassword(entry))
         {
-            return "No entry is selected.";
+            var dn = entry.Dn;
+            _passwordDialog = new PasswordDialogModel
+            {
+                Dn = dn,
+                SaveAsync = (password, token) => SavePasswordAsync(dn, password, token),
+            };
+        }
+    }
+
+    private async Task<string?> SavePasswordAsync(
+        string dn, string password, CancellationToken cancellationToken)
+    {
+        var result = await GuardedAsync(() => Directory.SetPasswordAsync(dn, password, cancellationToken));
+        if (!result.Succeeded)
+        {
+            return Describe(result);
         }
 
-        var values = Lines(dialog.ValuesText);
+        ShowToast($"password reset for {dn}");
+        return null;
+    }
+
+    private void OpenAddMemberDialog(GroupMembershipAttribute membership)
+    {
+        if (DialogOpen || _entry is not { } entry)
+        {
+            return;
+        }
+
+        var existing = entry.Attributes.FirstOrDefault(attribute =>
+            attribute.Name.Equals(membership.Name, StringComparison.OrdinalIgnoreCase))?.Values ?? [];
+        _addMemberDialog = new AddGroupMemberDialogModel
+        {
+            Membership = membership,
+            ExistingValues = new HashSet<string>(existing, StringComparer.Ordinal),
+            IsExistingValue = value => GroupMembership.ContainsEquivalentValue(membership, existing, value),
+            SearchAsync = SearchMembersAsync,
+            SaveAsync = (value, token) => ModifyMemberAsync(entry.Dn, DirectoryAttributeOperation.Add, membership, value, token),
+        };
+    }
+
+    private Task<LdapSearchResult> SearchMembersAsync(string query, CancellationToken cancellationToken) =>
+        Directory.SearchAsync(new LdapSearchOptions
+        {
+            Filter = GroupMemberSearch.Filter(query),
+            Limit = GroupMemberSearch.ResultLimit,
+            Attributes = ["uid", "cn", "mail", "objectClass"],
+        }, cancellationToken);
+
+    private Task<string?> RemoveMemberAsync(
+        string dn, GroupMembershipAttribute membership, string value, CancellationToken cancellationToken) =>
+        ModifyMemberAsync(dn, DirectoryAttributeOperation.Delete, membership, value, cancellationToken);
+
+    private async Task<string?> ModifyMemberAsync(
+        string dn,
+        DirectoryAttributeOperation operation,
+        GroupMembershipAttribute membership,
+        string value,
+        CancellationToken cancellationToken)
+    {
+        var selection = _selectSeq;
+        var result = await GuardedAsync(() => ModifyEntryAsync(
+            dn, [new LdapAttributeChange(operation, membership.Name, [value])], cancellationToken));
+        if (!result.Succeeded)
+        {
+            return Describe(result);
+        }
+
+        ShowToast($"modify {dn} — {membership.Name} value {(operation == DirectoryAttributeOperation.Add ? "added" : "removed")}");
+        if (selection == _selectSeq && DnEquality.AreEquivalent(_selectedDn, dn))
+        {
+            await SelectAsync(dn, reveal: false, CancellationToken.None);
+        }
+        return null;
+    }
+
+    private void UpdateMemberships()
+    {
+        _memberships = _entry is null ? [] : GroupMembership.Detect(_dialogSchema, _entry);
+        _managedMembershipAttributes = new HashSet<string>(
+            _memberships.Select(static membership => membership.Name), StringComparer.OrdinalIgnoreCase);
+        if (_memberships.Count == 0 && _entryTab == EntryTab.Members)
+        {
+            _entryTab = EntryTab.Overview;
+        }
+    }
+
+    /// <summary>Save delegates: null = success (the dialog closes); a string = shown inline.</summary>
+    private async Task<string?> SaveAttributeAsync(AttributeDialogModel dialog, CancellationToken cancellationToken)
+    {
+        var dn = dialog.Entry.Dn;
+        if (GroupMembership.Detect(_dialogSchema, dialog.Entry).Any(membership =>
+            membership.Name.Equals(dialog.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            return $"{dialog.Name} is managed in the Members tab; edit individual members there.";
+        }
+
+        var values = dialog.Values;
         if (dialog.IsNew && values.Count == 0)
         {
             return "Enter at least one value.";
@@ -979,7 +1093,8 @@
             dialog.Name,
             values,
             IsBase64: dialog.IsBinary);
-        var result = await GuardedAsync(() => Directory.ModifyEntryAsync(dn, [change]));
+        var selection = _selectSeq;
+        var result = await GuardedAsync(() => ModifyEntryAsync(dn, [change], cancellationToken));
 
         if (!result.Succeeded)
         {
@@ -987,17 +1102,28 @@
         }
 
         ShowToast($"modify {dn} — {dialog.Name} saved");
-        await SelectAsync(dn, reveal: false);
+        if (selection == _selectSeq && DnEquality.AreEquivalent(_selectedDn, dn))
+        {
+            await SelectAsync(dn, reveal: false, CancellationToken.None);
+        }
         return null;
     }
+
+    // Keep directory I/O replaceable for deterministic save/selection race tests.
+    protected virtual Task<LdapOperationResult> ModifyEntryAsync(
+        string dn, IReadOnlyList<LdapAttributeChange> changes, CancellationToken cancellationToken) =>
+        Directory.ModifyEntryAsync(dn, changes, cancellationToken);
+
+    protected virtual Task<LdapEntry?> GetEntryAsync(string dn, CancellationToken cancellationToken) =>
+        Directory.GetEntryAsync(dn, cancellationToken: cancellationToken);
 
     /// <summary>
     /// The wizard composes the entry (chained classes, escaped RDN — a pasted full DN is
     /// structurally impossible there); this applies it and lands on the new entry.
     /// </summary>
-    private async Task<string?> SaveNewEntryAsync(LdapNewEntry entry)
+    private async Task<string?> SaveNewEntryAsync(LdapNewEntry entry, CancellationToken cancellationToken)
     {
-        var result = await GuardedAsync(() => Directory.AddEntryAsync(entry));
+        var result = await GuardedAsync(() => Directory.AddEntryAsync(entry, cancellationToken));
 
         if (!result.Succeeded)
         {
@@ -1005,12 +1131,12 @@
         }
 
         ShowToast($"ldapadd — {entry.Dn} created");
-        await ReloadChildrenAsync(ParentOf(entry.Dn) ?? Directory.BaseDn);
-        await SelectAsync(entry.Dn, reveal: true);
+        await ReloadChildrenAsync(ParentOf(entry.Dn) ?? Directory.BaseDn, CancellationToken.None);
+        await SelectAsync(entry.Dn, reveal: true, CancellationToken.None);
         return null;
     }
 
-    private async Task<string?> SaveRenameAsync(RenameDialogModel dialog)
+    private async Task<string?> SaveRenameAsync(RenameDialogModel dialog, CancellationToken cancellationToken)
     {
         var newParent = dialog.NewParentDn.Length > 0 ? dialog.NewParentDn : null;
         // The dialog validated attribute and value; Dn.Rdn escapes, so a typed comma or
@@ -1019,11 +1145,17 @@
         LdapRenameResult rename;
         try
         {
-            rename = await Directory.RenameEntryAsync(dialog.Dn, newRdn, newParent, dialog.DeleteOldRdn);
+            rename = await Directory.RenameEntryAsync(
+                dialog.Dn, newRdn, newParent, dialog.DeleteOldRdn, cancellationToken);
         }
         catch (DirectoryException ex)
         {
             rename = new LdapRenameResult(new LdapOperationResult(LdapOperationStatus.Failed, null, Describe(ex)), null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            rename = new LdapRenameResult(
+                LdapOperationResult.Cancelled("stopped before sending the rename request"), null);
         }
 
         if (!rename.Outcome.Succeeded || rename.NewDn is null)
@@ -1032,21 +1164,29 @@
         }
 
         ShowToast($"modrdn — renamed to {rename.NewDn}");
-        await ReloadChildrenAsync(ParentOf(dialog.Dn) ?? Directory.BaseDn);
+        await ReloadChildrenAsync(ParentOf(dialog.Dn) ?? Directory.BaseDn, CancellationToken.None);
         if (newParent is not null)
         {
-            await ReloadChildrenAsync(newParent);
+            await ReloadChildrenAsync(newParent, CancellationToken.None);
         }
-        await SelectAsync(rename.NewDn, reveal: true);
+        await SelectAsync(rename.NewDn, reveal: true, CancellationToken.None);
         return null;
     }
 
-    private async Task<string?> ConfirmDeleteAsync(DeleteDialogModel dialog)
+    private async Task<string?> ConfirmDeleteAsync(DeleteDialogModel dialog, CancellationToken cancellationToken)
     {
-        var result = await GuardedAsync(() => Directory.DeleteEntryAsync(dialog.Dn, dialog.Subtree));
+        var result = await GuardedAsync(() =>
+            Directory.DeleteEntryAsync(dialog.Dn, dialog.Subtree, cancellationToken));
 
         if (!result.Succeeded)
         {
+            if (result.Status == LdapOperationStatus.Cancelled && dialog.Subtree)
+            {
+                var refreshParent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
+                await ReloadChildrenAsync(refreshParent, CancellationToken.None);
+                await ReloadChildrenAsync(dialog.Dn, CancellationToken.None);
+                await SelectAsync(dialog.Dn, reveal: false, CancellationToken.None);
+            }
             return Describe(result);
         }
 
@@ -1054,8 +1194,8 @@
             ? $"ldapdelete -r — {dialog.Dn} and its subtree deleted"
             : $"ldapdelete — {dialog.Dn} deleted");
         var parent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
-        await ReloadChildrenAsync(parent);
-        await SelectAsync(parent, reveal: true);
+        await ReloadChildrenAsync(parent, CancellationToken.None);
+        await SelectAsync(parent, reveal: true, CancellationToken.None);
         return null;
     }
 
@@ -1070,10 +1210,14 @@
         {
             return new LdapOperationResult(LdapOperationStatus.Failed, null, Describe(ex));
         }
+        catch (OperationCanceledException)
+        {
+            return LdapOperationResult.Cancelled("stopped before sending the request");
+        }
     }
 
     /// <summary>Re-fetches one node's children after a write changed them.</summary>
-    private async Task ReloadChildrenAsync(string parentDn)
+    private async Task ReloadChildrenAsync(string parentDn, CancellationToken cancellationToken = default)
     {
         if (NormOrNull(parentDn) is not { } norm || FindNode(norm) is not { } node)
         {
@@ -1087,7 +1231,7 @@
             {
                 try
                 {
-                    await ExpandAsync(node, depth: 1);
+                    await ExpandAsync(node, depth: 1, cancellationToken);
                 }
                 catch (DirectoryException ex)
                 {
@@ -1132,9 +1276,6 @@
             return null;
         }
     }
-
-    private static IReadOnlyList<string> Lines(string text) =>
-        [.. text.Split('\n').Select(static line => line.TrimEnd('\r')).Where(static line => line.Length > 0)];
 
     private static string FirstRdn(string dn)
     {
@@ -1192,6 +1333,9 @@
             LdapOperationStatus.ConstraintViolation => "The change violates a server constraint",
             LdapOperationStatus.InvalidRequest => "The request is not valid",
             LdapOperationStatus.Refused => "The server refused the request",
+            LdapOperationStatus.Cancelled when result.DeletedCount > 0 =>
+                $"The operation was cancelled after {result.DeletedCount} {(result.DeletedCount == 1 ? "deletion was" : "deletions were")} acknowledged",
+            LdapOperationStatus.Cancelled => "The operation was cancelled",
             LdapOperationStatus.Failed => $"The server reported {result.ResultCode?.ToString() ?? "an unmodelled error"}",
             _ => result.Status.ToString(),
         };
@@ -1204,7 +1348,7 @@
     public async ValueTask DisposeAsync()
     {
         Toasts.Shown -= OnToast;
-        _toastCts?.Cancel();
+        _toastClear.Dispose();
         if (_js is not null)
         {
             try

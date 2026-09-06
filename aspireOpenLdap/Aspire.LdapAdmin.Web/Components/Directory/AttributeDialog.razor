@@ -10,7 +10,7 @@
 *@
 @inherits DialogBase
 
-<ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="CloseAsync" Busy="Busy">
+<ConsoleDialog Title="@(Model.IsNew ? "Add attribute" : $"Edit {Model.Name}")" OnCancel="CancelAsync" Busy="Busy">
     <ChildContent>
     @if (Model.IsNew)
     {
@@ -19,11 +19,11 @@
             @if (Schema is not null)
             {
                 <AttributePicker Candidates="_candidates" @bind-Value="Model.Name"
-                                 Placeholder="attributeType" />
+                                 Placeholder="attributeType" Disabled="Busy" />
             }
             else
             {
-                <input class="input mono" @bind="Model.Name" spellcheck="false" />
+                <input class="input mono" @bind="Model.Name" spellcheck="false" disabled="@Busy" />
             }
         </div>
     }
@@ -43,21 +43,28 @@
     {
         <div class="hint">Not in the schema for this entry's object classes — the server decides.</div>
     }
-    <div class="field">
-        <label>@ValueLabel</label>
-        @if (Guidance is { SingleValued: true })
-        {
-            <input class="input mono" @bind="Model.ValuesText" spellcheck="false" />
-        }
-        else
-        {
-            <textarea class="ta ta-sm" @bind="Model.ValuesText" spellcheck="false"></textarea>
-        }
-    </div>
+    @for (var i = 0; i < Model.Values.Count; i++)
+    {
+        var index = i;
+        <div class="field">
+            <label for="attribute-value-@index">Value @(index + 1)@(Model.IsBinary ? " (base64)" : "")</label>
+            <textarea id="attribute-value-@index" class="ta ta-sm"
+                      @bind:get="Model.Values[index]" @bind:set="value => SetValue(index, value)"
+                      spellcheck="false" disabled="@Busy"></textarea>
+            <button class="btn btn-ghost" disabled="@Busy"
+                    @onclick="@(() => Model.Values = [.. Model.Values.Where((_, position) => position != index)])">Remove value</button>
+        </div>
+    }
+    <button class="btn btn-ghost" disabled="@(Busy || (Guidance is { SingleValued: true } && Model.Values.Count > 0))"
+            @onclick="@(() => Model.Values = [.. Model.Values, string.Empty])">Add value</button>
+    <p class="text-muted note">
+        Each field is one value and may contain multiple lines. A blank field is an empty value;
+        use Remove value to remove it.
+    </p>
     @if (!Model.IsNew)
     {
         <p class="text-muted note">
-            Saving replaces every value of this attribute; saving with no values removes it.
+            Saving replaces every value of this attribute; removing all value fields removes it.
         </p>
     }
     @if (Error is not null)
@@ -66,9 +73,9 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
         <button class="btn btn-primary" disabled="@Busy"
-                @onclick="@(() => SaveAsync(() => Model.SaveAsync(Model)))">@(Busy ? "Saving…" : "Save")</button>
+                @onclick="@(() => SaveAsync(token => Model.SaveAsync(Model, token)))">@(Busy ? "Saving…" : "Save")</button>
     </Actions>
 </ConsoleDialog>
 
@@ -79,6 +86,9 @@
     /// <summary>The loaded subschema, or null when unavailable (free-text fallback).</summary>
     [Parameter]
     public LdifDotNet.Schema.LdapSchema? Schema { get; set; }
+
+    [Parameter]
+    public IReadOnlySet<string> ExcludedAttributes { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private IReadOnlyList<AttributeGuidance> _candidates = [];
 
@@ -92,15 +102,18 @@
             : SchemaGuide.Describe(Schema, Model.Name,
                 _candidates.FirstOrDefault(c => c.Name.Equals(Model.Name, StringComparison.OrdinalIgnoreCase))?.Required ?? false);
 
-    private string ValueLabel =>
-        Guidance is { SingleValued: true }
-            ? (Model.IsBinary ? "Value (base64)" : "Value")
-            : (Model.IsBinary ? "Values (base64, one per line)" : "Values (one per line)");
+    private void SetValue(int index, string? value)
+    {
+        var values = Model.Values.ToArray();
+        values[index] = value ?? string.Empty;
+        Model.Values = values;
+    }
 
     protected override void OnParametersSet()
     {
         _candidates = Schema is null
             ? []
-            : SchemaGuide.AddCandidates(Schema, EntryObjectClasses, Model.Entry.Attributes.Select(static a => a.Name));
+            : [.. SchemaGuide.AddCandidates(Schema, EntryObjectClasses, Model.Entry.Attributes.Select(static a => a.Name))
+                .Where(candidate => !ExcludedAttributes.Contains(candidate.Name))];
     }
 }

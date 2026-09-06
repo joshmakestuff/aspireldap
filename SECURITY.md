@@ -19,10 +19,15 @@ developer convenience, and several features are explicitly not production-grade:
   (`LDAP_ALLOW_ANON_BINDING=yes`), matching common dev-server behavior.
 - **phpLDAPadmin** (`WithPhpLdapAdmin()`) connects with `LDAPTLS_REQCERT=never` when TLS is
   required, because the self-signed CA is not trusted inside that container.
+- **LdapAdmin** (`WithLdapAdmin()`) has no login and binds with the AppHost-provided LDAP
+  administrator credentials. Its REST API is disabled by default; setting
+  `EnableRestApi = true` exposes an unauthenticated `/api/v1` surface with the same privileges.
+  Neither surface configures CORS.
 - The TLS hostname-validation opt-outs (`disableHealthCheckHostnameValidation`,
   `DisableTlsHostnameValidation`) exist for local certificates only.
 
-Do not expose the OpenLDAP container or the phpLDAPadmin UI beyond your development machine.
+Do not expose the OpenLDAP container, LdapAdmin, its REST API, or phpLDAPadmin beyond your
+development machine.
 Reports about the above behaving as documented are appreciated but will generally be treated
 as documentation issues rather than vulnerabilities; anything that undermines the security of
 a consumer's *own* code or data (e.g. injection through generated LDIF, credential leakage

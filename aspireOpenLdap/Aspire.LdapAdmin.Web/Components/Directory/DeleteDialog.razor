@@ -4,7 +4,7 @@
 *@
 @inherits DialogBase
 
-<ConsoleDialog Title="Delete entry" OnCancel="CloseAsync" Busy="Busy">
+<ConsoleDialog Title="Delete entry" OnCancel="CancelAsync" Busy="Busy">
     <ChildContent>
     <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
     <p class="note">
@@ -29,9 +29,9 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
         <button class="btn btn-primary" disabled="@Busy"
-                @onclick="@(() => SaveAsync(() => Model.SaveAsync(Model)))">@(Busy ? "Deleting…" : "Delete")</button>
+                @onclick="@(() => SaveAsync(token => Model.SaveAsync(Model, token)))">@(Busy ? "Deleting…" : "Delete")</button>
     </Actions>
 </ConsoleDialog>
 

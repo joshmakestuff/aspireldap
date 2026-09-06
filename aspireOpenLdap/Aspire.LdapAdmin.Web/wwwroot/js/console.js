@@ -1,9 +1,7 @@
-// The console's whole JS interop surface: rail resize with
-// persisted width, theme toggle with persisted choice, clipboard copy, and a focus trap for
-// the owned dialogs. Everything else is Blazor.
+// The console's whole JS interop surface: rail resize with persisted width, clipboard copy,
+// and a focus trap for the owned dialogs. Everything else is Blazor.
 
 const RAIL_KEY = 'aspireldap.railWidth';
-const THEME_KEY = 'aspireldap.theme';
 const RAIL_DEFAULT = 292;
 const RAIL_MIN = 180;
 const RAIL_MAX = 560;
@@ -60,19 +58,6 @@ export function initRail(el) {
   });
 }
 
-// The boot script in App.razor stamps data-theme before first paint; this toggle just flips
-// and persists it. Returns the new mode so the caller can update its button.
-export function toggleTheme() {
-  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = next;
-  try { localStorage.setItem(THEME_KEY, next); } catch { /* storage unavailable */ }
-  return next;
-}
-
-export function currentTheme() {
-  return document.documentElement.dataset.theme || 'light';
-}
-
 // Never throws: a rejection escaping the Blazor event handler would kill the
 // circuit. Rejections are real even on localhost (document not focused,
 // permissions policy); a missing navigator.clipboard (non-secure origins) reports the
@@ -98,15 +83,13 @@ export function showToastPopover(el) {
 // ── Modal dialogs ─────────────────────────────────────────────────────────────
 // The <dialog> element + showModal() owns modality: top layer, background inertness,
 // Escape as a "cancel" close request, ::backdrop. This module only relays close requests
-// and backdrop clicks to .NET — the server decides whether the dialog actually closes,
-// and its Busy guard is authoritative; the data-busy checks here are UX-latency cover.
+// and backdrop clicks to .NET. The owner decides whether to close or request cancellation.
 // One dialog at a time (the shell enforces that), so module-level state suffices.
 let dialog = null;
 let restoreTo = null;
 let netRef = null;
 let downOutside = false;
 
-const busy = () => dialog?.dataset.busy === 'true';
 // An open picker list claims Escape: the picker's own Blazor handler closes the list,
 // and only the next Escape reaches the dialog.
 const comboOpen = () => !!dialog?.querySelector('[role="combobox"][aria-expanded="true"]');
@@ -117,7 +100,7 @@ const outside = e => {
   return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
 };
 const relay = () => {
-  try { netRef?.invokeMethodAsync('CancelFromJs'); } catch { /* component disposed */ }
+  netRef?.invokeMethodAsync('CancelFromJs').catch(() => { /* component disposed */ });
 };
 
 export function openModal(el, dotnetRef) {
@@ -133,20 +116,21 @@ export function openModal(el, dotnetRef) {
   el.focus({ preventScroll: true });
   el.addEventListener('cancel', e => {
     e.preventDefault(); // .NET owns closing; the element never closes itself
-    if (!busy() && !comboOpen()) relay();
+    if (!comboOpen()) relay();
   });
   // CloseWatcher anti-abuse: a second Escape without fresh user activation (Escape grants
-  // none) skips "cancel" and closes outright. Reopen while busy; relay otherwise.
+  // none) skips "cancel" and closes outright. Reopen so .NET still owns the outcome.
   el.addEventListener('close', () => {
-    if (busy()) requestAnimationFrame(() => { if (dialog?.isConnected) dialog.showModal(); });
-    else relay();
+    if (!netRef) return; // closeModal is intentionally unmounting this dialog
+    requestAnimationFrame(() => { if (el.isConnected && !el.open) el.showModal(); });
+    relay();
   });
   // A backdrop click cancels only when the interaction STARTED on the backdrop too:
   // drag-selecting text in a field and releasing past the panel edge fires click at the
   // dialog element (common ancestor) and must not discard the user's input.
   el.addEventListener('pointerdown', e => { downOutside = outside(e); });
   el.addEventListener('click', e => {
-    if (downOutside && outside(e) && !busy()) relay();
+    if (downOutside && outside(e)) relay();
     downOutside = false;
   });
 }

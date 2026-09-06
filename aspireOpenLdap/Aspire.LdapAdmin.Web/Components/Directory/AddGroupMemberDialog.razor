@@ -1,0 +1,133 @@
+@inherits DialogBase
+@using System.DirectoryServices.Protocols
+
+<ConsoleDialog Title="Add member" OnCancel="CancelAsync" Busy="Busy">
+    <ChildContent>
+        <div class="hint mono">
+            @Model.Membership.Name · @(Model.Membership.ValueKind == GroupMemberValueKind.DistinguishedName ? "DN value" : "uid value")
+        </div>
+        <div class="field">
+            <label for="member-search">Search existing directory entries</label>
+            <div style="display: flex; gap: var(--space-2);">
+                <input id="member-search" class="input mono" style="flex: 1;" @bind="_query" @bind:event="oninput" @onkeydown="OnSearchKeyDown"
+                       placeholder="name, uid, or email" spellcheck="false" disabled="@(Busy || _searching)" />
+                <button class="btn btn-secondary" @onclick="SearchAsync" disabled="@(Busy || _searching)">
+                    @(_searching ? "Searching…" : "Search")
+                </button>
+            </div>
+        </div>
+        @if (_searchError is not null)
+        {
+            <div class="bar err" role="alert" style="margin-bottom: var(--space-3);">@_searchError</div>
+        }
+        @if (_result is not null)
+        {
+            <div class="hint">@_result.Entries.Count result(s)@(_result.Truncated ? $" — truncated at {GroupMemberSearch.ResultLimit}; refine the search" : "")</div>
+            <div style="max-height: 220px; overflow: auto; border: 1px solid var(--color-divider);">
+                @foreach (var entry in _result.Entries)
+                {
+                    var value = GroupMemberSearch.ValueFor(Model.Membership, entry);
+                    var unavailable = value is null;
+                    var existing = value is not null
+                        && (Model.IsExistingValue?.Invoke(value) ?? Model.ExistingValues.Contains(value));
+                    <label style="display: block; padding: var(--space-2); border-bottom: 1px solid var(--color-divider); opacity: @(unavailable || existing ? ".55" : "1");">
+                        <input type="radio" name="member-result" value="@value" disabled="@(Busy || unavailable || existing)"
+                               checked="@string.Equals(_selectedValue, value, StringComparison.Ordinal)"
+                               @onchange="@(() => _selectedValue = value)" />
+                        <span class="mono">@entry.Dn</span>
+                        @if (unavailable)
+                        {
+                            <span class="text-muted"> — no readable uid</span>
+                        }
+                        else if (existing)
+                        {
+                            <span class="text-muted"> — already a member</span>
+                        }
+                    </label>
+                }
+            </div>
+        }
+        <div class="field" style="margin-top: var(--space-4);">
+            <label for="member-value">Or enter @(Model.Membership.ValueKind == GroupMemberValueKind.DistinguishedName ? "a DN" : "a uid")</label>
+            <input id="member-value" class="input mono" @bind="_typedValue" @bind:event="oninput" spellcheck="false" disabled="@Busy" />
+        </div>
+        @if (Error is not null)
+        {
+            <div class="bar err" role="alert" style="margin-bottom: 0;">@Error</div>
+        }
+    </ChildContent>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
+        <button class="btn btn-primary" disabled="@Busy" @onclick="AddAsync">@(Busy ? "Adding…" : "Add member")</button>
+    </Actions>
+</ConsoleDialog>
+
+@code {
+    [Parameter, EditorRequired]
+    public required AddGroupMemberDialogModel Model { get; set; }
+
+    private string _query = string.Empty;
+    private string _typedValue = string.Empty;
+    private string? _selectedValue;
+    private LdapSearchResult? _result;
+    private string? _searchError;
+    private bool _searching;
+    private int _searchSequence;
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        var sequence = ++_searchSequence;
+        _selectedValue = null;
+        _searching = true;
+        _searchError = null;
+        try
+        {
+            var result = await Model.SearchAsync(_query, LifetimeToken);
+            if (sequence == _searchSequence)
+            {
+                _result = result;
+            }
+        }
+        catch (OperationCanceledException) when (LifetimeToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex) when (ex is DirectoryException or ArgumentException)
+        {
+            if (sequence == _searchSequence)
+            {
+                _searchError = ex.Message;
+            }
+        }
+        finally
+        {
+            if (sequence == _searchSequence)
+            {
+                _searching = false;
+            }
+        }
+    }
+
+    private Task AddAsync()
+    {
+        var value = _typedValue.Trim().Length > 0 ? _typedValue.Trim() : _selectedValue;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            Error = $"Select an entry or enter {(Model.Membership.ValueKind == GroupMemberValueKind.DistinguishedName ? "a DN" : "a uid")}.";
+            return Task.CompletedTask;
+        }
+        if (Model.IsExistingValue?.Invoke(value) ?? Model.ExistingValues.Contains(value))
+        {
+            Error = "That value is already a member.";
+            return Task.CompletedTask;
+        }
+        return SaveAsync(token => Model.SaveAsync(value, token));
+    }
+}

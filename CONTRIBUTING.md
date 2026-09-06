@@ -22,7 +22,7 @@ The first test run builds the bundled Docker image and is slow; later runs reuse
 model/unit tests can be run without Docker — nothing in that tier may start a container:
 
 ```bash
-dotnet test aspireOpenLdap/AspireOpenLdap.slnx --filter "Category!=Integration"
+dotnet test aspireOpenLdap/AspireOpenLdap.slnx --filter "Category!=Integration&Category!=RestIntegration&Category!=CleanConsumer"
 ```
 
 Targeted mutation checks over the pure boundaries (connection-string parse/quote, DN and

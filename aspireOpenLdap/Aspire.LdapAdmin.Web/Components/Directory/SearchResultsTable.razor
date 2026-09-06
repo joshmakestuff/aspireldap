@@ -1,0 +1,147 @@
+@using Aspire.LdapAdmin.Core
+
+<div class="sec search-result-count">
+    Showing @_state.FirstVisibleNumber-@_state.LastVisibleNumber of @_state.FetchedCount fetched entries
+    @if (CommonSuffix.Length > 0)
+    {
+        <span class="mono search-result-base">all under @CommonSuffix</span>
+    }
+</div>
+
+@if (Result.Truncated)
+{
+    <div class="bar search-truncation" role="status">
+        @if (_state.FetchedCount == 0)
+        {
+            <text>Results were truncated before any entries could be fetched.</text>
+        }
+        else
+        {
+            <text>Results were truncated after @_state.FetchedCount fetched entries.</text>
+        }
+        Raise the limit or narrow the filter. Bulk edit affects only rows you explicitly select from these fetched entries.
+    </div>
+}
+
+@if (_state.FetchedCount > 0)
+{
+    <div class="search-results-scroll" tabindex="0" role="region" aria-label="Search results">
+    <table class="table search-results">
+    <thead>
+        <tr>
+            <th scope="col" class="cbcell"><span class="visually-hidden">Select</span></th>
+            <th scope="col" aria-sort="@_state.AriaSort(SearchResultSortColumn.Dn)">
+                <button class="sort-btn" @onclick="@(() => SortBy(SearchResultSortColumn.Dn))">
+                    DN <span class="sort-mark" aria-hidden="true">@_state.SortIndicator(SearchResultSortColumn.Dn)</span>
+                </button>
+            </th>
+            <th scope="col" style="width: 22%;" aria-sort="@_state.AriaSort(SearchResultSortColumn.Name)">
+                <button class="sort-btn" @onclick="@(() => SortBy(SearchResultSortColumn.Name))">
+                    Name <span class="sort-mark" aria-hidden="true">@_state.SortIndicator(SearchResultSortColumn.Name)</span>
+                </button>
+            </th>
+            <th scope="col" style="width: 22%;" aria-sort="@_state.AriaSort(SearchResultSortColumn.Mail)">
+                <button class="sort-btn" @onclick="@(() => SortBy(SearchResultSortColumn.Mail))">
+                    Mail <span class="sort-mark" aria-hidden="true">@_state.SortIndicator(SearchResultSortColumn.Mail)</span>
+                </button>
+            </th>
+            <th scope="col" style="width: 60px;"><span class="visually-hidden">Actions</span></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var row in _state.VisibleRows)
+        {
+            <tr @key="row.Key">
+                <td class="cbcell">
+                    <input type="checkbox" checked="@SelectedDns.Contains(row.Key)" disabled="@SelectionDisabled"
+                           aria-label="Select @row.Key" @onchange="@(args => Toggle(row.Entry, args))" />
+                </td>
+                <td class="mono">
+                    <a href="#" title="@row.Key"
+                       @onclick="@(() => OnEntrySelected.InvokeAsync(row.Key))"
+                       @onclick:preventDefault="true">@row.DisplayDn</a>
+                </td>
+                <td>@row.Name</td>
+                <td class="mono">@row.Mail</td>
+                <td>
+                    <button class="btn btn-ghost btn-sm" title="Copy full DN to clipboard"
+                            @onclick="@(() => OnCopyDn.InvokeAsync(row.Key))">Copy</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+    </table>
+    </div>
+
+    @if (_state.PageCount > 1)
+    {
+        <nav class="search-pager" aria-label="Search result pages">
+            <button class="btn btn-secondary btn-sm" disabled="@(!_state.HasPreviousPage)"
+                    @onclick="PreviousPage">Previous</button>
+            <span class="mono" aria-live="polite">Page @_state.PageNumber of @_state.PageCount</span>
+            <button class="btn btn-secondary btn-sm" disabled="@(!_state.HasNextPage)"
+                    @onclick="NextPage">Next</button>
+        </nav>
+    }
+}
+else
+{
+    <p class="text-muted note">
+        @(Result.Truncated ? "No entry was returned before truncation." : "No entry matched.")
+        <span class="mono">@RanFilter</span>
+    </p>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public LdapSearchResult Result { get; set; } = null!;
+
+    [Parameter]
+    public string CommonSuffix { get; set; } = string.Empty;
+
+    [Parameter]
+    public string RanFilter { get; set; } = string.Empty;
+
+    [Parameter]
+    public LdapAdminSortOrder InitialSortOrder { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnEntrySelected { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnCopyDn { get; set; }
+
+    [Parameter]
+    public IReadOnlySet<string> SelectedDns { get; set; } = new HashSet<string>(StringComparer.Ordinal);
+
+    [Parameter]
+    public EventCallback<SearchResultSelectionChange> OnSelectionChanged { get; set; }
+
+    [Parameter]
+    public bool SelectionDisabled { get; set; }
+
+    private SearchResultTableState _state = null!;
+    private LdapSearchResult? _renderedResult;
+    private string? _renderedSuffix;
+
+    protected override void OnInitialized() => _state = new SearchResultTableState(InitialSortOrder);
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Result, _renderedResult) || !string.Equals(CommonSuffix, _renderedSuffix, StringComparison.Ordinal))
+        {
+            _state.SetEntries(Result.Entries, CommonSuffix);
+            _renderedResult = Result;
+            _renderedSuffix = CommonSuffix;
+        }
+    }
+
+    private void SortBy(SearchResultSortColumn column) => _state.SortBy(column);
+
+    private void PreviousPage() => _state.GoToPage(_state.PageNumber - 1);
+
+    private void NextPage() => _state.GoToPage(_state.PageNumber + 1);
+
+    private Task Toggle(LdapEntry entry, ChangeEventArgs args) =>
+        OnSelectionChanged.InvokeAsync(new SearchResultSelectionChange(entry, args.Value is true));
+}

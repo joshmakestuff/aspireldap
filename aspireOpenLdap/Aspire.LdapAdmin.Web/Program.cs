@@ -27,6 +27,7 @@ builder.Services.AddSingleton(ConsoleConnectionInfo.From(
 var settings = builder.Configuration.GetSection(LdapAdminSettings.SectionName)
     .Get<LdapAdminSettings>() ?? new();
 builder.Services.AddSingleton(settings);
+builder.Services.AddProblemDetails();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -39,18 +40,37 @@ builder.Services.AddScoped<ConsoleDownload>();
 
 var app = builder.Build();
 
+if (settings.EnableRestApi)
+{
+    // API exceptions are always problem responses, including in Development; never expose the
+    // developer exception page's stack, headers, or query values on this opt-in transport.
+    app.UseWhen(
+        static context => context.Request.Path.StartsWithSegments(
+            LdapAdminApi.Prefix, StringComparison.OrdinalIgnoreCase),
+        static api =>
+        {
+            api.UseExceptionHandler();
+            api.UseStatusCodePages();
+        });
+}
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseWhen(
+    context => !settings.EnableRestApi || !context.Request.Path.StartsWithSegments(
+        LdapAdminApi.Prefix, StringComparison.OrdinalIgnoreCase),
+    static ui => ui.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 app.UseAntiforgery();
 
 // Runs the openldap_{name} health check from AddOpenLdapClient — a real admin bind plus a
 // root-DSE search — so /health answers "can this admin reach the directory", not just "is
 // Kestrel up". WithLdapAdmin() points the resource health check here.
 app.MapHealthChecks("/health");
+
+LdapAdminApi.Map(app, settings);
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

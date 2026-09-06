@@ -16,7 +16,7 @@
 @using LdifDotNet.Schema
 @inherits DialogBase
 
-<ConsoleDialog Title="Rename entry" OnCancel="CloseAsync" Busy="Busy">
+<ConsoleDialog Title="Rename entry" OnCancel="CancelAsync" Busy="Busy">
     <ChildContent>
     <div class="dnline mono" style="margin-top: 0;">@Model.Dn</div>
     <div class="frow frow-2">
@@ -24,7 +24,7 @@
             <label>New RDN attribute</label>
             @if (Schema is not null)
             {
-                <select class="input mono" @bind="Model.RdnAttribute" @bind:after="RdnAttributeChanged">
+                <select class="input mono" @bind="Model.RdnAttribute" @bind:after="RdnAttributeChanged" disabled="@Busy">
                     @foreach (var name in RdnChoices)
                     {
                         <option value="@name">@name</option>
@@ -33,17 +33,17 @@
             }
             else
             {
-                <input class="input mono" @bind="Model.RdnAttribute" @bind:after="RdnAttributeChanged" spellcheck="false" />
+                <input class="input mono" @bind="Model.RdnAttribute" @bind:after="RdnAttributeChanged" spellcheck="false" disabled="@Busy" />
             }
         </div>
         <div class="field">
             <label>New RDN value</label>
-            <input class="input mono" @bind="Model.RdnValue" @bind:event="oninput" spellcheck="false" />
+            <input class="input mono" @bind="Model.RdnValue" @bind:event="oninput" spellcheck="false" disabled="@Busy" />
         </div>
     </div>
     <div class="field">
         <label>New parent DN <span class="text-muted">(leave empty to rename in place)</span></label>
-        <input class="input mono" @bind="Model.NewParentDn" @bind:event="oninput" spellcheck="false" />
+        <input class="input mono" @bind="Model.NewParentDn" @bind:event="oninput" spellcheck="false" disabled="@Busy" />
     </div>
     <label class="check">
         <input type="checkbox" @bind="Model.DeleteOldRdn" disabled="@Busy" />
@@ -73,7 +73,7 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
         <button class="btn btn-primary" disabled="@Busy" @onclick="ValidateAndSaveAsync">@(Busy ? "Renaming…" : "Rename")</button>
     </Actions>
 </ConsoleDialog>
@@ -249,6 +249,6 @@
         Model.RdnValue = value;
         Model.NewParentDn = parent;
 
-        await SaveAsync(() => Model.SaveAsync(Model));
+        await SaveAsync(token => Model.SaveAsync(Model, token));
     }
 }

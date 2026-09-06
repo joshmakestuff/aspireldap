@@ -40,11 +40,12 @@ internal static class OpenLdapOverlayConfiguration
 
             builder.OnBeforeResourceStarted((res, _, ct) =>
             {
-                if (res.Overlays is not { Count: > 0 } overlays || res.OverlayFilePath is null)
+                if (res.OverlayFilePath is null)
                 {
                     return Task.CompletedTask;
                 }
-                return File.WriteAllTextAsync(res.OverlayFilePath, GenerateOverlayLdif(overlays), ct);
+                return File.WriteAllTextAsync(res.OverlayFilePath,
+                    res.Overlays is { Count: > 0 } overlays ? GenerateOverlayLdif(overlays) : string.Empty, ct);
             });
         }
 
@@ -107,13 +108,15 @@ internal static class OpenLdapOverlayConfiguration
 
         builder.OnBeforeResourceStarted((res, _, ct) =>
         {
-            if (res.AccessFilePath is null
-                || (res.AccessRules is not { Count: > 0 } && res.LimitRules is not { Count: > 0 }))
+            if (res.AccessFilePath is null)
             {
                 return Task.CompletedTask;
             }
             return File.WriteAllTextAsync(
-                res.AccessFilePath, GenerateDatabaseConfigLdif(res.AccessRules, res.LimitRules), ct);
+                res.AccessFilePath,
+                res.AccessRules is { Count: > 0 } || res.LimitRules is { Count: > 0 }
+                    ? GenerateDatabaseConfigLdif(res.AccessRules, res.LimitRules)
+                    : string.Empty, ct);
         });
     }
 

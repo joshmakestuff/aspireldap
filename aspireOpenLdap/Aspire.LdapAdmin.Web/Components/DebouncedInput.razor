@@ -1,0 +1,44 @@
+@implements IDisposable
+
+<input @attributes="AdditionalAttributes" value="@_text" @oninput="HandleInputAsync" />
+
+@code {
+    private static readonly TimeSpan DefaultDelay = TimeSpan.FromMilliseconds(200);
+    private readonly Debouncer _debouncer = new();
+    private string _text = string.Empty;
+    private string _appliedValue = string.Empty;
+
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter]
+    public TimeSpan Delay { get; set; } = DefaultDelay;
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(Value, _appliedValue, StringComparison.Ordinal))
+        {
+            _text = Value;
+            _appliedValue = Value;
+        }
+    }
+
+    private Task HandleInputAsync(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString() ?? string.Empty;
+        _text = value;
+        return _debouncer.DebounceAsync(Delay, async () =>
+        {
+            _appliedValue = value;
+            await ValueChanged.InvokeAsync(value);
+        });
+    }
+
+    public void Dispose() => _debouncer.Dispose();
+}

@@ -16,8 +16,11 @@
     run immediately so it arrives on real results.
 *@
 @using System.DirectoryServices.Protocols
+@using System.Collections.Immutable
 @using LdifDotNet
+@using LdifDotNet.Schema
 @inject LdapDirectoryService Directory
+@inject LdapSchemaService SchemaService
 @inject LdapAdminSettings Settings
 @inject ConsoleClipboard Clipboard
 @inject ConsoleToastService Toasts
@@ -144,61 +147,28 @@ else
 
 @if (_result is not null)
 {
-    <div class="sec">
-        @(_result.Entries.Count == 1 ? "1 entry returned" : $"{_result.Entries.Count} entries returned")
-        @* The stripped suffix is stated, not implied: relative DNs with no stated base
-           are ambiguous, which is the one failure mode stripping must not introduce. *@
-        @if (_commonSuffix.Length > 0)
+    <div class="search-selection-slot">
+        @if (_selected.Count > 0)
         {
-            <span class="mono" style="text-transform: none; letter-spacing: 0;">— all under @_commonSuffix</span>
+            <div class="bar search-selection" role="status">
+                <b class="mono">@_selected.Count</b> selected
+                <button class="btn btn-ghost btn-sm" @onclick="ClearSelection">Clear</button>
+                <span class="search-selection-spacer"></span>
+                <span class="hint">Only checked fetched rows are affected.</span>
+                <button class="btn btn-primary" @onclick="OpenBulkEdit">Bulk edit…</button>
+            </div>
         }
     </div>
+    <SearchResultsTable Result="_result" CommonSuffix="@_commonSuffix" RanFilter="@_ranFilter"
+                        InitialSortOrder="Settings.DefaultSortOrder"
+                        SelectionDisabled="_running"
+                        SelectedDns="SelectedDns" OnSelectionChanged="SetSelection"
+                        OnEntrySelected="OnEntrySelected" OnCopyDn="CopyDnAsync" />
+}
 
-    @if (_result.Truncated)
-    {
-        <div class="bar">
-            Showing the first @_result.Entries.Count entries — the directory has more. Raise
-            the limit or narrow the filter.
-        </div>
-    }
-
-    @if (_result.Entries.Count > 0)
-    {
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>DN</th>
-                    <th style="width: 22%;">Name</th>
-                    <th style="width: 22%;">Mail</th>
-                    <th style="width: 60px;"></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var entry in _displayEntries)
-                {
-                    <tr>
-                        <td class="mono">
-                            @* The whole meaning of the row is "open this entry", so the DN is
-                               the link; the full DN rides the title and the copy button. *@
-                            <a href="#" title="@entry.Dn"
-                               @onclick="@(() => OnEntrySelected.InvokeAsync(entry.Dn))"
-                               @onclick:preventDefault="true">@DnDisplay.Relative(entry.Dn, _commonSuffix)</a>
-                        </td>
-                        <td>@First(entry, "cn", "displayName", "ou", "o")</td>
-                        <td class="mono">@First(entry, "mail")</td>
-                        <td>
-                            <button class="btn btn-ghost btn-sm" title="Copy full DN to clipboard"
-                                    @onclick="@(() => CopyDnAsync(entry.Dn))">Copy</button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-    else
-    {
-        <p class="text-muted note">No entry matched. <span class="mono">@_ranFilter</span></p>
-    }
+@if (_bulkEdit is { } bulkEdit)
+{
+    <BulkEditDialog Model="bulkEdit" OnClose="CloseBulkEdit" />
 }
 
 @code {
@@ -317,11 +287,14 @@ else
     }
 
     private LdapSearchResult? _result;
-    private List<LdapEntry> _displayEntries = [];
     private string _commonSuffix = string.Empty;
     private string? _error;
     private string _ranFilter = string.Empty;
     private bool _running;
+    private readonly Dictionary<string, LdapEntry> _selected = new(StringComparer.Ordinal);
+    private LdifDotNet.Schema.LdapSchema? _schema;
+    private BulkEditDialogModel? _bulkEdit;
+    private IReadOnlySet<string> SelectedDns => _selected.Keys.ToHashSet(StringComparer.Ordinal);
 
     protected override void OnInitialized()
     {
@@ -352,6 +325,15 @@ else
             });
             _baseOptions = [Directory.BaseDn, .. ous.Entries.Select(static e => e.Dn)];
             StateHasChanged();
+        }
+        catch (DirectoryException)
+        {
+        }
+
+        try
+        {
+            var schema = await SchemaService.GetSchemaAsync();
+            _schema = schema.Available ? schema.Schema : null;
         }
         catch (DirectoryException)
         {
@@ -395,8 +377,14 @@ else
         }
     }
 
-    private async Task RunAsync()
+    private Task RunAsync() => RunAsync(clearSelection: true, CancellationToken.None);
+
+    private async Task RunAsync(bool clearSelection, CancellationToken cancellationToken)
     {
+        if (clearSelection)
+        {
+            ClearSelection();
+        }
         var filter = RawFilter;
         if (string.IsNullOrWhiteSpace(filter))
         {
@@ -417,7 +405,7 @@ else
                 BaseDn = string.IsNullOrWhiteSpace(_baseDn) ? null : _baseDn,
                 Scope = _scope,
                 Limit = _limit ?? Settings.DefaultSearchLimit,
-            });
+            }, cancellationToken);
         }
         catch (DirectoryException ex)
         {
@@ -427,6 +415,10 @@ else
         {
             error = ex.Message;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
 
         if (token != _runSeq)
         {
@@ -434,21 +426,16 @@ else
         }
 
         _running = false;
+        if (clearSelection)
+        {
+            // The previous result stays mounted while searching. Drop any selection made
+            // against it before committing this replacement result.
+            ClearSelection();
+        }
         _error = error;
         _result = result;
         _ranFilter = filter;
         _commonSuffix = result is null ? string.Empty : DnDisplay.CommonSuffix([.. result.Entries.Select(static e => e.Dn)]);
-        // Display order only — the AppHost-set default. Sorting happens after the
-        // (truncation-aware) fetch, so it never changes which entries came back, and it keys
-        // on the same relative form the DN column shows.
-        _displayEntries = result is null ? [] : [.. result.Entries];
-        if (Settings.DefaultSortOrder == LdapAdminSortOrder.Rdn)
-        {
-            _displayEntries.Sort((a, b) => string.Compare(
-                DnDisplay.Relative(a.Dn, _commonSuffix),
-                DnDisplay.Relative(b.Dn, _commonSuffix),
-                StringComparison.OrdinalIgnoreCase));
-        }
 
         StateHasChanged();
     }
@@ -456,22 +443,114 @@ else
     private async Task CopyDnAsync(string dn) =>
         Toasts.Show(await Clipboard.CopyAsync(dn) ? "DN copied" : "copy failed — clipboard unavailable");
 
-    /// <summary>
-    /// First non-empty value among <paramref name="names"/>, in preference order, so the
-    /// column stays populated across the object classes one filter can return. Binary
-    /// values are skipped: their transport form is base64, which is not a label.
-    /// </summary>
-    private static string First(LdapEntry entry, params string[] names)
+    private void SetSelection(SearchResultSelectionChange change)
     {
-        foreach (var name in names)
+        if (change.Selected)
         {
-            var attribute = entry.Attributes.FirstOrDefault(
-                a => a.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !a.IsBinary);
-            if (attribute?.Values.FirstOrDefault(static v => v.Length > 0) is { } value)
-            {
-                return value;
-            }
+            _selected[change.Entry.Dn] = change.Entry;
         }
-        return string.Empty;
+        else
+        {
+            _selected.Remove(change.Entry.Dn);
+        }
     }
+
+    private void ClearSelection() => _selected.Clear();
+
+    private void OpenBulkEdit()
+    {
+        if (_bulkEdit is not null || _selected.Count == 0)
+        {
+            return;
+        }
+
+        var entries = _selected.Values.ToImmutableArray();
+        _bulkEdit = new BulkEditDialogModel
+        {
+            Entries = entries,
+            AttributeCandidates = AttributeCandidates(entries),
+            SearchGroupsAsync = SearchGroupsAsync,
+            DescribeGroup = entry => GroupMembership.Detect(_schema, entry),
+            ApplyAsync = ApplyBulkItemAsync,
+            RunFinishedAsync = BulkRunFinishedAsync,
+        };
+    }
+
+    private void CloseBulkEdit() => _bulkEdit = null;
+
+    private Task<LdapSearchResult> SearchGroupsAsync(string query, CancellationToken cancellationToken) =>
+        Directory.SearchAsync(new LdapSearchOptions
+        {
+            Filter = GroupMemberSearch.Filter(query),
+            Limit = GroupMemberSearch.ResultLimit,
+            Attributes = ["uid", "cn", "mail", "objectClass", "member", "uniqueMember", "memberUid"],
+        }, cancellationToken);
+
+    private Task<LdapOperationResult> ApplyBulkItemAsync(BulkEditPlanItem item) =>
+        Directory.ModifyEntryAsync(item.TargetDn, [item.Change], CancellationToken.None);
+
+    private async Task BulkRunFinishedAsync(BulkEditRunResult run)
+    {
+        using var refresh = new CancellationTokenSource();
+        if (run.AllSucceeded)
+        {
+            ClearSelection();
+        }
+        else
+        {
+            RetainIncompleteSelection(_selected, run);
+        }
+        await RunAsync(clearSelection: false, refresh.Token);
+        if (run.AllSucceeded)
+        {
+            Toasts.Show($"ldapmodify — {run.CompletedCount} selected entries updated");
+        }
+    }
+
+    private IReadOnlyList<AttributeGuidance> AttributeCandidates(IEnumerable<LdapEntry> entries)
+    {
+        if (_schema is null)
+        {
+            return [];
+        }
+
+        var selected = entries.ToList();
+        var classesByEntry = selected.Select(static entry => entry.Attributes
+            .Where(static attribute => attribute.Name.Equals("objectClass", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(static attribute => attribute.Values));
+
+        return FilterBulkCandidates(
+            _schema, selected, SchemaGuide.SharedEditableCandidates(_schema, classesByEntry));
+    }
+
+    internal static IReadOnlyList<AttributeGuidance> FilterBulkCandidates(
+        LdapSchema schema,
+        IEnumerable<LdapEntry> entries,
+        IEnumerable<AttributeGuidance> candidates)
+    {
+        var selected = entries.ToList();
+        var binaryAttributes = new HashSet<string>(
+            selected.SelectMany(static entry => entry.Attributes)
+                .Where(static attribute => attribute.IsBinary)
+                .Select(static attribute => attribute.Name),
+            StringComparer.OrdinalIgnoreCase);
+        var membershipAttributes = new HashSet<string>(
+            selected.SelectMany(entry => GroupMembership.Detect(schema, entry))
+                .Select(static membership => membership.Name),
+            StringComparer.OrdinalIgnoreCase);
+
+        return [.. candidates.Where(candidate =>
+            !binaryAttributes.Contains(candidate.Name) && !membershipAttributes.Contains(candidate.Name))];
+    }
+
+    /// <summary>Leaves only work that an incomplete bulk run did not already acknowledge.</summary>
+    internal static void RetainIncompleteSelection(
+        IDictionary<string, LdapEntry> selected, BulkEditRunResult run)
+    {
+        foreach (var outcome in run.Outcomes.Where(static outcome => outcome.Status == BulkEditItemStatus.Succeeded))
+        {
+            selected.Remove(outcome.Item.SelectedDn);
+        }
+    }
+
 }

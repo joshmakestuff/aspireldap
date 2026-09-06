@@ -83,9 +83,9 @@ public sealed class ConsoleComponentTests : TestContext
         {
             IsNew = true,
             Name = "mail",
-            ValuesText = "alice@aspire.dev",
+            Values = ["alice@aspire.dev"],
             Entry = Entry(Text("objectClass", "top", "person")),
-            SaveAsync = _ => Task.FromResult<string?>("Access denied — the server's ACL refused this bind."),
+            SaveAsync = (_, _) => Task.FromResult<string?>("Access denied — the server's ACL refused this bind."),
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
@@ -106,9 +106,9 @@ public sealed class ConsoleComponentTests : TestContext
         {
             IsNew = true,
             Name = "mail",
-            ValuesText = "alice@aspire.dev",
+            Values = ["alice@aspire.dev"],
             Entry = Entry(Text("objectClass", "top", "person")),
-            SaveAsync = _ => Task.FromResult<string?>(null),
+            SaveAsync = (_, _) => Task.FromResult<string?>(null),
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
@@ -120,6 +120,74 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
+    public void PasswordDialog_Requires_Nonempty_Exact_Match_Without_Changing_The_Value()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        string? submitted = null;
+        var saves = 0;
+        var model = new PasswordDialogModel
+        {
+            Dn = "uid=alice,ou=people,dc=aspire,dc=dev",
+            SaveAsync = (password, _) =>
+            {
+                saves++;
+                submitted = password;
+                return Task.FromResult<string?>(null);
+            },
+        };
+        var cut = RenderComponent<PasswordDialog>(parameters => parameters.Add(p => p.Model, model));
+        var fields = cut.FindAll("input[type=password]").ToList();
+
+        Assert.Equal(2, fields.Count);
+        Assert.All(fields, field => Assert.Equal("new-password", field.GetAttribute("autocomplete")));
+
+        cut.Find("button.btn-primary").Click();
+        Assert.Equal("Enter a password.", cut.Find(".bar.err").TextContent);
+        Assert.Equal(0, saves);
+
+        cut.Find("#new-password").Change(" secret ");
+        cut.Find("#confirm-password").Change("secret");
+        cut.Find("button.btn-primary").Click();
+        Assert.Equal("Passwords do not match.", cut.Find(".bar.err").TextContent);
+        Assert.Equal(0, saves);
+
+        cut.Find("#confirm-password").Change(" secret ");
+        cut.Find("button.btn-primary").Click();
+        Assert.Equal(1, saves);
+        Assert.Equal(" secret ", submitted);
+    }
+
+    [Fact]
+    public async Task PasswordDialog_Uses_The_Save_Token_And_Shows_Service_Words_Inline()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var pending = new TaskCompletionSource<string?>();
+        CancellationToken saveToken = default;
+        const string refusal = "The request is not valid — the target is the console's bind identity; its password cannot be changed from here.";
+        var model = new PasswordDialogModel
+        {
+            Dn = "cn=admin,dc=aspire,dc=dev",
+            SaveAsync = (_, token) =>
+            {
+                saveToken = token;
+                return pending.Task;
+            },
+        };
+        var cut = RenderComponent<PasswordDialog>(parameters => parameters.Add(p => p.Model, model));
+        var fields = cut.FindAll("input[type=password]").ToList();
+        cut.Find("#new-password").Change("not-shown-in-status");
+        cut.Find("#confirm-password").Change("not-shown-in-status");
+        cut.Find("button.btn-primary").Click();
+
+        await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
+        Assert.True(saveToken.IsCancellationRequested);
+        pending.SetResult(refusal);
+
+        cut.WaitForAssertion(() => Assert.Equal(refusal, cut.Find(".bar.err").TextContent));
+        Assert.DoesNotContain("not-shown-in-status", cut.Find(".bar.err").TextContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AttributeDialog_With_Schema_Adapts_The_Value_Input_And_Shows_Guidance()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
@@ -128,16 +196,16 @@ public sealed class ConsoleComponentTests : TestContext
             IsNew = true,
             Name = "uidNumber",
             Entry = Entry(Text("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson")),
-            SaveAsync = _ => Task.FromResult<string?>(null),
+            SaveAsync = (_, _) => Task.FromResult<string?>(null),
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
-        // SINGLE-VALUE type: one input, not the multi-line textarea; guidance names it.
+        // SINGLE-VALUE still supports multiline content, but not adding a second value.
         Assert.Contains("single-valued", cut.Find(".hint").TextContent, StringComparison.Ordinal);
-        Assert.Empty(cut.FindAll("textarea"));
-        Assert.NotEmpty(cut.FindAll(".field input.input.mono"));
+        Assert.Single(cut.FindAll("textarea"));
+        Assert.True(cut.FindAll("button").Single(b => b.TextContent == "Add value").HasAttribute("disabled"));
     }
 
     [Fact]
@@ -148,7 +216,7 @@ public sealed class ConsoleComponentTests : TestContext
         var model = new NewEntryModel
         {
             ParentDn = "ou=people,dc=example,dc=org",
-            SaveAsync = entry => { saved = entry; return Task.FromResult<string?>(null); },
+            SaveAsync = (entry, _) => { saved = entry; return Task.FromResult<string?>(null); },
         };
         var cut = RenderComponent<NewEntryWizard>(parameters => parameters
             .Add(p => p.Model, model)
@@ -201,7 +269,7 @@ public sealed class ConsoleComponentTests : TestContext
         var model = new NewEntryModel
         {
             ParentDn = "ou=people,dc=example,dc=org",
-            SaveAsync = _ => Task.FromResult<string?>(null),
+            SaveAsync = (_, _) => Task.FromResult<string?>(null),
         };
         var cut = RenderComponent<NewEntryWizard>(parameters => parameters
             .Add(p => p.Model, model)
@@ -247,12 +315,10 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public async Task ConsoleDialog_Busy_Refuses_The_Cancel_Relay_And_Marks_The_Element()
+    public async Task ConsoleDialog_Busy_Relays_Cancellation_And_Marks_The_Element()
     {
-        // While an operation is in flight the relay is refused
-        // server-side (authoritative), and the element carries the attributes the JS and
-        // the platform use to refuse client-side: data-busy for console.js, closedby=none
-        // so supporting engines suppress close requests before they even fire.
+        // Busy close requests reach the owner, which requests cancellation while keeping
+        // the component mounted. Native closedby must not suppress those requests.
         JSInterop.Mode = JSRuntimeMode.Loose;
         var cancelled = 0;
         var cut = RenderComponent<ConsoleDialog>(parameters => parameters
@@ -262,28 +328,34 @@ public sealed class ConsoleComponentTests : TestContext
 
         await cut.InvokeAsync(() => cut.Instance.CancelFromJs());
 
-        Assert.Equal(0, cancelled);
+        Assert.Equal(1, cancelled);
         var panel = cut.Find("dialog.wide");
         Assert.Equal("true", panel.GetAttribute("data-busy"));
-        Assert.Equal("none", panel.GetAttribute("closedby"));
+        Assert.False(panel.HasAttribute("closedby"));
     }
 
     [Fact]
-    public async Task AttributeDialog_InFlight_Save_Refuses_Cancel_And_Still_Lands_The_Late_Error()
+    public async Task AttributeDialog_InFlight_Save_Cancels_Idempotently_And_Waits_For_Acknowledgement()
     {
-        // The dialog must stay mounted and un-dismissable for the
-        // whole operation, so an error returned after a cancel attempt still renders
-        // instead of landing on a disposed component.
+        // Cancellation is requested once, but the dialog remains mounted and locked until
+        // the delegate acknowledges it with a result.
         JSInterop.Mode = JSRuntimeMode.Loose;
         var closed = false;
         var pending = new TaskCompletionSource<string?>();
+        CancellationToken saveToken = default;
+        var cancellationCallbacks = 0;
         var model = new AttributeDialogModel
         {
             IsNew = true,
             Name = "mail",
-            ValuesText = "alice@aspire.dev",
+            Values = ["alice@aspire.dev"],
             Entry = Entry(Text("objectClass", "top", "person")),
-            SaveAsync = _ => pending.Task,
+            SaveAsync = (_, token) =>
+            {
+                saveToken = token;
+                token.Register(() => cancellationCallbacks++);
+                return pending.Task;
+            },
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
@@ -291,10 +363,16 @@ public sealed class ConsoleComponentTests : TestContext
 
         cut.Find("button.btn-primary").Click();
 
-        // In flight: Cancel is disabled and the Escape relay is refused.
-        Assert.True(cut.Find("button.btn-secondary").HasAttribute("disabled"));
+        // In flight: fields and Save stay locked, while Cancel remains available.
+        Assert.True(cut.Find("input.input").HasAttribute("disabled"));
+        Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
+        Assert.False(cut.Find("button.btn-secondary").HasAttribute("disabled"));
+        await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
         await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
         Assert.False(closed);
+        Assert.True(saveToken.IsCancellationRequested);
+        Assert.Equal(1, cancellationCallbacks);
+        Assert.Equal("Cancelling", cut.Find("button.btn-secondary").TextContent);
 
         pending.SetResult("Access denied — the server's ACL refused this bind.");
         cut.WaitForAssertion(() =>
@@ -303,7 +381,7 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public void AttributeDialog_InFlight_Save_Success_Closes_Exactly_Once()
+    public async Task AttributeDialog_Acknowledged_Success_After_Cancel_Closes_Exactly_Once()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         var closedCount = 0;
@@ -312,15 +390,17 @@ public sealed class ConsoleComponentTests : TestContext
         {
             IsNew = true,
             Name = "mail",
-            ValuesText = "alice@aspire.dev",
+            Values = ["alice@aspire.dev"],
             Entry = Entry(Text("objectClass", "top", "person")),
-            SaveAsync = _ => pending.Task,
+            SaveAsync = (_, _) => pending.Task,
         };
         var cut = RenderComponent<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.OnClose, () => { closedCount++; }));
 
         cut.Find("button.btn-primary").Click();
+        await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
+        Assert.Equal("Cancelling", cut.Find("button.btn-secondary").TextContent);
         pending.SetResult(null);
 
         cut.WaitForAssertion(() => Assert.Equal(1, closedCount));
@@ -328,7 +408,7 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public void DeleteDialog_InFlight_Delete_Disables_Cancel_And_The_Subtree_Checkbox()
+    public void DeleteDialog_InFlight_Delete_Leaves_Cancel_Enabled_And_Locks_Other_Controls()
     {
         // Flipping the subtree checkbox mid-walk would lie about
         // what the running operation is doing; it locks with the rest of the dialog.
@@ -338,14 +418,15 @@ public sealed class ConsoleComponentTests : TestContext
         {
             Dn = "uid=alice,ou=people,dc=aspire,dc=dev",
             Subtree = true,
-            SaveAsync = _ => pending.Task,
+            SaveAsync = (_, _) => pending.Task,
         };
         var cut = RenderComponent<DeleteDialog>(parameters => parameters
             .Add(p => p.Model, model));
 
         cut.Find("button.btn-primary").Click();
 
-        Assert.True(cut.Find("button.btn-secondary").HasAttribute("disabled"));
+        Assert.False(cut.Find("button.btn-secondary").HasAttribute("disabled"));
+        Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
         Assert.True(cut.Find("input[type=checkbox]").HasAttribute("disabled"));
 
         pending.SetResult(null);
@@ -374,7 +455,7 @@ public sealed class ConsoleComponentTests : TestContext
     /// <summary>A person entry named by cn, as the shell's OpenRenameDialog would hand over:
     /// RDN prefilled, parent computed, entry snapshotted.</summary>
     private static RenameDialogModel RenameModel(
-        Func<RenameDialogModel, Task<string?>>? save = null,
+        Func<RenameDialogModel, CancellationToken, Task<string?>>? save = null,
         params LdapAttributeValues[] attributes)
     {
         const string dn = "cn=Alice Chen,ou=people,dc=aspire,dc=dev";
@@ -393,7 +474,7 @@ public sealed class ConsoleComponentTests : TestContext
             Entry = new LdapEntry(dn, entryAttributes),
             RdnAttribute = "cn",
             RdnValue = "Alice Chen",
-            SaveAsync = save ?? (_ => Task.FromResult<string?>(null)),
+            SaveAsync = save ?? ((_, _) => Task.FromResult<string?>(null)),
         };
     }
 
@@ -457,7 +538,7 @@ public sealed class ConsoleComponentTests : TestContext
         JSInterop.Mode = JSRuntimeMode.Loose;
         var saves = 0;
         var cut = RenderComponent<RenameDialog>(parameters => parameters
-            .Add(p => p.Model, RenameModel(_ => { saves++; return Task.FromResult<string?>(null); }))
+            .Add(p => p.Model, RenameModel((_, _) => { saves++; return Task.FromResult<string?>(null); }))
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
         cut.FindAll("input.input.mono").ElementAt(1).Input("not a dn");
@@ -474,7 +555,7 @@ public sealed class ConsoleComponentTests : TestContext
         var saves = 0;
         // No schema: the attribute is free text, so an invalid type can be typed at all.
         var cut = RenderComponent<RenameDialog>(parameters => parameters
-            .Add(p => p.Model, RenameModel(_ => { saves++; return Task.FromResult<string?>(null); })));
+            .Add(p => p.Model, RenameModel((_, _) => { saves++; return Task.FromResult<string?>(null); })));
 
         cut.FindAll("input.input.mono").First().Change("1bad"); // RFC 4512 descr must start with a letter
         cut.Find("button.btn-primary").Click();
@@ -520,7 +601,7 @@ public sealed class ConsoleComponentTests : TestContext
         JSInterop.Mode = JSRuntimeMode.Loose;
         RenameDialogModel? saved = null;
         var closed = false;
-        var model = RenameModel(m => { saved = m; return Task.FromResult<string?>(null); });
+        var model = RenameModel((m, _) => { saved = m; return Task.FromResult<string?>(null); });
         var cut = RenderComponent<RenameDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, ConsoleTestSchema.Schema)
@@ -569,6 +650,26 @@ internal static class ConsoleTestSchema
 public sealed class SchemaGuideTests
 {
     [Fact]
+    public void Password_Eligibility_Comes_From_Effective_Schema_Attributes_Not_Class_Names()
+    {
+        var customSchema = LdifDotNet.Schema.LdapSchema.ParseSubschema(
+        [
+            "( 2.5.4.0 NAME 'objectClass' SYNTAX 1.3.6.1.4.1.1466.115.121.1.38 )",
+            "( 2.5.4.35 NAME 'userPassword' SYNTAX 1.3.6.1.4.1.1466.115.121.1.40 )",
+        ],
+        [
+            "( 2.5.6.0 NAME 'top' ABSTRACT MUST objectClass )",
+            "( 1.3.6.1.4.1.99999.1 NAME 'deviceCredential' SUP top AUXILIARY MAY userPassword )",
+            "( 1.3.6.1.4.1.99999.2 NAME 'namedService' SUP top AUXILIARY )",
+        ]);
+
+        Assert.True(SchemaGuide.PermitsAttribute(customSchema, ["deviceCredential"], "userPassword"));
+        Assert.False(SchemaGuide.PermitsAttribute(customSchema, ["namedService"], "userPassword"));
+        Assert.False(SchemaGuide.PermitsAttribute(customSchema, ["unknownClass"], "userPassword"));
+        Assert.False(SchemaGuide.PermitsAttribute(null, ["deviceCredential"], "userPassword"));
+    }
+
+    [Fact]
     public void EffectiveSets_Union_Superior_Chains_And_Dedupe_May_Against_Must()
     {
         var (must, may) = SchemaGuide.EffectiveSets(ConsoleTestSchema.Schema, ["inetOrgPerson"]);
@@ -603,6 +704,50 @@ public sealed class SchemaGuideTests
         Assert.Contains("uid", names, StringComparer.OrdinalIgnoreCase);
         // Required-first ordering.
         Assert.True(candidates.First().Required);
+    }
+
+    [Fact]
+    public void SharedEditableCandidates_Intersect_Heterogeneous_Entry_Schemas()
+    {
+        var schema = LdifDotNet.Schema.LdapSchema.ParseSubschema(
+        [
+            "( 2.5.4.0 NAME 'objectClass' SYNTAX 1.3.6.1.4.1.1466.115.121.1.38 )",
+            "( 2.5.4.3 NAME 'cn' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+            "( 2.5.4.13 NAME 'description' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+            "( 0.9.2342.19200300.100.1.3 NAME 'mail' SYNTAX 1.3.6.1.4.1.1466.115.121.1.26 )",
+        ],
+        [
+            "( 2.5.6.0 NAME 'top' ABSTRACT MUST objectClass )",
+            "( 1.3.6.1.4.1.99999.10 NAME 'mailEntry' SUP top STRUCTURAL MUST cn MAY ( description $ mail ) )",
+            "( 1.3.6.1.4.1.99999.11 NAME 'plainEntry' SUP top STRUCTURAL MUST cn MAY description )",
+        ]);
+
+        var candidates = SchemaGuide.SharedEditableCandidates(
+            schema, new[] { new[] { "mailEntry" }, new[] { "plainEntry" } });
+
+        Assert.Contains(candidates, candidate => candidate.Name.Equals("cn", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(candidates, candidate => candidate.Name.Equals("description", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(candidates, candidate => candidate.Name.Equals("mail", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void SharedEditableCandidates_Exclude_Binary_Syntaxes()
+    {
+        var schema = LdifDotNet.Schema.LdapSchema.ParseSubschema(
+        [
+            "( 2.5.4.0 NAME 'objectClass' SYNTAX 1.3.6.1.4.1.1466.115.121.1.38 )",
+            "( 2.5.4.3 NAME 'cn' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+            "( 0.9.2342.19200300.100.1.60 NAME 'jpegPhoto' SYNTAX 1.3.6.1.4.1.1466.115.121.1.28 )",
+        ],
+        [
+            "( 2.5.6.0 NAME 'top' ABSTRACT MUST objectClass )",
+            "( 1.3.6.1.4.1.99999.12 NAME 'photoEntry' SUP top STRUCTURAL MUST cn MAY jpegPhoto )",
+        ],
+        ["( 1.3.6.1.4.1.1466.115.121.1.28 DESC 'JPEG' X-NOT-HUMAN-READABLE 'TRUE' )"]);
+
+        var candidates = SchemaGuide.SharedEditableCandidates(schema, [new[] { "photoEntry" }]);
+
+        Assert.DoesNotContain(candidates, candidate => candidate.Name.Equals("jpegPhoto", StringComparison.OrdinalIgnoreCase));
     }
 }
 

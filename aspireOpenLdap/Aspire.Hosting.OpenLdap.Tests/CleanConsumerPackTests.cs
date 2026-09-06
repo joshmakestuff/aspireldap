@@ -75,9 +75,12 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
             output.WriteLine(run.Output);
             Assert.True(run.ExitCode == 0, $"clean consumer exited {run.ExitCode}:{Environment.NewLine}{run.Output}");
             Assert.Contains("CLEANCONSUMER resource ldap=Healthy", run.Output, StringComparison.Ordinal);
-            Assert.Contains("CLEANCONSUMER resource ldap-ldapadmin=Healthy", run.Output, StringComparison.Ordinal);
+            Assert.Contains("CLEANCONSUMER resource ldapadmin-disabled=Healthy", run.Output, StringComparison.Ordinal);
+            Assert.Contains("CLEANCONSUMER resource ldapadmin-enabled=Healthy", run.Output, StringComparison.Ordinal);
             Assert.Contains("CLEANCONSUMER health=200:Healthy", run.Output, StringComparison.Ordinal);
             Assert.Contains("CLEANCONSUMER home=200", run.Output, StringComparison.Ordinal);
+            Assert.Contains("CLEANCONSUMER api-disabled=404", run.Output, StringComparison.Ordinal);
+            Assert.Contains("CLEANCONSUMER api-enabled=200", run.Output, StringComparison.Ordinal);
             Assert.Contains("CLEANCONSUMER OK", run.Output, StringComparison.Ordinal);
         }
         finally
@@ -160,7 +163,14 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
                 // The options overload rides along: the packed artifact
                 // must deliver it, and the admin host must bind the LdapAdmin__* values it
                 // emits — a bad binding fails startup, which the health/home probes catch.
-                .WithLdapAdmin(admin => admin.Theme = LdapAdminTheme.Dark);
+                .WithLdapAdmin(
+                    admin => admin.Theme = LdapAdminTheme.Dark,
+                    containerName: "ldapadmin-disabled")
+                // A second admin uses the same LDAP resource. This proves both activation arms
+                // from the packed payload without paying for another directory container.
+                .WithLdapAdmin(
+                    admin => admin.EnableRestApi = true,
+                    containerName: "ldapadmin-enabled");
 
             var app = builder.Build();
 
@@ -173,24 +183,33 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
                 Console.WriteLine("CLEANCONSUMER resource ldap=Healthy");
                 // Healthy admin = its /health answered 200, i.e. an admin bind + root-DSE search
                 // against the directory succeeded from inside the admin container.
-                await app.ResourceNotifications.WaitForResourceHealthyAsync("ldap-ldapadmin", ct);
-                Console.WriteLine("CLEANCONSUMER resource ldap-ldapadmin=Healthy");
+                await app.ResourceNotifications.WaitForResourceHealthyAsync("ldapadmin-disabled", ct);
+                Console.WriteLine("CLEANCONSUMER resource ldapadmin-disabled=Healthy");
+                await app.ResourceNotifications.WaitForResourceHealthyAsync("ldapadmin-enabled", ct);
+                Console.WriteLine("CLEANCONSUMER resource ldapadmin-enabled=Healthy");
 
-                var admin = app.Services.GetRequiredService<DistributedApplicationModel>()
-                    .Resources.OfType<LdapAdminResource>().Single();
-                var baseUrl = new Uri(new EndpointReference(admin, "http").Url);
+                var admins = app.Services.GetRequiredService<DistributedApplicationModel>()
+                    .Resources.OfType<LdapAdminResource>().ToDictionary(resource => resource.Name);
+                var disabledUrl = new Uri(new EndpointReference(admins["ldapadmin-disabled"], "http").Url);
+                var enabledUrl = new Uri(new EndpointReference(admins["ldapadmin-enabled"], "http").Url);
                 using var http = new HttpClient();
 
                 // Witness the same LDAP round trip directly, plus the rendered home page.
-                var health = await http.GetAsync(new Uri(baseUrl, "/health"), ct);
+                var health = await http.GetAsync(new Uri(enabledUrl, "/health"), ct);
                 var healthBody = await health.Content.ReadAsStringAsync(ct);
                 Console.WriteLine($"CLEANCONSUMER health={(int)health.StatusCode}:{healthBody}");
-                var home = await http.GetAsync(baseUrl, ct);
+                var home = await http.GetAsync(disabledUrl, ct);
                 Console.WriteLine($"CLEANCONSUMER home={(int)home.StatusCode}");
+                var apiDisabled = await http.GetAsync(new Uri(disabledUrl, "/api/v1/directory"), ct);
+                Console.WriteLine($"CLEANCONSUMER api-disabled={(int)apiDisabled.StatusCode}");
+                var apiEnabled = await http.GetAsync(new Uri(enabledUrl, "/api/v1/directory"), ct);
+                Console.WriteLine($"CLEANCONSUMER api-enabled={(int)apiEnabled.StatusCode}");
 
                 var ok = (int)health.StatusCode == 200
                     && string.Equals(healthBody, "Healthy", StringComparison.Ordinal)
-                    && (int)home.StatusCode == 200;
+                    && (int)home.StatusCode == 200
+                    && (int)apiDisabled.StatusCode == 404
+                    && (int)apiEnabled.StatusCode == 200;
                 Console.WriteLine(ok ? "CLEANCONSUMER OK" : "CLEANCONSUMER FAIL");
                 await app.StopAsync(ct);
                 return ok ? 0 : 1;

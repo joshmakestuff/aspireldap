@@ -46,7 +46,7 @@ public sealed class LdapLdifService(LdapDirectoryService directory)
 
     /// <summary>
     /// Parses import text into an apply plan. A parse failure is a plan-level error; a
-    /// record the importer cannot apply (an increment modification) is refused here, before
+    /// record the importer cannot apply (controls or an increment modification) is refused here, before
     /// anything runs, not midway through an apply.
     /// </summary>
     public static LdifImportPlan ParsePlan(string ldif)
@@ -69,10 +69,9 @@ public sealed class LdapLdifService(LdapDirectoryService directory)
         var items = new List<LdifImportItem>();
         foreach (var record in records)
         {
-            if (record is LdifModifyRecord modify
-                && modify.Modifications.Any(static m => m.Type == LdifModificationType.Increment))
+            if (UnsupportedRecordError(record) is { } error)
             {
-                return new LdifImportPlan([], $"modify {record.Dn}: increment modifications are not supported here.");
+                return new LdifImportPlan([], error);
             }
 
             items.Add(new LdifImportItem(record, ChangeTypeLabel(record), record.Dn, DetailCount(record)));
@@ -82,13 +81,24 @@ public sealed class LdapLdifService(LdapDirectoryService directory)
     }
 
     /// <summary>
-    /// Applies a parsed plan in record order, stopping at the first failure — the records
+    /// Preflights unsupported records across the whole input, then applies in record order,
+    /// stopping at the first directory failure — the records
     /// before it are applied and stay applied, and the result says exactly how far it got
     /// and why it stopped. ldapmodify's own contract, because half-applied silence is worse
     /// than a visible stop.
     /// </summary>
     public async Task<LdifApplyResult> ApplyAsync(IReadOnlyList<LdifImportItem> items, CancellationToken cancellationToken = default)
     {
+        // Public callers can construct items without ParsePlan. Validate all records before
+        // dispatch so an unsupported later record cannot leave earlier mutations behind.
+        foreach (var item in items)
+        {
+            if (UnsupportedRecordError(item.Record) is { } error)
+            {
+                return new LdifApplyResult(0, items.Count, item.Record.Dn, LdapOperationResult.Invalid(error));
+            }
+        }
+
         var applied = 0;
         foreach (var item in items)
         {
@@ -114,6 +124,15 @@ public sealed class LdapLdifService(LdapDirectoryService directory)
 
         return new LdifApplyResult(applied, items.Count, null, LdapOperationResult.Ok());
     }
+
+    private static string? UnsupportedRecordError(LdifRecord record) => record switch
+    {
+        LdifChangeRecord { Controls.Count: > 0 } =>
+            $"{ChangeTypeLabel(record)} {record.Dn}: LDIF controls are not supported here.",
+        LdifModifyRecord modify when modify.Modifications.Any(static m => m.Type == LdifModificationType.Increment) =>
+            $"modify {record.Dn}: increment modifications are not supported here.",
+        _ => null,
+    };
 
     private Task<LdapOperationResult> ApplyOneAsync(LdifRecord record, CancellationToken cancellationToken) => record switch
     {
