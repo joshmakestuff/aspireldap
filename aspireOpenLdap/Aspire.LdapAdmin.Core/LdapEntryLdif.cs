@@ -32,7 +32,7 @@ public static class LdapEntryLdif
     /// <see cref="LdifDraftDiff.Changes"/> holds the replaces and deletes that make the
     /// entry match the draft — possibly none, when the draft is equivalent. Anything the
     /// diff cannot honestly apply (unparsable LDIF, several records, a changetype record, a
-    /// different DN) is an <see cref="LdifDraftDiff.Error"/>, never a guess.
+    /// different DN, or unresolved URL values) is an <see cref="LdifDraftDiff.Error"/>, never a guess.
     /// </summary>
     public static LdifDraftDiff Diff(LdapEntry entry, string draft)
     {
@@ -62,6 +62,11 @@ public static class LdapEntryLdif
         if (!DnEquality.AreEquivalent(record.Dn, entry.Dn))
         {
             return LdifDraftDiff.Fail("The draft's DN must match the entry — use Rename to move it.");
+        }
+
+        if (LdifInputValidation.UnresolvedUrlError(record) is { } error)
+        {
+            return LdifDraftDiff.Fail(error);
         }
 
         return LdifDraftDiff.Ok(ComputeChanges(entry, record));
