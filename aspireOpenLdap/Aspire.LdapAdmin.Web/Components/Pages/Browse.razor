@@ -1117,13 +1117,25 @@
     protected virtual Task<LdapEntry?> GetEntryAsync(string dn, CancellationToken cancellationToken) =>
         Directory.GetEntryAsync(dn, cancellationToken: cancellationToken);
 
+    protected virtual Task<LdapOperationResult> AddEntryAsync(LdapNewEntry entry, CancellationToken cancellationToken) =>
+        Directory.AddEntryAsync(entry, cancellationToken);
+
+    protected virtual Task<LdapRenameResult> RenameEntryAsync(
+        string dn, string newRdn, string? newParent, bool deleteOldRdn, CancellationToken cancellationToken) =>
+        Directory.RenameEntryAsync(dn, newRdn, newParent, deleteOldRdn, cancellationToken);
+
+    protected virtual Task<LdapOperationResult> DeleteEntryAsync(string dn, bool subtree, CancellationToken cancellationToken) =>
+        Directory.DeleteEntryAsync(dn, subtree, cancellationToken);
+
     /// <summary>
     /// The wizard composes the entry (chained classes, escaped RDN — a pasted full DN is
-    /// structurally impossible there); this applies it and lands on the new entry.
+    /// structurally impossible there); this applies it and selects the new entry unless
+    /// navigation changed while the write or tree refresh was pending.
     /// </summary>
     private async Task<string?> SaveNewEntryAsync(LdapNewEntry entry, CancellationToken cancellationToken)
     {
-        var result = await GuardedAsync(() => Directory.AddEntryAsync(entry, cancellationToken));
+        var selection = _selectSeq;
+        var result = await GuardedAsync(() => AddEntryAsync(entry, cancellationToken));
 
         if (!result.Succeeded)
         {
@@ -1132,12 +1144,18 @@
 
         ShowToast($"ldapadd — {entry.Dn} created");
         await ReloadChildrenAsync(ParentOf(entry.Dn) ?? Directory.BaseDn, CancellationToken.None);
-        await SelectAsync(entry.Dn, reveal: true, CancellationToken.None);
+        // Browser history can change selection even while the native modal is open.
+        // Refresh the tree regardless, but let that newer selection keep the pane.
+        if (selection == _selectSeq)
+        {
+            await SelectAsync(entry.Dn, reveal: true, CancellationToken.None);
+        }
         return null;
     }
 
     private async Task<string?> SaveRenameAsync(RenameDialogModel dialog, CancellationToken cancellationToken)
     {
+        var selection = _selectSeq;
         var newParent = dialog.NewParentDn.Length > 0 ? dialog.NewParentDn : null;
         // The dialog validated attribute and value; Dn.Rdn escapes, so a typed comma or
         // plus is a value character, never DN structure.
@@ -1145,7 +1163,7 @@
         LdapRenameResult rename;
         try
         {
-            rename = await Directory.RenameEntryAsync(
+            rename = await RenameEntryAsync(
                 dialog.Dn, newRdn, newParent, dialog.DeleteOldRdn, cancellationToken);
         }
         catch (DirectoryException ex)
@@ -1169,14 +1187,18 @@
         {
             await ReloadChildrenAsync(newParent, CancellationToken.None);
         }
-        await SelectAsync(rename.NewDn, reveal: true, CancellationToken.None);
+        if (selection == _selectSeq)
+        {
+            await SelectAsync(rename.NewDn, reveal: true, CancellationToken.None);
+        }
         return null;
     }
 
     private async Task<string?> ConfirmDeleteAsync(DeleteDialogModel dialog, CancellationToken cancellationToken)
     {
+        var selection = _selectSeq;
         var result = await GuardedAsync(() =>
-            Directory.DeleteEntryAsync(dialog.Dn, dialog.Subtree, cancellationToken));
+            DeleteEntryAsync(dialog.Dn, dialog.Subtree, cancellationToken));
 
         if (!result.Succeeded)
         {
@@ -1185,7 +1207,10 @@
                 var refreshParent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
                 await ReloadChildrenAsync(refreshParent, CancellationToken.None);
                 await ReloadChildrenAsync(dialog.Dn, CancellationToken.None);
-                await SelectAsync(dialog.Dn, reveal: false, CancellationToken.None);
+                if (selection == _selectSeq)
+                {
+                    await SelectAsync(dialog.Dn, reveal: false, CancellationToken.None);
+                }
             }
             return Describe(result);
         }
@@ -1195,7 +1220,10 @@
             : $"ldapdelete — {dialog.Dn} deleted");
         var parent = ParentOf(dialog.Dn) ?? Directory.BaseDn;
         await ReloadChildrenAsync(parent, CancellationToken.None);
-        await SelectAsync(parent, reveal: true, CancellationToken.None);
+        if (selection == _selectSeq)
+        {
+            await SelectAsync(parent, reveal: true, CancellationToken.None);
+        }
         return null;
     }
 
@@ -1217,7 +1245,7 @@
     }
 
     /// <summary>Re-fetches one node's children after a write changed them.</summary>
-    private async Task ReloadChildrenAsync(string parentDn, CancellationToken cancellationToken = default)
+    protected virtual async Task ReloadChildrenAsync(string parentDn, CancellationToken cancellationToken = default)
     {
         if (NormOrNull(parentDn) is not { } norm || FindNode(norm) is not { } node)
         {
