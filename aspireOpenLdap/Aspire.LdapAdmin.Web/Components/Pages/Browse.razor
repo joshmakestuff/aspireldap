@@ -52,6 +52,8 @@
                 @onclick="@(() => SwitchView(AdminView.Ldif))">LDIF</button>
         <button class="vt" role="tab" aria-selected="@Selected(AdminView.Schema)"
                 @onclick="@(() => SwitchView(AdminView.Schema))">Schema</button>
+        <button class="vt" role="tab" aria-selected="@Selected(AdminView.Server)"
+                @onclick="@(() => SwitchView(AdminView.Server))">Server</button>
     </div>
 
     <div class="work">
@@ -60,7 +62,7 @@
                 <div class="railrow">
                     <div class="railhead">Directory information tree</div>
                     <button class="btn btn-secondary btn-sm" @onclick="OpenChildDialog"
-                            disabled="@(_selectedDn is null)">New entry…</button>
+                            disabled="@(_selectedDn is null || _view == AdminView.Server)">New entry…</button>
                 </div>
                 <DebouncedInput class="input mono railfilter" placeholder="filter RDN…" spellcheck="false"
                                 aria-label="Filter tree rows by RDN" @bind-Value="_treeFilter" />
@@ -98,6 +100,10 @@
         <button class="split" role="separator" aria-orientation="vertical"
                 aria-label="Resize the directory tree" @ref="_splitter"></button>
         <div class="pane">
+            @if (_view == AdminView.Server)
+            {
+                <ServerContextsPanel @ref="_serverContexts" />
+            }
             <div style="@PanelDisplay(AdminView.Browse)">
                 @if (_error is not null)
                 {
@@ -145,6 +151,8 @@
                                 @onclick="@(() => _entryTab = EntryTab.Overview)">Overview</button>
                         <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Attributes)"
                                 @onclick="@(() => _entryTab = EntryTab.Attributes)">Attributes</button>
+                        <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Operational)"
+                                @onclick="@(() => _entryTab = EntryTab.Operational)">Operational</button>
                         @if (_memberships.Count > 0)
                         {
                             <button class="dt" role="tab" aria-selected="@TabSelected(EntryTab.Members)"
@@ -160,6 +168,10 @@
                         <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog"
                                    ManagedAttributes="_managedMembershipAttributes" />
                     </div>
+                    @if (_entryTab == EntryTab.Operational)
+                    {
+                        <OperationalAttributesPanel Entry="_entry" />
+                    }
                     @if (_memberships.Count > 0)
                     {
                         <div style="@TabDisplay(EntryTab.Members)">
@@ -253,6 +265,7 @@
     private bool _loadingEntry;
 
     private SearchPanel? _searchPanel;
+    private ServerContextsPanel? _serverContexts;
     private ElementReference _splitter;
     private IJSObjectReference? _js;
 
@@ -287,11 +300,11 @@
     [SupplyParameterFromQuery(Name = "dn")]
     public string? DeepLinkDn { get; set; }
 
-    /// <summary>Which view the contextual pane shows ("search"/"schema"; anything else = browse).</summary>
+    /// <summary>Which view the contextual pane shows; unrecognized values select browse.</summary>
     [SupplyParameterFromQuery(Name = "view")]
     public string? ViewParam { get; set; }
 
-    internal enum AdminView { Browse, Search, Ldif, Schema }
+    internal enum AdminView { Browse, Search, Ldif, Schema, Server }
 
     private AdminView _view = AdminView.Browse;
 
@@ -310,6 +323,7 @@
         AdminView.Search => "Search",
         AdminView.Ldif => "LDIF",
         AdminView.Schema => "Schema",
+        AdminView.Server => "Server contexts",
         _ => "Directory",
     };
 
@@ -324,6 +338,7 @@
     {
         Overview,
         Attributes,
+        Operational,
         Members,
         Ldif,
     }
@@ -443,12 +458,13 @@
             "search" => AdminView.Search,
             "ldif" => AdminView.Ldif,
             "schema" => AdminView.Schema,
+            "server" => AdminView.Server,
             _ => AdminView.Browse,
         };
         _schemaVisited |= _view == AdminView.Schema;
         _ldifVisited |= _view == AdminView.Ldif;
 
-        if (DeepLinkDn is { Length: > 0 } dn && !string.Equals(dn, _selectedDn, StringComparison.Ordinal))
+        if (_view != AdminView.Server && DeepLinkDn is { Length: > 0 } dn && !string.Equals(dn, _selectedDn, StringComparison.Ordinal))
         {
             await SelectAsync(dn, reveal: true);
         }
@@ -674,7 +690,7 @@
     private static string Url(AdminView view, string? dn)
     {
         var query = new List<string>(2);
-        if (view is AdminView.Search or AdminView.Ldif or AdminView.Schema)
+        if (view is AdminView.Search or AdminView.Ldif or AdminView.Schema or AdminView.Server)
         {
             query.Add($"view={view.ToString().ToLowerInvariant()}");
         }
@@ -833,9 +849,17 @@
 
     // ---- Top bar ------------------------------------------------------------------------
 
-    /// <summary>Reloads the tree from the root and re-fetches the selected entry.</summary>
+    /// <summary>Reloads the active server context, or the directory tree and selected entry.</summary>
     private async Task RefreshAsync()
     {
+        if (_view == AdminView.Server)
+        {
+            if (_serverContexts is not null)
+            {
+                await _serverContexts.RefreshAsync();
+            }
+            return;
+        }
         _root = null;
         _error = null;
         StateHasChanged();
