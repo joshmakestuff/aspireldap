@@ -14,6 +14,34 @@ namespace Aspire.LdapAdmin.Tests;
 public class DirectoryBrowseTests(LdapAdminAppHostFixture fixture)
 {
     [Fact]
+    public async Task Operational_projection_is_separate_from_the_editable_entry()
+    {
+        using var cts = TestCancellation.Source();
+        var dn = fixture.DnUnder("uid=alice", "ou=people");
+        var ordinary = await fixture.Directory.GetEntryAsync(dn, cancellationToken: cts.Token);
+        var operational = await fixture.Directory.GetEntryAsync(dn, ["+"], cts.Token);
+        Assert.NotNull(ordinary);
+        Assert.NotNull(operational);
+        Assert.DoesNotContain(ordinary.Attributes, attribute => string.Equals(attribute.Name, "entryUUID", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(operational.Attributes, attribute => string.Equals(attribute.Name, "entryUUID", StringComparison.OrdinalIgnoreCase) && attribute.Values.Count == 1);
+        Assert.DoesNotContain(operational.Attributes, attribute => string.Equals(attribute.Name, "userPassword", StringComparison.OrdinalIgnoreCase));
+        var schema = await fixture.Schema.GetSchemaAsync(cts.Token);
+        Assert.True(schema.Schema.FindAttributeType("entryUUID")!.NoUserModification);
+    }
+
+    [Fact]
+    public async Task Context_discovery_does_not_imply_configuration_read_access()
+    {
+        using var cts = TestCancellation.Source();
+        var contexts = await fixture.Contexts.DiscoverAsync(cts.Token);
+        Assert.Contains(contexts, context => DnEquality.AreEquivalent(context.Dn, fixture.BaseDn));
+        Assert.Contains(contexts, context => DnEquality.AreEquivalent(context.Dn, "cn=config"));
+        Assert.Contains(contexts, context => DnEquality.AreEquivalent(context.Dn, "cn=Monitor"));
+        Assert.Null(await fixture.Directory.GetEntryAsync("cn=config", ["*", "+"], cts.Token));
+        Assert.NotNull(await fixture.Directory.GetEntryAsync("cn=Monitor", ["*", "+"], cts.Token));
+    }
+
+    [Fact]
     public async Task Children_of_the_base_dn_are_the_seeded_organizational_units()
     {
         using var cts = TestCancellation.Source();

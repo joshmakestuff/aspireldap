@@ -63,6 +63,8 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
     /// <summary>The schema service under test, sharing the directory service's schema cache.</summary>
     public LdapSchemaService Schema { get; private set; } = null!;
 
+    public LdapServerContextService Contexts { get; private set; } = null!;
+
     /// <summary>The enabled admin web host, using the same directory container as the services.</summary>
     public HttpClient Api { get; private set; } = null!;
 
@@ -134,6 +136,7 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
             _host = BuildServiceHost(ConnectionString);
             Directory = _host.Services.GetRequiredService<LdapDirectoryService>();
             Schema = _host.Services.GetRequiredService<LdapSchemaService>();
+            Contexts = _host.Services.GetRequiredService<LdapServerContextService>();
             var admin = app.Services.GetRequiredService<DistributedApplicationModel>()
                 .Resources.OfType<ProjectResource>().Single(resource => resource.Name == AdminResourceName);
             Api = new HttpClient { BaseAddress = new Uri(new EndpointReference(admin, "http").Url) };

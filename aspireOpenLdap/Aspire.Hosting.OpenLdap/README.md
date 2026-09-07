@@ -47,6 +47,16 @@ builder.Build().Run();
 
 Relative file/directory paths passed to `WithSchema(s)`, `WithSeedData`, and `WithTls` resolve against the AppHost project directory — the same base Aspire uses for bind mounts — so they work identically whether the AppHost is launched from an IDE, its own directory, or the repository root.
 
+### LdapAdmin server visibility
+
+The entry's **Operational** tab shows server-provided operational attributes read-only,
+separately from the editable attributes and LDIF draft. The **Server** tab discovers naming,
+configuration, and monitor contexts advertised by the root DSE and provides read-only browsing
+with the existing data-admin identity. Discovery does not grant access: the bundled default
+allows monitor reads but hides `cn=config`. An enabled access log is normally advertised as
+`cn=accesslog`; an explicitly configured suffix is discovered as advertised. No additional
+credentials or ACL grants are installed by these views.
+
 ### LdapAdmin REST API
 
 The UI's REST surface is disabled by default. Enable it only for local development automation:

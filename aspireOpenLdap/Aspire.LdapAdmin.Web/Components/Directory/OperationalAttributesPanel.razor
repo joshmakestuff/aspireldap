@@ -1,0 +1,83 @@
+@inject LdapDirectoryService Directory
+@implements IDisposable
+
+<p class="text-muted note" style="margin-top: var(--space-4);">
+    Operational attributes returned by the server. This view is read-only; these values are
+    separate from the editable entry and LDIF draft.
+</p>
+@if (_loading)
+{
+    <p class="text-muted note">Loading operational attributes…</p>
+}
+else if (_error is not null)
+{
+    <div class="bar err" role="alert">@_error</div>
+}
+else if (_entry is { Attributes.Count: > 0 } entry)
+{
+    <EntryView Entry="entry" />
+}
+else
+{
+    <p class="text-muted note">No operational attributes are readable for this entry.</p>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public required LdapEntry Entry { get; set; }
+
+    private LdapEntry? _source;
+    private LdapEntry? _entry;
+    private string? _error;
+    private bool _loading;
+    private int _sequence;
+    private readonly CancellationTokenSource _lifetime = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReferenceEquals(_source, Entry))
+        {
+            return;
+        }
+        _source = Entry;
+        var sequence = ++_sequence;
+        _loading = true;
+        _entry = null;
+        _error = null;
+        try
+        {
+            var entry = await ReadAsync(Entry.Dn, _lifetime.Token);
+            if (sequence == _sequence)
+            {
+                _entry = entry;
+            }
+        }
+        catch (System.DirectoryServices.Protocols.DirectoryException)
+        {
+            if (sequence == _sequence)
+            {
+                _error = "Operational attributes could not be read with the configured connection.";
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            if (sequence == _sequence)
+            {
+                _loading = false;
+            }
+        }
+    }
+
+    protected virtual Task<LdapEntry?> ReadAsync(string dn, CancellationToken cancellationToken) =>
+        Directory.GetEntryAsync(dn, ["+"], cancellationToken);
+
+    public void Dispose()
+    {
+        ++_sequence;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

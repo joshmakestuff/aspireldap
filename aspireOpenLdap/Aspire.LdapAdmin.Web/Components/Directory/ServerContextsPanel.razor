@@ -1,0 +1,172 @@
+@inject LdapServerContextService Contexts
+@inject LdapDirectoryService Directory
+@inject LdapAdminSettings Settings
+@implements IDisposable
+
+<h3>Server contexts</h3>
+<p class="text-muted note">Read-only inspection using the configured connection. Advertised contexts may be hidden by the server's access rules.</p>
+@if (_contexts is not null)
+{
+    <div style="display: flex; flex-wrap: wrap; gap: var(--space-2);">
+        @foreach (var context in _contexts)
+        {
+            <button class="btn btn-secondary btn-sm mono" disabled="@_loading"
+                    @onclick="@(() => OpenRootAsync(context))">@context.Dn <span class="text-muted">(@context.Kind)</span></button>
+        }
+    </div>
+    @if (_contexts.Count == 0)
+    {
+        <p class="text-muted note">No naming contexts are advertised to this connection.</p>
+    }
+}
+@if (_path.Count > 0)
+{
+    <nav aria-label="Context path" style="display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4);">
+        @for (var i = 0; i < _path.Count; i++)
+        {
+            var index = i;
+            <button class="btn btn-ghost btn-sm mono" disabled="@_loading" @onclick="@(() => OpenAncestorAsync(index))">@_path[index]</button>
+        }
+    </nav>
+}
+@if (_loading)
+{
+    <p class="text-muted note">Loading…</p>
+}
+else if (_error is not null)
+{
+    <div class="bar err" role="alert" style="margin-top: var(--space-4);">@_error</div>
+}
+else if (_entry is not null)
+{
+    <div class="sec" style="margin-top: var(--space-4);">Attributes — read-only</div>
+    <EntryView Entry="_entry" />
+    <div class="sec" style="margin-top: var(--space-4);">Children</div>
+    @if (_children is { } children)
+    {
+        @foreach (var child in children.Children)
+        {
+            <button class="btn btn-ghost btn-sm mono" @onclick="@(() => OpenChildAsync(child.Dn))">@child.Rdn</button>
+        }
+        @if (children.Truncated)
+        {
+            <p class="text-muted note">Showing the first @children.Children.Count readable children; this list is truncated.</p>
+        }
+        else if (children.Children.Count == 0)
+        {
+            <p class="text-muted note">No readable children.</p>
+        }
+    }
+}
+
+@code {
+    private IReadOnlyList<LdapServerContext>? _contexts;
+    private readonly List<string> _path = [];
+    private LdapEntry? _entry;
+    private LdapChildrenResult? _children;
+    private bool _loading;
+    private string? _error;
+    private readonly CancellationTokenSource _lifetime = new();
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    public async Task RefreshAsync()
+    {
+        if (_loading)
+        {
+            return;
+        }
+        _loading = true;
+        _error = null;
+        _entry = null;
+        _children = null;
+        StateHasChanged();
+        try
+        {
+            _contexts = await Contexts.DiscoverAsync(_lifetime.Token);
+        }
+        catch (Exception ex) when (ex is System.DirectoryServices.Protocols.DirectoryException or ArgumentException)
+        {
+            _error = "Server contexts could not be discovered with the configured connection.";
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _loading = false;
+        }
+        if (_error is null && !_lifetime.IsCancellationRequested && _path.Count > 0)
+        {
+            await ReadAsync(_path[^1]);
+        }
+        StateHasChanged();
+    }
+
+    private Task OpenRootAsync(LdapServerContext context)
+    {
+        if (_loading)
+        {
+            return Task.CompletedTask;
+        }
+        _path.Clear();
+        _path.Add(context.Dn);
+        return ReadAsync(context.Dn);
+    }
+
+    private Task OpenAncestorAsync(int index)
+    {
+        if (_loading)
+        {
+            return Task.CompletedTask;
+        }
+        _path.RemoveRange(index + 1, _path.Count - index - 1);
+        return ReadAsync(_path[index]);
+    }
+
+    private Task OpenChildAsync(string dn)
+    {
+        if (_loading)
+        {
+            return Task.CompletedTask;
+        }
+        _path.Add(dn);
+        return ReadAsync(dn);
+    }
+
+    private async Task ReadAsync(string dn)
+    {
+        _loading = true;
+        _entry = null;
+        _children = null;
+        _error = null;
+        var cancellationToken = _lifetime.Token;
+        try
+        {
+            _entry = await Directory.GetEntryAsync(dn, ["*", "+"], cancellationToken);
+            if (_entry is null)
+            {
+                _error = "This context or entry is unavailable or not readable with the configured connection.";
+                return;
+            }
+            _children = await Directory.GetChildrenAsync(dn, Settings.DefaultSearchLimit, cancellationToken);
+        }
+        catch (System.DirectoryServices.Protocols.DirectoryException)
+        {
+            _error = "This context or entry could not be read with the configured connection.";
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}
