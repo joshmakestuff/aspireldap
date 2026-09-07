@@ -15,6 +15,9 @@ public sealed class BrowseDialogRaceTests : TestContext
 {
     private const string A = "cn=a,dc=example,dc=org";
     private const string B = "cn=b,dc=example,dc=org";
+    private const string Parent = "dc=example,dc=org";
+    private const string Created = "cn=new,dc=example,dc=org";
+    private const string Moved = "cn=renamed,ou=destination,dc=example,dc=org";
     private static readonly GroupMembershipAttribute Membership =
         new("member", GroupMemberValueKind.DistinguishedName, Required: true);
 
@@ -143,6 +146,75 @@ public sealed class BrowseDialogRaceTests : TestContext
     private static LdapEntry Entry(string dn, string objectClass) => new(dn,
         [new LdapAttributeValues("objectClass", false, [objectClass], LdapValueClassification.Schema)]);
 
+    public static TheoryData<string, bool, bool> TreeWriteRaces
+    {
+        get
+        {
+            TheoryData<string, bool, bool> cases = new();
+            foreach (var path in new[] { "create", "rename", "delete", "cancel-subtree" })
+            {
+                foreach (var returnToA in new[] { false, true })
+                {
+                    cases.Add(path, returnToA, false);
+                    cases.Add(path, returnToA, true);
+                }
+            }
+            return cases;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(TreeWriteRaces))]
+    public async Task Tree_write_refreshes_affected_nodes_without_overwriting_newer_selection(
+        string path, bool returnToA, bool delayRefresh)
+    {
+        var cut = RenderBrowse();
+        var page = cut.Instance;
+        await cut.InvokeAsync(() => page.SelectAsync(A));
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        page.TreeWriteGate = delayRefresh ? Task.CompletedTask : pending.Task;
+        page.RefreshGate = delayRefresh ? pending.Task : Task.CompletedTask;
+        Task<string?> save = null!;
+        using var cancellation = new CancellationTokenSource();
+        await cut.InvokeAsync(() => { save = page.SaveTreeAsync(path, cancellation.Token); });
+        Assert.False(save.IsCompleted);
+        Assert.Equal(path == "create" ? Created : A, Assert.Single(page.TreeWrites).Dn);
+        Assert.Equal(cancellation.Token, page.TreeWrites[0].Token);
+        await cut.InvokeAsync(() => page.SelectAsync(B));
+        if (returnToA)
+        {
+            await cut.InvokeAsync(() => page.SelectAsync(A));
+        }
+        await cut.InvokeAsync(() => pending.SetResult());
+        var error = await save;
+        Assert.Equal(path == "cancel-subtree", error is not null);
+        Assert.Equal(returnToA ? A : B, page.SelectedDn);
+        Assert.Equal(returnToA ? [A, B, A] : [A, B], page.Reads);
+        Assert.Equal(ExpectedRefreshes(path), page.Refreshes);
+    }
+
+    [Theory]
+    [InlineData("create", Created)]
+    [InlineData("rename", Moved)]
+    [InlineData("delete", Parent)]
+    [InlineData("cancel-subtree", A)]
+    public async Task Tree_write_without_newer_navigation_selects_its_result(string path, string selected)
+    {
+        var cut = RenderBrowse();
+        await cut.InvokeAsync(() => cut.Instance.SelectAsync(A));
+        await cut.InvokeAsync(() => cut.Instance.SaveTreeAsync(path, CancellationToken.None));
+        Assert.Equal(selected, cut.Instance.SelectedDn);
+        Assert.Equal([A, selected], cut.Instance.Reads);
+        Assert.Equal(ExpectedRefreshes(path), cut.Instance.Refreshes);
+    }
+
+    private static string[] ExpectedRefreshes(string path) => path switch
+    {
+        "rename" => [Parent, "ou=destination," + Parent],
+        "cancel-subtree" => [Parent, A],
+        _ => [Parent],
+    };
+
     // Keep the real save/open/selection handlers and Blazor dispatcher. Only LDAP I/O,
     // startup queries and unrelated markup are replaced; no server or runtime patching.
     public sealed class BrowseHarness : Browse
@@ -152,17 +224,81 @@ public sealed class BrowseDialogRaceTests : TestContext
         {
             [A] = Entry(A, "ordinaryEntry"),
             [B] = Entry(B, "ordinaryEntry"),
+            [Parent] = Entry(Parent, "ordinaryEntry"),
+            [Created] = Entry(Created, "ordinaryEntry"),
+            [Moved] = Entry(Moved, "ordinaryEntry"),
         };
         public IList<string> Reads { get; } = new List<string>();
         public IList<(string Dn, IReadOnlyList<LdapAttributeChange> Changes, CancellationToken Token)> Writes { get; } =
             new List<(string Dn, IReadOnlyList<LdapAttributeChange> Changes, CancellationToken Token)>();
         public Task<LdapOperationResult> WriteResult { get; set; } = Task.FromResult(LdapOperationResult.Ok());
+        public Task TreeWriteGate { get; set; } = Task.CompletedTask;
+        public Task RefreshGate { get; set; } = Task.CompletedTask;
+        public IList<string> Refreshes { get; } = new List<string>();
+        public IList<(string Dn, CancellationToken Token)> TreeWrites { get; } = new List<(string, CancellationToken)>();
+        private bool _cancelSubtree;
         public string? SelectedDn => (string?)typeof(Browse).GetField("_selectedDn", PrivateInstance)!.GetValue(this);
 
         public void Set(string name, object value) => typeof(Browse).GetField(name, PrivateInstance)!.SetValue(this, value);
         public object? Call(string name, params object[] arguments) =>
             typeof(Browse).GetMethod(name, PrivateInstance)!.Invoke(this, arguments);
         public Task SelectAsync(string dn) => (Task)Call("SelectAsync", dn, false, CancellationToken.None)!;
+
+        public Task<string?> SaveTreeAsync(string path, CancellationToken token)
+        {
+            _cancelSubtree = path == "cancel-subtree";
+            return path switch
+            {
+                "create" => (Task<string?>)Call("SaveNewEntryAsync", new LdapNewEntry(Created, []), token)!,
+                "rename" => (Task<string?>)Call("SaveRenameAsync", new RenameDialogModel
+                {
+                    Dn = A,
+                    CurrentParentDn = Parent,
+                    Entry = Entries[A],
+                    RdnAttribute = "cn",
+                    RdnValue = "renamed",
+                    NewParentDn = "ou=destination," + Parent,
+                    SaveAsync = (_, _) => throw new NotSupportedException(),
+                }, token)!,
+                _ => (Task<string?>)Call("ConfirmDeleteAsync", new DeleteDialogModel
+                {
+                    Dn = A,
+                    Subtree = _cancelSubtree,
+                    SaveAsync = (_, _) => throw new NotSupportedException(),
+                }, token)!,
+            };
+        }
+
+        protected override async Task<LdapOperationResult> AddEntryAsync(LdapNewEntry entry, CancellationToken token)
+        {
+            TreeWrites.Add((entry.Dn, token));
+            await TreeWriteGate;
+            return LdapOperationResult.Ok();
+        }
+
+        protected override async Task<LdapRenameResult> RenameEntryAsync(
+            string dn, string newRdn, string? newParent, bool deleteOldRdn, CancellationToken token)
+        {
+            TreeWrites.Add((dn, token));
+            Assert.Equal("cn=renamed", newRdn);
+            Assert.Equal("ou=destination," + Parent, newParent);
+            await TreeWriteGate;
+            return new LdapRenameResult(LdapOperationResult.Ok(), Moved);
+        }
+
+        protected override async Task<LdapOperationResult> DeleteEntryAsync(string dn, bool subtree, CancellationToken token)
+        {
+            TreeWrites.Add((dn, token));
+            Assert.Equal(_cancelSubtree, subtree);
+            await TreeWriteGate;
+            return _cancelSubtree ? LdapOperationResult.Cancelled("stopped") : LdapOperationResult.Ok();
+        }
+
+        protected override async Task ReloadChildrenAsync(string parentDn, CancellationToken token = default)
+        {
+            Refreshes.Add(parentDn);
+            await RefreshGate;
+        }
 
         public Func<CancellationToken, Task<string?>> OpenDialog(bool member, string attribute = "description")
         {
