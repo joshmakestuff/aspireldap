@@ -6,9 +6,7 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// Writing the directory: the round trip, and every refusal a person editing entries actually
-/// meets. Each refusal is asserted as an outcome the service returns, not as an exception —
-/// "that already exists" is an answer to render, not a crash.
+/// Tests CRUD round trips and common LDAP refusals returned as operation outcomes.
 /// </summary>
 [Collection(LdapAdminAppHostCollection.Name)]
 [Trait("Category", "Integration")]
@@ -198,7 +196,7 @@ public class EntryWriteTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_dn_that_is_not_a_valid_dn_is_rejected_without_a_round_trip()
+    public async Task A_dn_that_is_not_a_valid_dn_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 
@@ -210,7 +208,7 @@ public class EntryWriteTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_value_that_is_not_valid_base64_is_rejected_without_a_round_trip()
+    public async Task A_value_that_is_not_valid_base64_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
         var dn = fixture.DnUnder(Dn.Rdn("uid", "bad-base64"), "ou=people");
@@ -229,7 +227,7 @@ public class EntryWriteTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task An_attribute_name_that_is_not_a_valid_attribute_description_is_rejected_without_a_round_trip()
+    public async Task An_attribute_name_that_is_not_a_valid_attribute_description_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
         var dn = fixture.DnUnder(Dn.Rdn("uid", "bad-attr-name"), "ou=people");
@@ -242,7 +240,7 @@ public class EntryWriteTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task An_entry_with_no_attributes_is_rejected_without_a_round_trip()
+    public async Task An_entry_with_no_attributes_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 

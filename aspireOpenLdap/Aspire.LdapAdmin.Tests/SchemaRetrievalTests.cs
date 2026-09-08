@@ -79,7 +79,7 @@ public class SchemaRetrievalTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_schema_that_was_read_once_is_not_read_again()
+    public async Task Repeated_schema_reads_return_the_cached_result_instance()
     {
         using var cts = TestCancellation.Source();
 

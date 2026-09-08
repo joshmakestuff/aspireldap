@@ -225,8 +225,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
             return LdapOperationResult.Invalid("A modify must carry at least one change.");
         }
 
-        // The password guard, at its second door: a userPassword modification on the
-        // bind identity is the same silent self-brick the RFC 3062 path refuses.
+        // Apply the bind-password policy to attribute modifications as well as RFC 3062.
         if (changes.Any(static c => IsPasswordAttribute(c.Name))
             && DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
         {
@@ -272,10 +271,8 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
     /// Deletes an entry. A plain delete requires a leaf — the server refuses non-leaves.
     /// With <paramref name="subtree"/>, deletes the entry's whole subtree depth-first,
     /// children before parents: the bundled OpenLDAP does not advertise the Tree Delete
-    /// control (1.2.840.113556.1.4.805), so the recursion is client-side, as <c>ldapdelete -r</c> does. A
-    /// server sizelimit does not stop the walk: a size-limited listing's partial batch is
-    /// deleted and the walk re-lists until the container empties. The walk stops at
-    /// the first refusal and the result names the DN that failed — a partial delete is
+    /// control (1.2.840.113556.1.4.805), so the recursion is client-side, as <c>ldapdelete -r</c> does. The walk stops at
+    /// an incomplete listing or the first refusal and the result names the DN that failed — a partial delete is
     /// never silent.
     /// </summary>
     public Task<LdapOperationResult> DeleteEntryAsync(string dn, CancellationToken cancellationToken = default) =>
@@ -292,7 +289,7 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
             return dnError;
         }
 
-        // Deleting the bind identity severs every connection the console makes from then on;
+        // Deleting the bind identity can invalidate the AppHost-provided credentials;
         // refused without a round trip. The subtree walk gets the ancestor check too,
         // because its children are deleted through raw DeleteRequests that never re-enter
         // this method — without it the walk would sweep the identity away mid-recursion. A
@@ -336,34 +333,24 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
     {
         var deletedCount = 0;
 
-        // Children first. Re-list after each sweep — the final DeleteRequest below is the
-        // authoritative "now empty" check either way.
-        while (true)
+        if (cancellationToken.IsCancellationRequested)
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                return LdapOperationResult.Cancelled($"stopped before listing children of '{dn}'", deletedCount);
-            }
+            return LdapOperationResult.Cancelled($"stopped before listing children of '{dn}'");
+        }
 
-            var (children, listingFailure) = await ListChildrenForDeleteAsync(client, dn, cancellationToken)
-                .ConfigureAwait(false);
-            if (listingFailure is not null)
+        var (children, listingFailure) = await ListChildrenForDeleteAsync(client, dn, cancellationToken)
+            .ConfigureAwait(false);
+        if (listingFailure is not null)
+        {
+            return listingFailure;
+        }
+        foreach (var child in children!)
+        {
+            var result = await DeleteSubtreeAsync(client, child, cancellationToken, deleteAcknowledged).ConfigureAwait(false);
+            deletedCount += result.DeletedCount;
+            if (!result.Succeeded)
             {
-                return listingFailure with { DeletedCount = deletedCount };
-            }
-
-            if (children!.Count == 0)
-            {
-                break;
-            }
-            foreach (var child in children)
-            {
-                var result = await DeleteSubtreeAsync(client, child, cancellationToken, deleteAcknowledged).ConfigureAwait(false);
-                deletedCount += result.DeletedCount;
-                if (!result.Succeeded)
-                {
-                    return result with { DeletedCount = deletedCount };
-                }
+                return result with { DeletedCount = deletedCount };
             }
         }
 
@@ -397,13 +384,6 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return (null, LdapOperationResult.Cancelled($"stopped before listing children of '{dn}'"));
-            }
-            catch (DirectoryOperationException ex) when (
-                ex.Response is SearchResponse partial && partial.ResultCode == ResultCode.SizeLimitExceeded)
-            {
-                // Delete the partial batch; the outer sweep re-lists and converges.
-                children.AddRange(partial.Entries.Cast<SearchResultEntry>().Select(static entry => entry.DistinguishedName));
-                break;
             }
             catch (DirectoryOperationException ex) when (ex.Response is not null)
             {
@@ -505,9 +485,9 @@ public sealed class LdapDirectoryService(OpenLdapClientFactory factory, LdapSche
             return dnError;
         }
 
-        // A password change aimed at the console's own bind identity is refused here, without
-        // a round trip: it would sever every connection the console makes from then on, and
-        // silently desync the AppHost's declared credentials from the directory.
+        // Keep the AppHost-provided credentials under AppHost control. Changing an entry's
+        // password can invalidate those credentials; the rootdn's config-level password is
+        // distinct, but the same policy applies to either kind of bind identity.
         if (DnEquality.AreEquivalent(dn, factory.ConnectionString.BindDn))
         {
             return LdapOperationResult.Invalid(

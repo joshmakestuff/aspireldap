@@ -29,9 +29,9 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
+        <button class="btn btn-secondary" disabled="@(Busy && !Model.Subtree)" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
         <button class="btn btn-primary" disabled="@Busy"
-                @onclick="@(() => SaveAsync(token => Model.SaveAsync(Model, token)))">@(Busy ? "Deleting…" : "Delete")</button>
+                @onclick="@(() => SaveAsync(token => Model.SaveAsync(Model, token), allowCancellation: Model.Subtree))">@(Busy ? "Deleting…" : "Delete")</button>
     </Actions>
 </ConsoleDialog>
 

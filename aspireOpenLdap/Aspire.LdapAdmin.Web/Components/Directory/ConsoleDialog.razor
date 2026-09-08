@@ -45,8 +45,8 @@
     public EventCallback OnCancel { get; set; }
 
     /// <summary>
-    /// True while the owner's operation is in flight. Native close attempts are relayed to
-    /// the owner and the dialog remains mounted until the operation acknowledges cancellation.
+    /// True while the owner's operation is in flight. The owner ignores close attempts for
+    /// single writes and may request stopping between requests for batch operations.
     /// </summary>
     [Parameter]
     public bool Busy { get; set; }

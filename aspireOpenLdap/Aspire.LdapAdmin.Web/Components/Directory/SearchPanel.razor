@@ -520,11 +520,10 @@ else
             .SelectMany(static attribute => attribute.Values));
 
         return FilterBulkCandidates(
-            _schema, selected, SchemaGuide.SharedEditableCandidates(_schema, classesByEntry));
+            selected, SchemaGuide.SharedEditableCandidates(_schema, classesByEntry));
     }
 
     internal static IReadOnlyList<AttributeGuidance> FilterBulkCandidates(
-        LdapSchema schema,
         IEnumerable<LdapEntry> entries,
         IEnumerable<AttributeGuidance> candidates)
     {
@@ -534,13 +533,7 @@ else
                 .Where(static attribute => attribute.IsBinary)
                 .Select(static attribute => attribute.Name),
             StringComparer.OrdinalIgnoreCase);
-        var membershipAttributes = new HashSet<string>(
-            selected.SelectMany(entry => GroupMembership.Detect(schema, entry))
-                .Select(static membership => membership.Name),
-            StringComparer.OrdinalIgnoreCase);
-
-        return [.. candidates.Where(candidate =>
-            !binaryAttributes.Contains(candidate.Name) && !membershipAttributes.Contains(candidate.Name))];
+        return [.. candidates.Where(candidate => !binaryAttributes.Contains(candidate.Name))];
     }
 
     /// <summary>Leaves only work that an incomplete bulk run did not already acknowledge.</summary>

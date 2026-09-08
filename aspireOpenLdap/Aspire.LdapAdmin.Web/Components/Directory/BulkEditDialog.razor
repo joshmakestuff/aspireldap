@@ -286,7 +286,7 @@
         return _run.Cancelled
             ? $"Cancelled: {_run.CompletedCount} completed, {_run.FailedCount} failed, {_run.PendingCount} pending."
             : $"Bulk edit incomplete: {_run.CompletedCount} completed, {_run.FailedCount} failed, {_run.PendingCount} pending.";
-    });
+    }, allowCancellation: true);
 
     private static ImmutableArray<string> Lines(string value) =>
         value.Length == 0 ? [] : [.. value.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')];

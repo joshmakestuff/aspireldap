@@ -66,7 +66,7 @@ public class EntryRenameTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_new_rdn_that_is_more_than_one_rdn_is_rejected_without_a_round_trip()
+    public async Task A_new_rdn_that_is_more_than_one_rdn_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 
@@ -78,7 +78,7 @@ public class EntryRenameTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_new_rdn_that_is_not_a_valid_rdn_is_rejected_without_a_round_trip()
+    public async Task A_new_rdn_that_is_not_a_valid_rdn_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 

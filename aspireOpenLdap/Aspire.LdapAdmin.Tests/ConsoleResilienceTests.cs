@@ -9,16 +9,15 @@ using MainLayout = Aspire.LdapAdmin.Web.Components.Layout.MainLayout;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// No clipboard failure — missing API, rejection, dead circuit — may
-/// ever escape into a Blazor event handler. The guarantee lives in ConsoleClipboard, the
-/// single copy path both Browse and the search panel use.
+/// Exercises clipboard interop success and rejection through ConsoleClipboard.
+/// The JavaScript and browser clipboard API are mocked here.
 /// </summary>
 public sealed class ConsoleClipboardTests : TestContext
 {
     [Fact]
     public async Task CopyAsync_Returns_False_Instead_Of_Throwing_When_The_Interop_Rejects()
     {
-        // The deterministic non-secure-origin shape: the dotted lookup / write rejects.
+        // Simulate a rejected interop call; this does not execute the browser clipboard API.
         var module = JSInterop.SetupModule("./js/console.js");
         module.Setup<bool>("copyText", "uid=alice,dc=example,dc=org")
             .SetException(new JSException("Could not find 'clipboard' in 'navigator'."));
@@ -41,8 +40,8 @@ public sealed class ConsoleClipboardTests : TestContext
 }
 
 /// <summary>
-/// The layout's ErrorBoundary: an exception escaping any handler inside the shell
-/// degrades to an inline error with a way back, never a dead circuit.
+/// Checks ErrorBoundary rendering and recovery for a throwing child event handler in bUnit.
+/// This does not exercise a live Blazor circuit or connection loss.
 /// </summary>
 public sealed class MainLayoutErrorBoundaryTests : TestContext
 {

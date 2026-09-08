@@ -27,8 +27,9 @@ public sealed class LdapServerContextService(OpenLdapClientFactory factory)
                 foreach (string value in values.GetValues(typeof(string)))
                 {
                     // Use the DN parser to reject an unusable server advertisement before
-                    // presenting it as a navigable root. Do not invent unadvertised roots.
-                    if (Dn.Parse(value).Count > 0 && !contexts.Any(context => DnEquality.AreEquivalent(context.Dn, value)))
+                    // presenting it as a navigable root. One rejected value must not hide the
+                    // others. Do not invent unadvertised roots.
+                    if (IsNavigableDn(value) && !contexts.Any(context => DnEquality.AreEquivalent(context.Dn, value)))
                     {
                         contexts.Add(new LdapServerContext(value, kind));
                     }
@@ -36,5 +37,17 @@ public sealed class LdapServerContextService(OpenLdapClientFactory factory)
             }
         }
         return contexts;
+    }
+
+    private static bool IsNavigableDn(string value)
+    {
+        try
+        {
+            return Dn.Parse(value).Count > 0;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 }

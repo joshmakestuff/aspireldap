@@ -86,7 +86,7 @@ public class EntryReadTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_dn_that_is_not_a_valid_dn_is_rejected_before_the_server_sees_it()
+    public async Task A_dn_that_is_not_a_valid_dn_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 

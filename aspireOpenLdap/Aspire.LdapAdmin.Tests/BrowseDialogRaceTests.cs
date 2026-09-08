@@ -61,11 +61,8 @@ public sealed class BrowseDialogRaceTests : TestContext
     [InlineData("entry", false)]
     [InlineData("entry", true)]
     [InlineData("attribute", false)]
-    [InlineData("attribute", true)]
     [InlineData("add", false)]
-    [InlineData("add", true)]
     [InlineData("remove", false)]
-    [InlineData("remove", true)]
     public async Task Pending_modify_does_not_refresh_over_a_newer_selection(string path, bool returnToA)
     {
         var cut = RenderBrowse();
@@ -115,56 +112,17 @@ public sealed class BrowseDialogRaceTests : TestContext
         Assert.Equal([A, A], page.Reads);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Attribute_membership_guard_uses_dialog_entry_not_current_selection(bool targetIsGroup)
-    {
-        var cut = RenderBrowse();
-        var page = cut.Instance;
-        page.Set("_dialogSchema", GroupMembershipSchemaTests.TestSchema);
-        page.Entries[B] = Entry(B, targetIsGroup ? "teamByDn" : "ordinaryEntry");
-        page.Entries[A] = Entry(A, targetIsGroup ? "ordinaryEntry" : "teamByDn");
-        await cut.InvokeAsync(() => page.SelectAsync(B));
-        var save = page.OpenDialog(member: false, attribute: "member");
-        await cut.InvokeAsync(() => page.SelectAsync(A));
-
-        var error = await cut.InvokeAsync(() => save(CancellationToken.None));
-
-        if (targetIsGroup)
-        {
-            Assert.Contains("managed in the Members tab", error, StringComparison.Ordinal);
-            Assert.Empty(page.Writes);
-        }
-        else
-        {
-            Assert.Null(error);
-            Assert.Equal(B, Assert.Single(page.Writes).Dn);
-        }
-    }
-
     private static LdapEntry Entry(string dn, string objectClass) => new(dn,
         [new LdapAttributeValues("objectClass", false, [objectClass], LdapValueClassification.Schema)]);
 
-    public static TheoryData<string, bool, bool> TreeWriteRaces
-    {
-        get
-        {
-            TheoryData<string, bool, bool> cases = new();
-            foreach (var path in new[] { "create", "rename", "delete", "cancel-subtree" })
-            {
-                foreach (var returnToA in new[] { false, true })
-                {
-                    cases.Add(path, returnToA, false);
-                    cases.Add(path, returnToA, true);
-                }
-            }
-            return cases;
-        }
-    }
-
     [Theory]
-    [MemberData(nameof(TreeWriteRaces))]
+    [InlineData("create", false, false)]
+    [InlineData("rename", false, false)]
+    [InlineData("delete", false, false)]
+    [InlineData("cancel-subtree", false, false)]
+    // Exercise returning to the same DN and navigation during refresh once each.
+    [InlineData("create", true, false)]
+    [InlineData("rename", false, true)]
     public async Task Tree_write_refreshes_affected_nodes_without_overwriting_newer_selection(
         string path, bool returnToA, bool delayRefresh)
     {
@@ -239,7 +197,6 @@ public sealed class BrowseDialogRaceTests : TestContext
         private bool _cancelSubtree;
         public string? SelectedDn => (string?)typeof(Browse).GetField("_selectedDn", PrivateInstance)!.GetValue(this);
 
-        public void Set(string name, object value) => typeof(Browse).GetField(name, PrivateInstance)!.SetValue(this, value);
         public object? Call(string name, params object[] arguments) =>
             typeof(Browse).GetMethod(name, PrivateInstance)!.Invoke(this, arguments);
         public Task SelectAsync(string dn) => (Task)Call("SelectAsync", dn, false, CancellationToken.None)!;

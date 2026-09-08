@@ -18,6 +18,10 @@ packages plus the LdapAdmin application.
   is server-rendered Blazor with InteractiveServer; UI components call services directly.
   Do not add a WASM client, a shared DTO/Contracts project, or a parallel REST dependency
   for the UI.
+- Scale admin guards and tests to ordinary development use. Keep value integrity and
+  single-user async correctness; avoid restricted-bind recovery, load hardening, and tests
+  that assert source spelling. Single LDAP writes wait for their result; batch work may stop
+  between requests. The Members tab is a convenience, not an exclusive write path.
 - LdapAdmin ships as an internal payload of the hosting package and is built locally by
   Aspire. It has no independent release lifecycle.
 - The archived standalone `AspireLdapAdmin` application is historical context, not a
@@ -39,6 +43,7 @@ packages plus the LdapAdmin application.
   issue rather than adding planning documents to the repository.
 - Do not create design, planning, status, findings, or decision documents unless the user
   explicitly requests one.
+- Do not maintain a changelog; describe changes in issues and pull requests.
 - Treat `artifacts/`, `.playwright/`, `.playwright-cli/`, and `working/` as disposable
   local output unless a task explicitly asks to preserve an artifact.
 - Finish code changes with the narrowest relevant build or test, then broaden only when

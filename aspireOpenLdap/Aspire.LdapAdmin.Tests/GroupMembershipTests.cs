@@ -155,24 +155,9 @@ public sealed class GroupMembershipComponentTests : TestContext
     }
 
     [Fact]
-    public void Generic_Attribute_Editing_Is_Disabled_For_Managed_Membership()
+    public async Task Generic_Ldif_Editing_Allows_A_Membership_Replacement()
     {
-        var entry = new LdapEntry(GroupDn, [Text("member", "uid=a,dc=example,dc=org"), Text("cn", "team")]);
-        var cut = RenderComponent<EntryView>(parameters => parameters
-            .Add(p => p.Entry, entry)
-            .Add(p => p.OnEdit, _ => { })
-            .Add(p => p.ManagedAttributes, new HashSet<string>(["member"], StringComparer.OrdinalIgnoreCase)));
-
-        var managed = cut.FindAll("button").Single(button => button.TextContent == "Members");
-        Assert.True(managed.HasAttribute("disabled"));
-        Assert.DoesNotContain(cut.FindAll("button"), button => button.TextContent == "Edit" &&
-            button.GetAttribute("title") == "Edit member");
-    }
-
-    [Fact]
-    public async Task Generic_Ldif_Editing_Refuses_A_Managed_Membership_Replacement()
-    {
-        var applied = false;
+        IReadOnlyList<LdapAttributeChange>? applied = null;
         var entry = new LdapEntry(GroupDn,
         [
             Text("objectClass", "groupOfNames"),
@@ -181,10 +166,9 @@ public sealed class GroupMembershipComponentTests : TestContext
         ]);
         var cut = RenderComponent<EntryLdifPanel>(parameters => parameters
             .Add(p => p.Entry, entry)
-            .Add(p => p.ManagedAttributes, new HashSet<string>(["member"], StringComparer.OrdinalIgnoreCase))
-            .Add(p => p.ApplyAsync, _ =>
+            .Add(p => p.ApplyAsync, changes =>
             {
-                applied = true;
+                applied = changes;
                 return Task.FromResult<string?>(null);
             }));
         var draft = cut.Find("textarea").GetAttribute("value")!
@@ -193,8 +177,12 @@ public sealed class GroupMembershipComponentTests : TestContext
         cut.Find("textarea").Input(draft);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.False(applied);
-        Assert.Contains("managed in the Members tab", cut.Find(".bar.err").TextContent, StringComparison.Ordinal);
+        Assert.NotNull(applied);
+        var change = Assert.Single(applied);
+        Assert.Equal("member", change.Name);
+        Assert.Equal(DirectoryAttributeOperation.Replace, change.Operation);
+        Assert.Equal(["uid=a,dc=example,dc=org"], change.Values);
+        Assert.Empty(cut.FindAll(".bar.err"));
     }
 
     [Fact]
@@ -233,7 +221,7 @@ public sealed class GroupMembershipComponentTests : TestContext
     }
 
     [Fact]
-    public async Task Add_Dialog_Uses_Typed_Uid_Fallback_And_The_Token_Aware_Cancel_Protocol()
+    public async Task Add_Dialog_Uses_Typed_Uid_Fallback_And_Waits_For_The_Write()
     {
         var pending = new TaskCompletionSource<string?>();
         CancellationToken saveToken = default;
@@ -255,8 +243,8 @@ public sealed class GroupMembershipComponentTests : TestContext
         cut.FindAll("button").Single(button => button.TextContent == "Add member").Click();
         await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
 
-        Assert.True(saveToken.IsCancellationRequested);
-        Assert.Contains(cut.FindAll("button.btn-secondary"), button => button.TextContent == "Cancelling");
+        Assert.False(saveToken.CanBeCanceled);
+        Assert.Contains(cut.FindAll("button.btn-secondary"), button => button.TextContent == "Cancel" && button.HasAttribute("disabled"));
         pending.SetResult("The server refused the value.");
         cut.WaitForAssertion(() => Assert.Contains("server refused", cut.Find(".bar.err").TextContent, StringComparison.Ordinal));
     }

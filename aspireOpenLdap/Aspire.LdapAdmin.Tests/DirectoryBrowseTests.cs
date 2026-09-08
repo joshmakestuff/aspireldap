@@ -66,7 +66,7 @@ public class DirectoryBrowseTests(LdapAdminAppHostFixture fixture)
 
         var leaves = await fixture.Directory.GetChildrenAsync(people.Dn, cancellationToken: cts.Token);
         Assert.Equal(
-            ["uid=alice", "uid=bob", "uid=svc-sweeper"],
+            ["uid=alice", "uid=bob"],
             leaves.Children.Select(c => c.Rdn).Order(StringComparer.Ordinal));
         Assert.All(leaves.Children, child => Assert.False(child.HasChildren));
     }
@@ -127,7 +127,7 @@ public class DirectoryBrowseTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_browse_base_that_is_not_a_valid_dn_is_rejected_before_the_server_sees_it()
+    public async Task A_browse_base_that_is_not_a_valid_dn_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 

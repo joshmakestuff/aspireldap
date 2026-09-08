@@ -10,24 +10,12 @@ public sealed class BindPasswordGuardTests
 {
     private const string BindDn = "uid=operator,dc=example,dc=org";
 
-    public static TheoryData<string, DirectoryAttributeOperation> PasswordModifications
-    {
-        get
-        {
-            TheoryData<string, DirectoryAttributeOperation> cases = new();
-            foreach (var name in new[] { "userPassword", "USERPASSWORD", "2.5.4.35", "userPassword;binary", "2.5.4.35;binary" })
-            {
-                foreach (var operation in new[] { DirectoryAttributeOperation.Add, DirectoryAttributeOperation.Replace, DirectoryAttributeOperation.Delete })
-                {
-                    cases.Add(name, operation);
-                }
-            }
-            return cases;
-        }
-    }
-
     [Theory]
-    [MemberData(nameof(PasswordModifications))]
+    [InlineData("userPassword", DirectoryAttributeOperation.Add)]
+    [InlineData("USERPASSWORD", DirectoryAttributeOperation.Replace)]
+    [InlineData("2.5.4.35", DirectoryAttributeOperation.Delete)]
+    [InlineData("userPassword;binary", DirectoryAttributeOperation.Replace)]
+    [InlineData("2.5.4.35;binary", DirectoryAttributeOperation.Replace)]
     public async Task Password_names_oids_and_options_are_refused_before_dispatch(string name, DirectoryAttributeOperation operation)
     {
         var result = await Directory().ModifyEntryAsync(BindDn.ToUpperInvariant(),
