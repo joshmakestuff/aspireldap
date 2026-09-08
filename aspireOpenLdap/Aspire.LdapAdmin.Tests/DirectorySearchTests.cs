@@ -14,31 +14,20 @@ namespace Aspire.LdapAdmin.Tests;
 public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
 {
     [Fact]
-    public async Task A_subtree_search_finds_every_seeded_person()
+    public async Task Search_reads_across_an_ldap_page_boundary()
     {
-        // Completeness by anchors, not census: a seed-count pin turns
-        // green tests red on unrelated seed changes, and a count derived from the search
-        // itself could not catch dropped entries. Not-truncated proves the search saw
-        // everything; the anchors prove both seeded branches were reached.
         using var cts = TestCancellation.Source();
-
-        // Limit sits above any seed size (ou=hosts alone holds 2,000), not at a census pin:
-        // it only has to be big enough that Truncated=false still means "saw everything".
-        var result = await fixture.Directory.SearchAsync(
-            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = 5000 },
-            cts.Token);
+        var result = await fixture.Directory.SearchAsync(new LdapSearchOptions
+        {
+            BaseDn = fixture.DnUnder("ou=hosts"),
+            Filter = "(objectClass=inetOrgPerson)",
+            Limit = 502,
+            Attributes = ["uid"],
+        }, cts.Token);
 
         Assert.False(result.Truncated);
-        foreach (var uid in (string[])["uid=alice", "uid=bob", "uid=svc-sweeper"])
-        {
-            Assert.Contains(result.Entries, e =>
-                string.Equals(e.Dn, fixture.DnUnder(uid, "ou=people"), StringComparison.OrdinalIgnoreCase));
-        }
-        // The generated branches: at least one fake person under each.
-        foreach (var ou in (string[])[",ou=directory,", ",ou=hosts,"])
-        {
-            Assert.Contains(result.Entries, e => e.Dn.Contains(ou, StringComparison.OrdinalIgnoreCase));
-        }
+        Assert.Equal(501, result.Entries.Count);
+        Assert.Equal(501, result.Entries.Select(entry => entry.Dn).Distinct().Count());
     }
 
     [Fact]
@@ -57,23 +46,16 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
     [Fact]
     public async Task A_limit_that_exactly_matches_the_result_count_is_not_truncated()
     {
-        // The truncation boundary is relative, so the count is derived, never pinned
-        // The stuck-at-false direction of the flag is covered by
-        // Matches_past_the_limit_are_reported_as_truncated — judge the pair together.
         using var cts = TestCancellation.Source();
-
-        var all = await fixture.Directory.SearchAsync(
-            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = 5000 },
-            cts.Token);
-        Assert.False(all.Truncated);
-        var actualCount = all.Entries.Count;
-
-        var exact = await fixture.Directory.SearchAsync(
-            new LdapSearchOptions { Filter = "(objectClass=inetOrgPerson)", Limit = actualCount },
-            cts.Token);
+        var exact = await fixture.Directory.SearchAsync(new LdapSearchOptions
+        {
+            BaseDn = fixture.DnUnder("ou=people"),
+            Filter = "(|(uid=alice)(uid=bob))",
+            Limit = 2,
+        }, cts.Token);
 
         Assert.False(exact.Truncated);
-        Assert.Equal(actualCount, exact.Entries.Count);
+        Assert.Equal(2, exact.Entries.Count);
     }
 
     [Fact]
@@ -172,7 +154,7 @@ public class DirectorySearchTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task A_search_base_that_is_not_a_valid_dn_is_rejected_before_the_server_sees_it()
+    public async Task A_search_base_that_is_not_a_valid_dn_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 

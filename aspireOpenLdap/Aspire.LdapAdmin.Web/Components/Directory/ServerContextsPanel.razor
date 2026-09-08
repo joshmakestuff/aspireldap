@@ -42,7 +42,11 @@ else if (_entry is not null)
     <div class="sec" style="margin-top: var(--space-4);">Attributes — read-only</div>
     <EntryView Entry="_entry" />
     <div class="sec" style="margin-top: var(--space-4);">Children</div>
-    @if (_children is { } children)
+    @if (_childrenError is not null)
+    {
+        <div class="bar err" role="alert">@_childrenError</div>
+    }
+    else if (_children is { } children)
     {
         @foreach (var child in children.Children)
         {
@@ -64,6 +68,7 @@ else if (_entry is not null)
     private readonly List<string> _path = [];
     private LdapEntry? _entry;
     private LdapChildrenResult? _children;
+    private string? _childrenError;
     private bool _loading;
     private string? _error;
     private readonly CancellationTokenSource _lifetime = new();
@@ -80,6 +85,7 @@ else if (_entry is not null)
         _error = null;
         _entry = null;
         _children = null;
+        _childrenError = null;
         StateHasChanged();
         try
         {
@@ -87,6 +93,10 @@ else if (_entry is not null)
         }
         catch (Exception ex) when (ex is System.DirectoryServices.Protocols.DirectoryException or ArgumentException)
         {
+            // A failed re-discovery must not leave the previous context list and breadcrumb
+            // clickable, or the next click would erase this error.
+            _contexts = null;
+            _path.Clear();
             _error = "Server contexts could not be discovered with the configured connection.";
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
@@ -139,6 +149,7 @@ else if (_entry is not null)
         _loading = true;
         _entry = null;
         _children = null;
+        _childrenError = null;
         _error = null;
         var cancellationToken = _lifetime.Token;
         try
@@ -149,11 +160,32 @@ else if (_entry is not null)
                 _error = "This context or entry is unavailable or not readable with the configured connection.";
                 return;
             }
-            _children = await Directory.GetChildrenAsync(dn, Settings.DefaultSearchLimit, cancellationToken);
         }
-        catch (System.DirectoryServices.Protocols.DirectoryException)
+        catch (Exception ex) when (ex is System.DirectoryServices.Protocols.DirectoryException or ArgumentException)
         {
             _error = "This context or entry could not be read with the configured connection.";
+            return;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            return;
+        }
+        finally
+        {
+            _loading = false;
+        }
+
+        // The entry was read; a failing child search reports under "Children" rather than
+        // discarding the entry. ArgumentException covers a child DN the parser rejects and an
+        // out-of-range search limit, neither of which may take the circuit down.
+        _loading = true;
+        try
+        {
+            _children = await Directory.GetChildrenAsync(dn, Settings.DefaultSearchLimit, cancellationToken);
+        }
+        catch (Exception ex) when (ex is System.DirectoryServices.Protocols.DirectoryException or ArgumentException)
+        {
+            _childrenError = "Children could not be listed with the configured connection.";
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {

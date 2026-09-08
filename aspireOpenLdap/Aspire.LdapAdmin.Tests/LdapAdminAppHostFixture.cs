@@ -13,9 +13,8 @@ using Xunit;
 namespace Aspire.LdapAdmin.Tests;
 
 /// <summary>
-/// The per-test deadline. Every operation in this assembly is one LDAP round trip against an
-/// already-running container, so a test that has not finished inside this budget is stuck, not
-/// slow — and a stuck test should fail with its own name rather than hang the run.
+/// Bounds each integration test's LDAP work, including multi-request searches and writes.
+/// AppHost startup has a separate, longer deadline.
 /// </summary>
 internal static class TestCancellation
 {
@@ -23,9 +22,7 @@ internal static class TestCancellation
 }
 
 /// <summary>
-/// Serializes every test that needs the admin AppHost, and shares one boot across all of them:
-/// multiple AppHosts in one process contend on orchestration host ports and hang, and the
-/// OpenLDAP container start is by far the most expensive thing in this assembly.
+/// Shares one AppHost per test run and serializes tests that mutate its seeded directory.
 /// </summary>
 /// <remarks>
 /// This assembly has no direct-docker test family, so there is nothing for a DockerHostGate to

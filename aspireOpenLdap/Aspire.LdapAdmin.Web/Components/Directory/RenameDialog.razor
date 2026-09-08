@@ -73,7 +73,7 @@
     }
     </ChildContent>
     <Actions>
-        <button class="btn btn-secondary" @onclick="CancelAsync">@(CancellationRequested ? "Cancelling" : "Cancel")</button>
+        <button class="btn btn-secondary" disabled="@Busy" @onclick="CancelAsync">Cancel</button>
         <button class="btn btn-primary" disabled="@Busy" @onclick="ValidateAndSaveAsync">@(Busy ? "Renaming…" : "Rename")</button>
     </Actions>
 </ConsoleDialog>

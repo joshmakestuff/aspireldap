@@ -67,7 +67,7 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
             var asTarget = fixture.DirectoryAs(dn, "chosen-by-the-test");
             Assert.NotNull(await asTarget.GetEntryAsync(dn, ["cn"], cts.Token));
 
-            // The server chose the storage scheme, not this layer.
+            // The password attribute is returned as binary data regardless of the server's storage scheme.
             var stored = await fixture.Directory.GetEntryAsync(dn, ["userPassword"], cts.Token);
             Assert.NotNull(stored);
             Assert.True(Assert.Single(stored.Attributes).IsBinary);
@@ -79,7 +79,7 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
     }
 
     [Fact]
-    public async Task Setting_the_bind_identity_password_is_rejected_without_a_round_trip()
+    public async Task Setting_the_bind_identity_password_is_rejected_as_invalid_input()
     {
         using var cts = TestCancellation.Source();
 
@@ -93,13 +93,13 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
         Assert.Null(result.ResultCode);
         Assert.Contains("bind identity", result.Message);
 
-        // The declared credentials still work: the password genuinely did not change.
+        // The original configured password still permits a bind.
         var asAdmin = fixture.DirectoryAs(fixture.Settings.BindDn, fixture.Settings.BindPassword);
         Assert.NotNull(await asAdmin.GetEntryAsync(fixture.BaseDn, ["dc"], cts.Token));
     }
 
     [Fact]
-    public async Task Every_write_that_would_invalidate_the_bind_identity_is_rejected_without_a_round_trip()
+    public async Task Identity_and_ancestor_writes_are_refused_and_the_admin_bind_still_works()
     {
         // Rename and delete of the identity, rename and subtree-delete of a container holding
         // it, and the password change through the modify door. Each uses a case/whitespace
@@ -131,7 +131,7 @@ public class AccessAndPasswordTests(LdapAdminAppHostFixture fixture)
         Assert.Equal(LdapOperationStatus.InvalidRequest, passwordModified.Status);
         Assert.Null(passwordModified.ResultCode);
 
-        // The declared credentials still work, and the directory is intact.
+        // The configured bind still works and the base entry remains readable.
         var asAdmin = fixture.DirectoryAs(fixture.Settings.BindDn, fixture.Settings.BindPassword);
         Assert.NotNull(await asAdmin.GetEntryAsync(fixture.BaseDn, ["dc"], cts.Token));
     }

@@ -62,7 +62,7 @@
                 <div class="railrow">
                     <div class="railhead">Directory information tree</div>
                     <button class="btn btn-secondary btn-sm" @onclick="OpenChildDialog"
-                            disabled="@(_selectedDn is null || _view == AdminView.Server)">New entry…</button>
+                            disabled="@(_selectedDn is null)">New entry…</button>
                 </div>
                 <DebouncedInput class="input mono railfilter" placeholder="filter RDN…" spellcheck="false"
                                 aria-label="Filter tree rows by RDN" @bind-Value="_treeFilter" />
@@ -165,8 +165,7 @@
                         <EntryOverview Entry="_entry" SaveAsync="ApplyEntryChangesAsync" />
                     </div>
                     <div style="@TabDisplay(EntryTab.Attributes)">
-                        <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog"
-                                   ManagedAttributes="_managedMembershipAttributes" />
+                        <EntryView Entry="_entry" OnEdit="OpenEditAttributeDialog" />
                     </div>
                     @if (_entryTab == EntryTab.Operational)
                     {
@@ -181,8 +180,7 @@
                         </div>
                     }
                     <div style="@TabDisplay(EntryTab.Ldif)">
-                        <EntryLdifPanel Entry="_entry" ApplyAsync="ApplyEntryChangesAsync"
-                                        ManagedAttributes="_managedMembershipAttributes" />
+                        <EntryLdifPanel Entry="_entry" ApplyAsync="ApplyEntryChangesAsync" />
                     </div>
                 }
                 else if (_error is null)
@@ -279,7 +277,6 @@
     /// <summary>The subschema for the schema-aware dialogs; null degrades them to free text.</summary>
     private LdifDotNet.Schema.LdapSchema? _dialogSchema;
     private IReadOnlyList<GroupMembershipAttribute> _memberships = [];
-    private IReadOnlySet<string> _managedMembershipAttributes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private string? _toast;
     private ElementReference _toastElement;
@@ -360,11 +357,6 @@
         if (_selectedDn is not { } dn)
         {
             return "No entry is selected.";
-        }
-
-        if (changes.FirstOrDefault(change => _managedMembershipAttributes.Contains(change.Name)) is { } managed)
-        {
-            return $"{managed.Name} is managed in the Members tab; edit individual members there.";
         }
 
         var selection = _selectSeq;
@@ -541,8 +533,8 @@
         return rows;
     }
 
-    // Static and internal so the row contract is testable without a renderer — Browse
-    // cannot render under bUnit, and the filter/cap interplay is unit-tested.
+    // Row generation is tested independently of the page renderer, including filtering
+    // and the search handoff for capped children.
     internal static void Walk(TreeNode node, int depth, string query, string? selectedDn, List<Row> rows)
     {
         var filtering = query.Length > 0;
@@ -849,21 +841,29 @@
 
     // ---- Top bar ------------------------------------------------------------------------
 
-    /// <summary>Reloads the active server context, or the directory tree and selected entry.</summary>
+    /// <summary>Reloads the directory tree, the selected entry, and the server contexts when shown.</summary>
     private async Task RefreshAsync()
     {
-        if (_view == AdminView.Server)
-        {
-            if (_serverContexts is not null)
-            {
-                await _serverContexts.RefreshAsync();
-            }
-            return;
-        }
+        // The rail is always on screen, so the tree reloads in every view; a failed tree load
+        // is recoverable from the Server tab too.
         _root = null;
         _error = null;
         StateHasChanged();
         await OnInitializedAsync();
+        if (_view == AdminView.Server)
+        {
+            // SelectAsync would navigate to the Browse view, so re-reveal without re-selecting.
+            if (_selectedDn is { } selected)
+            {
+                await RevealAsync(selected, _selectSeq, CancellationToken.None);
+            }
+            if (_serverContexts is not null)
+            {
+                await _serverContexts.RefreshAsync();
+            }
+            ShowToast("server contexts reloaded");
+            return;
+        }
         if (_selectedDn is { } dn)
         {
             await SelectAsync(dn, reveal: true);
@@ -925,11 +925,6 @@
     {
         if (DialogOpen || _entry is not { } entry)
         {
-            return;
-        }
-        if (_managedMembershipAttributes.Contains(attribute.Name))
-        {
-            _entryTab = EntryTab.Members;
             return;
         }
         _attributeDialog = new AttributeDialogModel
@@ -1088,8 +1083,6 @@
     private void UpdateMemberships()
     {
         _memberships = _entry is null ? [] : GroupMembership.Detect(_dialogSchema, _entry);
-        _managedMembershipAttributes = new HashSet<string>(
-            _memberships.Select(static membership => membership.Name), StringComparer.OrdinalIgnoreCase);
         if (_memberships.Count == 0 && _entryTab == EntryTab.Members)
         {
             _entryTab = EntryTab.Overview;
@@ -1100,12 +1093,6 @@
     private async Task<string?> SaveAttributeAsync(AttributeDialogModel dialog, CancellationToken cancellationToken)
     {
         var dn = dialog.Entry.Dn;
-        if (GroupMembership.Detect(_dialogSchema, dialog.Entry).Any(membership =>
-            membership.Name.Equals(dialog.Name, StringComparison.OrdinalIgnoreCase)))
-        {
-            return $"{dialog.Name} is managed in the Members tab; edit individual members there.";
-        }
-
         var values = dialog.Values;
         if (dialog.IsNew && values.Count == 0)
         {

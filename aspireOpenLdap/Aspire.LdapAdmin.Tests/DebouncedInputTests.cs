@@ -25,7 +25,7 @@ public sealed class DebouncedInputTests : TestContext
             return Task.CompletedTask;
         });
 
-        await Task.WhenAll(first, second);
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.False(firstRan);
         Assert.True(secondRan);
@@ -43,7 +43,7 @@ public sealed class DebouncedInputTests : TestContext
         });
 
         debouncer.Dispose();
-        await pending;
+        await pending.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.False(ran);
     }

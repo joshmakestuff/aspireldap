@@ -52,7 +52,7 @@ public sealed class RestApiMappingTests
     [InlineData(LdapOperationStatus.Refused, 422, "refused")]
     [InlineData(LdapOperationStatus.Cancelled, 499, "cancelled")]
     [InlineData(LdapOperationStatus.Failed, 502, "failed")]
-    public async Task Every_failure_status_has_a_stable_problem_mapping(
+    public async Task Failure_statuses_have_expected_problem_mappings(
         LdapOperationStatus status,
         int expectedHttpStatus,
         string expectedTypeSuffix)

@@ -45,9 +45,6 @@
     [Parameter]
     public Func<IReadOnlyList<LdapAttributeChange>, Task<string?>>? ApplyAsync { get; set; }
 
-    [Parameter]
-    public IReadOnlySet<string> ManagedAttributes { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
     private string _generated = string.Empty;
     private string _draft = string.Empty;
     private LdapEntry? _lastEntry;
@@ -100,12 +97,6 @@
         {
             _error = null;
             Toasts.Show("draft matches the entry — nothing to apply");
-            return;
-        }
-
-        if (changes.FirstOrDefault(change => ManagedAttributes.Contains(change.Name)) is { } managed)
-        {
-            _error = $"{managed.Name} is managed in the Members tab; edit individual members there.";
             return;
         }
 

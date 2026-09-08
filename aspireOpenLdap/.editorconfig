@@ -1,5 +1,8 @@
 root = true
 
+[*]
+end_of_line = lf
+
 # Meziantou.Analyzer tuning. Rules stay at their defaults unless listed here; product code
 # must build warning-free (CI sets TreatWarningsAsErrors).
 

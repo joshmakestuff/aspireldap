@@ -17,7 +17,7 @@ public sealed class BulkEditPlanTests
     [InlineData(BulkAttributeOperation.Add, DirectoryAttributeOperation.Add)]
     [InlineData(BulkAttributeOperation.Replace, DirectoryAttributeOperation.Replace)]
     [InlineData(BulkAttributeOperation.Delete, DirectoryAttributeOperation.Delete)]
-    public void Attribute_plan_is_one_immutable_modify_per_selected_dn(
+    public void Attribute_plan_carries_the_operation_and_values_for_each_selected_dn(
         BulkAttributeOperation requested,
         DirectoryAttributeOperation expected)
     {
@@ -40,6 +40,7 @@ public sealed class BulkEditPlanTests
         {
             Assert.Equal(expected, item.Change.Operation);
             Assert.Equal("description", item.Change.Name);
+            Assert.Equal(values, item.Change.Values);
             Assert.Contains(item.SelectedDn, item.Preview, StringComparison.Ordinal);
         });
         Assert.Contains(requested == BulkAttributeOperation.Delete ? "entire attribute" : "alpha, beta",
@@ -256,7 +257,7 @@ public sealed class BulkEditComponentTests : TestContext
     }
 
     [Fact]
-    public void Generic_Bulk_Candidates_Exclude_Binary_And_Managed_Membership_Attributes()
+    public void Generic_Bulk_Candidates_Allow_Membership_But_Exclude_Binary_Attributes()
     {
         var schema = GroupMembershipSchemaTests.TestSchema;
         var type = schema.FindAttributeType("member")!;
@@ -273,9 +274,9 @@ public sealed class BulkEditComponentTests : TestContext
             new AttributeGuidance(type, "description", Required: false, SingleValued: false, NoUserModification: false, SyntaxLabel: "text"),
         };
 
-        var filtered = SearchPanel.FilterBulkCandidates(schema, [group], candidates);
+        var filtered = SearchPanel.FilterBulkCandidates([group], candidates);
 
-        Assert.Equal("description", Assert.Single(filtered).Name);
+        Assert.Equal(["member", "description"], filtered.Select(candidate => candidate.Name));
     }
 
     [Fact]

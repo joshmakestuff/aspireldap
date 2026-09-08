@@ -13,7 +13,7 @@ namespace Aspire.LdapAdmin.Tests;
 public sealed class LdifViewPlanTests
 {
     [Fact]
-    public void ParsePlan_Labels_Every_Record_Kind_With_Its_Detail_Count()
+    public void ParsePlan_Labels_Add_Modify_Delete_And_Rename_With_Their_Detail_Counts()
     {
         var plan = LdapLdifService.ParsePlan(
             "dn: uid=new,ou=people,dc=example,dc=org\n" +

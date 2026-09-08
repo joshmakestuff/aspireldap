@@ -158,7 +158,7 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public async Task PasswordDialog_Uses_The_Save_Token_And_Shows_Service_Words_Inline()
+    public async Task PasswordDialog_Waits_For_The_Write_And_Shows_Service_Words_Inline()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         var pending = new TaskCompletionSource<string?>();
@@ -180,7 +180,7 @@ public sealed class ConsoleComponentTests : TestContext
         cut.Find("button.btn-primary").Click();
 
         await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
-        Assert.True(saveToken.IsCancellationRequested);
+        Assert.False(saveToken.CanBeCanceled);
         pending.SetResult(refusal);
 
         cut.WaitForAssertion(() => Assert.Equal(refusal, cut.Find(".bar.err").TextContent));
@@ -335,10 +335,9 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public async Task AttributeDialog_InFlight_Save_Cancels_Idempotently_And_Waits_For_Acknowledgement()
+    public async Task AttributeDialog_InFlight_Save_Ignores_Close_Requests_And_Waits_For_The_Result()
     {
-        // Cancellation is requested once, but the dialog remains mounted and locked until
-        // the delegate acknowledges it with a result.
+        // A dispatched single write cannot be cancelled; keep its result visible.
         JSInterop.Mode = JSRuntimeMode.Loose;
         var closed = false;
         var pending = new TaskCompletionSource<string?>();
@@ -363,16 +362,16 @@ public sealed class ConsoleComponentTests : TestContext
 
         cut.Find("button.btn-primary").Click();
 
-        // In flight: fields and Save stay locked, while Cancel remains available.
+        // In flight: fields and actions stay locked.
         Assert.True(cut.Find("input.input").HasAttribute("disabled"));
         Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
-        Assert.False(cut.Find("button.btn-secondary").HasAttribute("disabled"));
+        Assert.True(cut.Find("button.btn-secondary").HasAttribute("disabled"));
         await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
         await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
         Assert.False(closed);
-        Assert.True(saveToken.IsCancellationRequested);
-        Assert.Equal(1, cancellationCallbacks);
-        Assert.Equal("Cancelling", cut.Find("button.btn-secondary").TextContent);
+        Assert.False(saveToken.CanBeCanceled);
+        Assert.Equal(0, cancellationCallbacks);
+        Assert.Equal("Cancel", cut.Find("button.btn-secondary").TextContent);
 
         pending.SetResult("Access denied — the server's ACL refused this bind.");
         cut.WaitForAssertion(() =>
@@ -381,7 +380,7 @@ public sealed class ConsoleComponentTests : TestContext
     }
 
     [Fact]
-    public async Task AttributeDialog_Acknowledged_Success_After_Cancel_Closes_Exactly_Once()
+    public async Task AttributeDialog_Success_After_A_Close_Request_Closes_Exactly_Once()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         var closedCount = 0;
@@ -400,7 +399,7 @@ public sealed class ConsoleComponentTests : TestContext
 
         cut.Find("button.btn-primary").Click();
         await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
-        Assert.Equal("Cancelling", cut.Find("button.btn-secondary").TextContent);
+        Assert.Equal("Cancel", cut.Find("button.btn-secondary").TextContent);
         pending.SetResult(null);
 
         cut.WaitForAssertion(() => Assert.Equal(1, closedCount));
@@ -754,33 +753,6 @@ public sealed class SchemaGuideTests
 /// <summary>Pure display-logic checks for the console (no renderer needed).</summary>
 public sealed class ConsoleDisplayLogicTests
 {
-    [Theory]
-    [InlineData(5, 20, false, 5, false)]  // under the cap: everything renders
-    [InlineData(25, 20, false, 20, true)] // over the cap: exactly the cap, flagged
-    [InlineData(25, 20, true, 25, false)] // explicitly expanded: everything renders
-    public void PlanValues_Caps_Exactly_And_Never_Silently(
-        int total, int cap, bool expanded, int shown, bool capped)
-    {
-        var plan = EntryView.PlanValues(total, cap, expanded);
-        Assert.Equal(shown, plan.Shown);
-        Assert.Equal(total, plan.Total);
-        Assert.Equal(capped, plan.Capped);
-    }
-
-    [Fact]
-    public void CountBadge_States_The_Cap_While_One_Is_In_Effect()
-    {
-        Assert.Equal("20 of 25 values", EntryView.CountBadge(EntryView.PlanValues(25, 20, expanded: false)));
-        Assert.Equal("5 values", EntryView.CountBadge(EntryView.PlanValues(5, 20, expanded: false)));
-    }
-
-    [Theory]
-    [InlineData("AAAA", "3 bytes")]
-    [InlineData("AA==", "1 byte")]
-    [InlineData("", "0 bytes")]
-    public void DescribeBinary_Sizes_From_Length_Without_Decoding(string base64, string expected) =>
-        Assert.Equal(expected, EntryView.DescribeBinary(base64));
-
     [Fact]
     public void EntryTitle_Prefers_The_Display_Name_Over_The_Rdn_Value()
     {

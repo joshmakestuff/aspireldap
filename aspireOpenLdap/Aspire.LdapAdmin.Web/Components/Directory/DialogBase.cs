@@ -2,11 +2,7 @@ using Microsoft.AspNetCore.Components;
 
 namespace Aspire.LdapAdmin.Web.Components.Directory;
 
-/// <summary>
-/// The dialogs' shared save protocol: one cancellation source per save, one busy flag,
-/// one inline error, and close only on success. Cancelling an in-flight save requests
-/// cancellation but leaves the dialog mounted until the delegate acknowledges it.
-/// </summary>
+/// <summary>Shared busy/error state. Only batch saves support stopping between requests.</summary>
 public abstract class DialogBase : ComponentBase, IDisposable
 {
     private CancellationTokenSource? _saveCancellation;
@@ -44,23 +40,23 @@ public abstract class DialogBase : ComponentBase, IDisposable
     }
 
     /// <summary>Runs the save delegate under the protocol: null closes; a string renders inline.</summary>
-    protected async Task SaveAsync(Func<CancellationToken, Task<string?>> save)
+    protected async Task SaveAsync(Func<CancellationToken, Task<string?>> save, bool allowCancellation = false)
     {
         if (Busy)
         {
             return;
         }
 
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation = allowCancellation ? new CancellationTokenSource() : null;
         _saveCancellation = cancellation;
         Busy = true;
         CancellationRequested = false;
         Error = null;
         try
         {
-            Error = await save(cancellation.Token);
+            Error = await save(cancellation?.Token ?? CancellationToken.None);
         }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellation?.IsCancellationRequested == true)
         {
             Error = "The operation was cancelled.";
         }
