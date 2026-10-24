@@ -12,7 +12,7 @@ namespace Aspire.LdapAdmin.Tests;
 /// Exercises clipboard interop success and rejection through ConsoleClipboard.
 /// The JavaScript and browser clipboard API are mocked here.
 /// </summary>
-public sealed class ConsoleClipboardTests : TestContext
+public sealed class ConsoleClipboardTests : BunitContext
 {
     [Fact]
     public async Task CopyAsync_Returns_False_Instead_Of_Throwing_When_The_Interop_Rejects()
@@ -43,7 +43,7 @@ public sealed class ConsoleClipboardTests : TestContext
 /// Checks ErrorBoundary rendering and recovery for a throwing child event handler in bUnit.
 /// This does not exercise a live Blazor circuit or connection loss.
 /// </summary>
-public sealed class MainLayoutErrorBoundaryTests : TestContext
+public sealed class MainLayoutErrorBoundaryTests : BunitContext
 {
     /// <summary>A component whose click handler throws, owned by
     /// a real component so the renderer routes the exception to the nearest boundary.</summary>
@@ -68,7 +68,7 @@ public sealed class MainLayoutErrorBoundaryTests : TestContext
             builder.OpenComponent<Boom>(0);
             builder.CloseComponent();
         };
-        var cut = RenderComponent<MainLayout>(parameters => parameters
+        var cut = Render<MainLayout>(parameters => parameters
             .Add(p => p.Body, body));
 
         cut.Find("#boom").Click();

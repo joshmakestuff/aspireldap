@@ -16,7 +16,7 @@ namespace Aspire.LdapAdmin.Tests;
 /// </summary>
 [Collection(LdapAdminAppHostCollection.Name)]
 [Trait("Category", "Integration")]
-public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) : TestContext
+public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) : BunitContext
 {
     /// <summary>Directory String — the syntax <c>cn</c> resolves to.</summary>
     private const string DirectoryStringOid = "1.3.6.1.4.1.1466.115.121.1.15";
@@ -27,9 +27,9 @@ public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) :
     /// <summary>The <c>cn</c>/<c>commonName</c> attribute's OID.</summary>
     private const string CnOid = "2.5.4.3";
 
-    private TestContext Context()
+    private BunitContext Context()
     {
-        var ctx = new TestContext();
+        var ctx = new BunitContext();
         ctx.Services.AddSingleton(fixture.Schema);
         return ctx;
     }
@@ -53,7 +53,7 @@ public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) :
     public void Filtering_By_A_Partial_Oid_Returns_The_Matching_Rows()
     {
         using var ctx = Context();
-        var cut = ctx.RenderComponent<SchemaPanel>();
+        var cut = ctx.Render<SchemaPanel>();
         var filter = cut.WaitForElement("input[aria-label='Filter the schema']", TimeSpan.FromSeconds(10));
 
         filter.Input(SyntaxFamilyFragment);
@@ -84,7 +84,7 @@ public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) :
     public void Attribute_Types_Are_Matchable_By_A_Bare_Or_Pasted_Oid(string query)
     {
         using var ctx = Context();
-        var cut = ctx.RenderComponent<SchemaPanel>();
+        var cut = ctx.Render<SchemaPanel>();
         var filter = cut.WaitForElement("input[aria-label='Filter the schema']", TimeSpan.FromSeconds(10));
 
         filter.Input(query);
@@ -104,7 +104,7 @@ public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) :
     public void A_Kind_Toggle_Hides_Only_Its_Own_Section_And_Rechecking_Restores_It()
     {
         using var ctx = Context();
-        var cut = ctx.RenderComponent<SchemaPanel>();
+        var cut = ctx.Render<SchemaPanel>();
         cut.WaitForAssertion(
             () => Assert.True(cut.FindAll("label.seg-opt").Count >= 3),
             TimeSpan.FromSeconds(10));
@@ -132,7 +132,7 @@ public sealed class SchemaPanelComponentTests(LdapAdminAppHostFixture fixture) :
     public void Hiding_Every_Kind_States_That_Nothing_Is_Shown()
     {
         using var ctx = Context();
-        var cut = ctx.RenderComponent<SchemaPanel>();
+        var cut = ctx.Render<SchemaPanel>();
         cut.WaitForAssertion(
             () => Assert.True(cut.FindAll("label.seg-opt").Count >= 3),
             TimeSpan.FromSeconds(10));

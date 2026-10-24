@@ -6,13 +6,13 @@
 
   <!-- Aspire -->
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting" Version="13.6.1" />
-    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.6.1" />
+    <PackageVersion Include="Aspire.Hosting" Version="13.6.3" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.6.3" />
   </ItemGroup>
 
   <!-- OpenTelemetry -->
   <ItemGroup>
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.20.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.20.1" />
   </ItemGroup>
 
   <!-- LDIF (RFC 2849) reading/writing + fake directory data generation -->
@@ -37,7 +37,7 @@
   <!-- Build / packaging -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.402" />
-    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.303" />
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.316" />
   </ItemGroup>
 
   <!-- Test -->

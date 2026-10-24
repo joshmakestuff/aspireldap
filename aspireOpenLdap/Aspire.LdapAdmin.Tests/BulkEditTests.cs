@@ -101,7 +101,7 @@ public sealed class BulkEditPlanTests
         uid is null ? [] : [new LdapAttributeValues("uid", false, [uid], LdapValueClassification.Schema)]);
 }
 
-public sealed class BulkEditComponentTests : TestContext
+public sealed class BulkEditComponentTests : BunitContext
 {
     public BulkEditComponentTests() => JSInterop.Mode = JSRuntimeMode.Loose;
 
@@ -112,7 +112,7 @@ public sealed class BulkEditComponentTests : TestContext
     public async Task Attribute_values_preserve_whitespace_and_empty_lines_through_dispatch(BulkAttributeOperation operation)
     {
         List<BulkEditPlanItem> dispatched = [];
-        var cut = RenderComponent<BulkEditDialog>(parameters => parameters.Add(component => component.Model, Model(
+        var cut = Render<BulkEditDialog>(parameters => parameters.Add(component => component.Model, Model(
             item => { dispatched.Add(item); return Task.FromResult(LdapOperationResult.Ok()); },
             _ => Task.CompletedTask)));
         cut.Find("select").Change(BulkEditOperation.Attribute.ToString());
@@ -136,7 +136,7 @@ public sealed class BulkEditComponentTests : TestContext
     public async Task Only_an_empty_delete_field_removes_the_whole_attribute(string text, bool deleteWholeAttribute)
     {
         List<BulkEditPlanItem> dispatched = [];
-        var cut = RenderComponent<BulkEditDialog>(parameters => parameters.Add(component => component.Model, Model(
+        var cut = Render<BulkEditDialog>(parameters => parameters.Add(component => component.Model, Model(
             item => { dispatched.Add(item); return Task.FromResult(LdapOperationResult.Ok()); },
             _ => Task.CompletedTask)));
         cut.Find("select").Change(BulkEditOperation.Attribute.ToString());
@@ -162,13 +162,13 @@ public sealed class BulkEditComponentTests : TestContext
             .ToArray();
         HashSet<string> selected = new(StringComparer.Ordinal);
         IRenderedComponent<SearchResultsTable>? cut = null;
-        cut = RenderComponent<SearchResultsTable>(parameters => parameters
+        cut = Render<SearchResultsTable>(parameters => parameters
             .Add(component => component.Result, new LdapSearchResult(entries, Truncated: false))
             .Add(component => component.SelectedDns, selected)
             .Add(component => component.OnSelectionChanged, change =>
             {
                 if (change.Selected) selected.Add(change.Entry.Dn); else selected.Remove(change.Entry.Dn);
-                cut!.SetParametersAndRender(parameters => parameters.Add(component => component.SelectedDns, selected));
+                cut!.Render(parameters => parameters.Add(component => component.SelectedDns, selected));
             }));
 
         cut.Find("input[type=checkbox]").Change(true);
@@ -196,7 +196,7 @@ public sealed class BulkEditComponentTests : TestContext
                 ? new LdapOperationResult(LdapOperationStatus.ConstraintViolation, Message: "duplicate value")
                 : LdapOperationResult.Ok());
         }, run => { lastRun = run; return Task.CompletedTask; });
-        var cut = RenderComponent<BulkEditDialog>(parameters => parameters
+        var cut = Render<BulkEditDialog>(parameters => parameters
             .Add(component => component.Model, model)
             .Add(component => component.OnClose, () => closed++));
 
@@ -224,7 +224,7 @@ public sealed class BulkEditComponentTests : TestContext
         BulkEditRunResult? lastRun = null;
         var model = Model(_ => ++calls == 1 ? first.Task : Task.FromResult(LdapOperationResult.Ok()),
             run => { lastRun = run; return Task.CompletedTask; });
-        var cut = RenderComponent<BulkEditDialog>(parameters => parameters.Add(component => component.Model, model));
+        var cut = Render<BulkEditDialog>(parameters => parameters.Add(component => component.Model, model));
         SelectAttributePlan(cut);
 
         cut.FindAll("button").Single(button => button.TextContent == "Apply changes").Click();
@@ -282,7 +282,7 @@ public sealed class BulkEditComponentTests : TestContext
     [Fact]
     public void Manually_Typed_Unsupported_Attribute_Cannot_Build_A_Bulk_Plan()
     {
-        var cut = RenderComponent<BulkEditDialog>(parameters => parameters.Add(component => component.Model, Model(
+        var cut = Render<BulkEditDialog>(parameters => parameters.Add(component => component.Model, Model(
             _ => Task.FromResult(LdapOperationResult.Ok()), _ => Task.CompletedTask)));
         cut.Find("select").Change(BulkEditOperation.Attribute.ToString());
         cut.Find("input[aria-label='Attribute name']").Input("member");

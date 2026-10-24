@@ -14,7 +14,7 @@ namespace Aspire.LdapAdmin.Tests;
 /// These assert consumer-visible behavior: what renders, what a click changes, what a save
 /// failure keeps on screen.
 /// </summary>
-public sealed class ConsoleComponentTests : TestContext
+public sealed class ConsoleComponentTests : BunitContext
 {
     private static LdapEntry Entry(params LdapAttributeValues[] attributes) =>
         new("uid=alice.chen,ou=people,dc=aspire,dc=dev", attributes);
@@ -29,7 +29,7 @@ public sealed class ConsoleComponentTests : TestContext
     public void EntryView_Renders_Attribute_Rows_Sorted_And_Monospace()
     {
         AddSettings();
-        var cut = RenderComponent<EntryView>(parameters => parameters
+        var cut = Render<EntryView>(parameters => parameters
             .Add(p => p.Entry, Entry(Text("uid", "alice.chen"), Text("cn", "Alice Chen"))));
 
         var cells = cut.FindAll("td.mono");
@@ -46,7 +46,7 @@ public sealed class ConsoleComponentTests : TestContext
     {
         AddSettings(cap: 2);
         var values = Enumerable.Range(1, 5).Select(static i => $"value-{i}").ToArray();
-        var cut = RenderComponent<EntryView>(parameters => parameters
+        var cut = Render<EntryView>(parameters => parameters
             .Add(p => p.Entry, Entry(Text("member", values))));
 
         // Capped: exactly the cap renders, and the cap is stated, never silent.
@@ -65,7 +65,7 @@ public sealed class ConsoleComponentTests : TestContext
         // "AAAA" decodes to 3 bytes.
         var binary = new LdapAttributeValues(
             "userCertificate", IsBinary: true, ["AAAA"], LdapValueClassification.Schema);
-        var cut = RenderComponent<EntryView>(parameters => parameters
+        var cut = Render<EntryView>(parameters => parameters
             .Add(p => p.Entry, Entry(binary)));
 
         Assert.Contains("binary", cut.Find("td:first-child").TextContent, StringComparison.Ordinal);
@@ -87,7 +87,7 @@ public sealed class ConsoleComponentTests : TestContext
             Entry = Entry(Text("objectClass", "top", "person")),
             SaveAsync = (_, _) => Task.FromResult<string?>("Access denied — the server's ACL refused this bind."),
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.OnClose, () => { closed = true; }));
 
@@ -110,7 +110,7 @@ public sealed class ConsoleComponentTests : TestContext
             Entry = Entry(Text("objectClass", "top", "person")),
             SaveAsync = (_, _) => Task.FromResult<string?>(null),
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.OnClose, () => { closed = true; }));
 
@@ -135,7 +135,7 @@ public sealed class ConsoleComponentTests : TestContext
                 return Task.FromResult<string?>(null);
             },
         };
-        var cut = RenderComponent<PasswordDialog>(parameters => parameters.Add(p => p.Model, model));
+        var cut = Render<PasswordDialog>(parameters => parameters.Add(p => p.Model, model));
         var fields = cut.FindAll("input[type=password]").ToList();
 
         Assert.Equal(2, fields.Count);
@@ -173,7 +173,7 @@ public sealed class ConsoleComponentTests : TestContext
                 return pending.Task;
             },
         };
-        var cut = RenderComponent<PasswordDialog>(parameters => parameters.Add(p => p.Model, model));
+        var cut = Render<PasswordDialog>(parameters => parameters.Add(p => p.Model, model));
         var fields = cut.FindAll("input[type=password]").ToList();
         cut.Find("#new-password").Change("not-shown-in-status");
         cut.Find("#confirm-password").Change("not-shown-in-status");
@@ -198,7 +198,7 @@ public sealed class ConsoleComponentTests : TestContext
             Entry = Entry(Text("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson")),
             SaveAsync = (_, _) => Task.FromResult<string?>(null),
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -218,7 +218,7 @@ public sealed class ConsoleComponentTests : TestContext
             ParentDn = "ou=people,dc=example,dc=org",
             SaveAsync = (entry, _) => { saved = entry; return Task.FromResult<string?>(null); },
         };
-        var cut = RenderComponent<NewEntryWizard>(parameters => parameters
+        var cut = Render<NewEntryWizard>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -271,7 +271,7 @@ public sealed class ConsoleComponentTests : TestContext
             ParentDn = "ou=people,dc=example,dc=org",
             SaveAsync = (_, _) => Task.FromResult<string?>(null),
         };
-        var cut = RenderComponent<NewEntryWizard>(parameters => parameters
+        var cut = Render<NewEntryWizard>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -302,7 +302,7 @@ public sealed class ConsoleComponentTests : TestContext
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         var cancelled = 0;
-        var cut = RenderComponent<ConsoleDialog>(parameters => parameters
+        var cut = Render<ConsoleDialog>(parameters => parameters
             .Add(p => p.Title, "Test dialog")
             .Add(p => p.OnCancel, () => { cancelled++; }));
 
@@ -321,7 +321,7 @@ public sealed class ConsoleComponentTests : TestContext
         // the component mounted. Native closedby must not suppress those requests.
         JSInterop.Mode = JSRuntimeMode.Loose;
         var cancelled = 0;
-        var cut = RenderComponent<ConsoleDialog>(parameters => parameters
+        var cut = Render<ConsoleDialog>(parameters => parameters
             .Add(p => p.Title, "Busy dialog")
             .Add(p => p.Busy, true)
             .Add(p => p.OnCancel, () => { cancelled++; }));
@@ -356,7 +356,7 @@ public sealed class ConsoleComponentTests : TestContext
                 return pending.Task;
             },
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.OnClose, () => { closed = true; }));
 
@@ -393,7 +393,7 @@ public sealed class ConsoleComponentTests : TestContext
             Entry = Entry(Text("objectClass", "top", "person")),
             SaveAsync = (_, _) => pending.Task,
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.OnClose, () => { closedCount++; }));
 
@@ -419,7 +419,7 @@ public sealed class ConsoleComponentTests : TestContext
             Subtree = true,
             SaveAsync = (_, _) => pending.Task,
         };
-        var cut = RenderComponent<DeleteDialog>(parameters => parameters
+        var cut = Render<DeleteDialog>(parameters => parameters
             .Add(p => p.Model, model));
 
         cut.Find("button.btn-primary").Click();
@@ -439,7 +439,7 @@ public sealed class ConsoleComponentTests : TestContext
         // from Razor (showModal() owns it; a rendered `open` would drop the top layer on
         // the next diff).
         JSInterop.Mode = JSRuntimeMode.Loose;
-        var cut = RenderComponent<ConsoleDialog>(parameters => parameters
+        var cut = Render<ConsoleDialog>(parameters => parameters
             .Add(p => p.Title, "Framed"));
 
         var panel = cut.Find("dialog.wide.blueprint");
@@ -481,7 +481,7 @@ public sealed class ConsoleComponentTests : TestContext
     public void RenameDialog_Prefills_The_Current_Rdn_Attribute_And_Value()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
-        var cut = RenderComponent<RenameDialog>(parameters => parameters
+        var cut = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel())
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -493,7 +493,7 @@ public sealed class ConsoleComponentTests : TestContext
     public void RenameDialog_Offers_Schema_Attributes_And_Free_Text_Without_A_Schema()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
-        var withSchema = RenderComponent<RenameDialog>(parameters => parameters
+        var withSchema = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel())
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -503,7 +503,7 @@ public sealed class ConsoleComponentTests : TestContext
         Assert.Contains("sn", options);
         Assert.DoesNotContain("objectClass", options);
 
-        var withoutSchema = RenderComponent<RenameDialog>(parameters => parameters
+        var withoutSchema = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel()));
         Assert.Empty(withoutSchema.FindAll("select"));
         // Free text degradation: attribute, value and parent are all plain inputs.
@@ -514,7 +514,7 @@ public sealed class ConsoleComponentTests : TestContext
     public void RenameDialog_Previews_The_Resulting_Dn_For_Rename_In_Place_And_For_A_Move()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
-        var cut = RenderComponent<RenameDialog>(parameters => parameters
+        var cut = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel())
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -536,7 +536,7 @@ public sealed class ConsoleComponentTests : TestContext
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         var saves = 0;
-        var cut = RenderComponent<RenameDialog>(parameters => parameters
+        var cut = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel((_, _) => { saves++; return Task.FromResult<string?>(null); }))
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -553,7 +553,7 @@ public sealed class ConsoleComponentTests : TestContext
         JSInterop.Mode = JSRuntimeMode.Loose;
         var saves = 0;
         // No schema: the attribute is free text, so an invalid type can be typed at all.
-        var cut = RenderComponent<RenameDialog>(parameters => parameters
+        var cut = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel((_, _) => { saves++; return Task.FromResult<string?>(null); })));
 
         cut.FindAll("input.input.mono").First().Change("1bad"); // RFC 4512 descr must start with a letter
@@ -574,7 +574,7 @@ public sealed class ConsoleComponentTests : TestContext
         // cn is MUST on person and the entry's only cn value is its name: switching the RDN
         // to sn with delete-old-RDN on is a guaranteed objectClassViolation.
         JSInterop.Mode = JSRuntimeMode.Loose;
-        var cut = RenderComponent<RenameDialog>(parameters => parameters
+        var cut = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, RenameModel())
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 
@@ -601,7 +601,7 @@ public sealed class ConsoleComponentTests : TestContext
         RenameDialogModel? saved = null;
         var closed = false;
         var model = RenameModel((m, _) => { saved = m; return Task.FromResult<string?>(null); });
-        var cut = RenderComponent<RenameDialog>(parameters => parameters
+        var cut = Render<RenameDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, ConsoleTestSchema.Schema)
             .Add(p => p.OnClose, () => { closed = true; }));
