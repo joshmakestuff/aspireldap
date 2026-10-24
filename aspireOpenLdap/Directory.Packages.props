@@ -45,7 +45,7 @@
     <!-- Direct reference only to lift bunit's transitive AngleSharp above the advisory
          GHSA-pgww-w46g-26qg range. -->
     <PackageVersion Include="AngleSharp" Version="1.8.5" />
-    <PackageVersion Include="bunit" Version="1.40.0" />
+    <PackageVersion Include="bunit" Version="2.11.3" />
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

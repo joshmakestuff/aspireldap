@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Aspire.LdapAdmin.Tests;
 
-public sealed class BrowseDialogRaceTests : TestContext
+public sealed class BrowseDialogRaceTests : BunitContext, IAsyncLifetime
 {
     private const string A = "cn=a,dc=example,dc=org";
     private const string B = "cn=b,dc=example,dc=org";
@@ -21,6 +21,11 @@ public sealed class BrowseDialogRaceTests : TestContext
     private static readonly GroupMembershipAttribute Membership =
         new("member", GroupMemberValueKind.DistinguishedName, Required: true);
 
+    Task IAsyncLifetime.InitializeAsync() => Task.CompletedTask;
+
+    // xUnit v2 needs IAsyncLifetime to dispose the container's async-only services.
+    Task IAsyncLifetime.DisposeAsync() => DisposeAsync().AsTask();
+
     private IRenderedComponent<BrowseHarness> RenderBrowse()
     {
         Services.AddSingleton(new LdapDirectoryService(null!, null!));
@@ -29,7 +34,7 @@ public sealed class BrowseDialogRaceTests : TestContext
         Services.AddSingleton(new ConsoleConnectionInfo("unused", "unused"));
         Services.AddSingleton<ConsoleToastService>();
         Services.AddSingleton<ConsoleClipboard>();
-        return RenderComponent<BrowseHarness>();
+        return Render<BrowseHarness>();
     }
 
     [Theory]

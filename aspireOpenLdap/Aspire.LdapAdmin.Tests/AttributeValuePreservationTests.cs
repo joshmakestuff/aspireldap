@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Aspire.LdapAdmin.Tests;
 
-public sealed class AttributeValuePreservationTests : TestContext
+public sealed class AttributeValuePreservationTests : BunitContext
 {
     [Theory]
     [InlineData(false, false)]
@@ -32,7 +32,7 @@ public sealed class AttributeValuePreservationTests : TestContext
                 return Task.FromResult<string?>(null);
             },
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, singleValued ? ConsoleTestSchema.Schema : null));
 
@@ -57,7 +57,7 @@ public sealed class AttributeValuePreservationTests : TestContext
             Values = original,
             SaveAsync = (_, _) => Task.FromResult<string?>("Write refused"),
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, singleValued ? ConsoleTestSchema.Schema : null));
 
@@ -88,7 +88,7 @@ public sealed class AttributeValuePreservationTests : TestContext
                 return Task.FromResult<string?>(null);
             },
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters.Add(p => p.Model, model));
+        var cut = Render<AttributeDialog>(parameters => parameters.Add(p => p.Model, model));
 
         cut.FindAll("button").First(b => b.TextContent == "Remove value").Click();
         Assert.Equal("other", Assert.Single(model.Values));
@@ -117,7 +117,7 @@ public sealed class AttributeValuePreservationTests : TestContext
             Values = ["first\nsecond"],
             SaveAsync = (_, _) => pending.Task,
         };
-        var cut = RenderComponent<AttributeDialog>(parameters => parameters
+        var cut = Render<AttributeDialog>(parameters => parameters
             .Add(p => p.Model, model)
             .Add(p => p.Schema, ConsoleTestSchema.Schema));
 

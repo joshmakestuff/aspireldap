@@ -13,7 +13,7 @@ namespace Aspire.LdapAdmin.Tests;
 /// kind-driven field sets and save semantics, the LDIF tab's draft/apply flow, and the
 /// entry-semantic stat strip.
 /// </summary>
-public sealed class EntryTabsComponentTests : TestContext
+public sealed class EntryTabsComponentTests : BunitContext
 {
     private const string AliceDn = "uid=alice.chen,ou=people,dc=aspire,dc=dev";
 
@@ -48,7 +48,7 @@ public sealed class EntryTabsComponentTests : TestContext
     [Fact]
     public void Overview_Renders_The_Person_Field_Set_And_ObjectClass_Chips()
     {
-        var cut = RenderComponent<EntryOverview>(parameters => parameters
+        var cut = Render<EntryOverview>(parameters => parameters
             .Add(p => p.Entry, Person(Text("cn", "Alice Chen"), Text("uid", "alice.chen"))));
 
         var labels = cut.FindAll(".field > label").Select(static l => l.TextContent.Trim()).ToList();
@@ -62,7 +62,7 @@ public sealed class EntryTabsComponentTests : TestContext
     [Fact]
     public void Overview_Renders_The_Container_Field_Set_With_The_Real_Name_Attribute()
     {
-        var cut = RenderComponent<EntryOverview>(parameters => parameters
+        var cut = Render<EntryOverview>(parameters => parameters
             .Add(p => p.Entry, new LdapEntry("ou=people,dc=aspire,dc=dev",
                 [Text("objectClass", "organizationalUnit"), Text("ou", "people")])));
 
@@ -74,7 +74,7 @@ public sealed class EntryTabsComponentTests : TestContext
     [Fact]
     public void Overview_Makes_MultiValued_And_Binary_Fields_ReadOnly()
     {
-        var cut = RenderComponent<EntryOverview>(parameters => parameters
+        var cut = Render<EntryOverview>(parameters => parameters
             .Add(p => p.Entry, Person(
                 Text("cn", "Alice Chen", "A. Chen"),
                 Binary("title", Convert.ToBase64String([1])))));
@@ -89,7 +89,7 @@ public sealed class EntryTabsComponentTests : TestContext
     public async Task Overview_Save_Sends_Replaces_And_Deletes_For_Dirty_Fields_Only()
     {
         IReadOnlyList<LdapAttributeChange>? sent = null;
-        var cut = RenderComponent<EntryOverview>(parameters => parameters
+        var cut = Render<EntryOverview>(parameters => parameters
             .Add(p => p.Entry, Person(Text("cn", "Alice Chen"), Text("mail", "old@aspire.dev"), Text("title", "temp")))
             .Add(p => p.SaveAsync, changes =>
             {
@@ -117,7 +117,7 @@ public sealed class EntryTabsComponentTests : TestContext
     [Fact]
     public async Task Overview_Shows_A_Save_Failure_Inline_And_Keeps_The_Draft()
     {
-        var cut = RenderComponent<EntryOverview>(parameters => parameters
+        var cut = Render<EntryOverview>(parameters => parameters
             .Add(p => p.Entry, Person(Text("mail", "old@aspire.dev")))
             .Add(p => p.SaveAsync, _ => Task.FromResult<string?>("Access denied — the server's ACL refused this bind.")));
 
@@ -134,7 +134,7 @@ public sealed class EntryTabsComponentTests : TestContext
     [Fact]
     public void Overview_Save_Button_Is_Disabled_Until_Something_Changes()
     {
-        var cut = RenderComponent<EntryOverview>(parameters => parameters
+        var cut = Render<EntryOverview>(parameters => parameters
             .Add(p => p.Entry, Person(Text("mail", "old@aspire.dev")))
             .Add(p => p.SaveAsync, _ => Task.FromResult<string?>(null)));
 
@@ -156,7 +156,7 @@ public sealed class EntryTabsComponentTests : TestContext
     public void LdifPanel_Renders_The_Entry_As_A_Content_Record()
     {
         AddLdifPanelServices();
-        var cut = RenderComponent<EntryLdifPanel>(parameters => parameters
+        var cut = Render<EntryLdifPanel>(parameters => parameters
             .Add(p => p.Entry, Person(Text("cn", "Alice Chen")))
             .Add(p => p.ApplyAsync, _ => Task.FromResult<string?>(null)));
 
@@ -172,7 +172,7 @@ public sealed class EntryTabsComponentTests : TestContext
     {
         AddLdifPanelServices();
         IReadOnlyList<LdapAttributeChange>? sent = null;
-        var cut = RenderComponent<EntryLdifPanel>(parameters => parameters
+        var cut = Render<EntryLdifPanel>(parameters => parameters
             .Add(p => p.Entry, Person(Text("cn", "Alice Chen")))
             .Add(p => p.ApplyAsync, changes =>
             {
@@ -195,7 +195,7 @@ public sealed class EntryTabsComponentTests : TestContext
     {
         AddLdifPanelServices();
         var applied = false;
-        var cut = RenderComponent<EntryLdifPanel>(parameters => parameters
+        var cut = Render<EntryLdifPanel>(parameters => parameters
             .Add(p => p.Entry, Person(Text("cn", "Alice Chen")))
             .Add(p => p.ApplyAsync, _ =>
             {

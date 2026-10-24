@@ -100,9 +100,9 @@ public sealed class FilterBuilderTests
     /// pure UI state, and the panel's background OU lookup fails into its documented
     /// empty-datalist fallback.
     /// </summary>
-    private static TestContext PanelContext()
+    private static BunitContext PanelContext()
     {
-        var ctx = new TestContext();
+        var ctx = new BunitContext();
         var connectionString = new OpenLdapConnectionStringBuilder
         {
             Endpoint = new Uri("ldap://127.0.0.1:1"),
@@ -122,14 +122,14 @@ public sealed class FilterBuilderTests
         return ctx;
     }
 
-    private static string Raw(IRenderedFragment cut) =>
+    private static string Raw(IRenderedComponent<SearchPanel> cut) =>
         cut.Find("input[aria-label='LDAP filter']").GetAttribute("value")!;
 
     [Fact]
     public void Builder_Starts_As_Match_Everything_And_Composes_Into_The_Raw_Field()
     {
         using var ctx = PanelContext();
-        var cut = ctx.RenderComponent<SearchPanel>();
+        var cut = ctx.Render<SearchPanel>();
 
         Assert.Equal("(objectClass=*)", Raw(cut));
         var row = cut.Find(".frow");
@@ -144,7 +144,7 @@ public sealed class FilterBuilderTests
     public void Editing_The_Raw_Filter_Projects_Into_The_Builder_Rows()
     {
         using var ctx = PanelContext();
-        var cut = ctx.RenderComponent<SearchPanel>();
+        var cut = ctx.Render<SearchPanel>();
 
         cut.Find("input[aria-label='LDAP filter']").Input("(|(uid=alice)(uidNumber>=1000))");
 
@@ -161,7 +161,7 @@ public sealed class FilterBuilderTests
     public void The_Raw_Field_Wins_Until_A_Builder_Control_Is_Touched()
     {
         using var ctx = PanelContext();
-        var cut = ctx.RenderComponent<SearchPanel>();
+        var cut = ctx.Render<SearchPanel>();
 
         // Hand-edit the raw filter to something beyond the builder: it stays verbatim,
         // and the panel says the projection is lossy.
@@ -179,7 +179,7 @@ public sealed class FilterBuilderTests
     public void Switching_The_Join_Rewrites_The_Raw_Filter()
     {
         using var ctx = PanelContext();
-        var cut = ctx.RenderComponent<SearchPanel>();
+        var cut = ctx.Render<SearchPanel>();
 
         cut.Find("input[aria-label='LDAP filter']").Input("(&(uid=a)(cn=b))");
         cut.FindAll(".seg-opt input").ElementAt(1).Change(true);
@@ -191,7 +191,7 @@ public sealed class FilterBuilderTests
     public void Removing_A_Condition_Rewrites_The_Raw_Filter()
     {
         using var ctx = PanelContext();
-        var cut = ctx.RenderComponent<SearchPanel>();
+        var cut = ctx.Render<SearchPanel>();
 
         cut.Find("input[aria-label='LDAP filter']").Input("(&(uid=a)(cn=b))");
         cut.FindAll("button[aria-label='Remove condition']").First().Click();

@@ -79,7 +79,7 @@ public sealed class GroupMembershipSchemaTests
     }
 }
 
-public sealed class GroupMembershipComponentTests : TestContext
+public sealed class GroupMembershipComponentTests : BunitContext
 {
     private const string GroupDn = "cn=team,ou=groups,dc=example,dc=org";
     private static readonly GroupMembershipAttribute Membership =
@@ -105,7 +105,7 @@ public sealed class GroupMembershipComponentTests : TestContext
             Text("objectClass", "groupOfNames"),
             Text("member", "uid=A,dc=example,dc=org", "uid=b,dc=example,dc=org", "UID=c,DC=example,DC=org"),
         ]);
-        var cut = RenderComponent<GroupMembersPanel>(parameters => parameters
+        var cut = Render<GroupMembersPanel>(parameters => parameters
             .Add(p => p.Entry, entry)
             .Add(p => p.Memberships, [Membership])
             .Add(p => p.RemoveMemberAsync, (_, _, value, _) =>
@@ -136,13 +136,13 @@ public sealed class GroupMembershipComponentTests : TestContext
             removedFrom = dn;
             return pending.Task;
         };
-        var cut = RenderComponent<GroupMembersPanel>(parameters => parameters
+        var cut = Render<GroupMembersPanel>(parameters => parameters
             .Add(p => p.Entry, first)
             .Add(p => p.Memberships, [Membership])
             .Add(p => p.RemoveMemberAsync, remove));
 
         var removal = cut.Find("button[title^='Remove']").ClickAsync(new());
-        cut.SetParametersAndRender(parameters => parameters
+        cut.Render(parameters => parameters
             .Add(p => p.Entry, second)
             .Add(p => p.Memberships, [Membership])
             .Add(p => p.RemoveMemberAsync, remove));
@@ -164,7 +164,7 @@ public sealed class GroupMembershipComponentTests : TestContext
             Text("cn", "team"),
             Text("member", "uid=a,dc=example,dc=org", "uid=b,dc=example,dc=org"),
         ]);
-        var cut = RenderComponent<EntryLdifPanel>(parameters => parameters
+        var cut = Render<EntryLdifPanel>(parameters => parameters
             .Add(p => p.Entry, entry)
             .Add(p => p.ApplyAsync, changes =>
             {
@@ -208,7 +208,7 @@ public sealed class GroupMembershipComponentTests : TestContext
                 return Task.FromResult<string?>(null);
             },
         };
-        var cut = RenderComponent<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
+        var cut = Render<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
 
         cut.Find("input[placeholder='name, uid, or email']").Input("alice*)(uid=*)");
         await cut.FindAll("button").Single(button => button.TextContent == "Search").ClickAsync(new());
@@ -237,7 +237,7 @@ public sealed class GroupMembershipComponentTests : TestContext
                 return pending.Task;
             },
         };
-        var cut = RenderComponent<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
+        var cut = Render<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
 
         cut.FindAll("input.input.mono").Last().Input(" typed-user ");
         cut.FindAll("button").Single(button => button.TextContent == "Add member").Click();
@@ -268,7 +268,7 @@ public sealed class GroupMembershipComponentTests : TestContext
                 return Task.FromResult<string?>(null);
             },
         };
-        var cut = RenderComponent<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
+        var cut = Render<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
         var search = cut.FindAll("button").Single(button => button.TextContent == "Search");
 
         await search.ClickAsync(new());
@@ -299,7 +299,7 @@ public sealed class GroupMembershipComponentTests : TestContext
                 return Task.FromResult<string?>(null);
             },
         };
-        var cut = RenderComponent<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
+        var cut = Render<AddGroupMemberDialog>(parameters => parameters.Add(p => p.Model, model));
 
         cut.Find("#member-value").Input(@"cn=Smith\2C Alice,ou=people,dc=example,dc=org");
         await cut.FindAll("button").Single(button => button.TextContent == "Add member").ClickAsync(new());

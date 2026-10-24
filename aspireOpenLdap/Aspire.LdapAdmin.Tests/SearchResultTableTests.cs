@@ -103,12 +103,12 @@ public sealed class SearchResultTableStateTests
     }
 }
 
-public sealed class SearchResultsTableComponentTests : TestContext
+public sealed class SearchResultsTableComponentTests : BunitContext
 {
     [Fact]
     public void Sort_headers_toggle_direction_and_report_aria_sort()
     {
-        var cut = RenderComponent<SearchResultsTable>(parameters => parameters
+        var cut = Render<SearchResultsTable>(parameters => parameters
             .Add(component => component.Result, new LdapSearchResult(
                 [SearchResultTableStateTests.Entry("uid=zulu,dc=example,dc=org", name: "Zulu"),
                  SearchResultTableStateTests.Entry("uid=alpha,dc=example,dc=org", name: "Alpha")],
@@ -131,7 +131,7 @@ public sealed class SearchResultsTableComponentTests : TestContext
         var entries = Enumerable.Range(1, 30)
             .Select(index => SearchResultTableStateTests.Entry($"uid={index:D2},dc=example,dc=org"))
             .ToArray();
-        var cut = RenderComponent<SearchResultsTable>(parameters => parameters
+        var cut = Render<SearchResultsTable>(parameters => parameters
             .Add(component => component.Result, new LdapSearchResult(entries, Truncated: true))
             .Add(component => component.CommonSuffix, "dc=example,dc=org"));
 
@@ -148,7 +148,7 @@ public sealed class SearchResultsTableComponentTests : TestContext
     [InlineData(true, "No entry was returned before truncation.")]
     public void Empty_results_report_zero_fetched_without_overstating_completeness(bool truncated, string message)
     {
-        var cut = RenderComponent<SearchResultsTable>(parameters => parameters
+        var cut = Render<SearchResultsTable>(parameters => parameters
             .Add(component => component.Result, new LdapSearchResult([], truncated))
             .Add(component => component.RanFilter, "(uid=missing)"));
 

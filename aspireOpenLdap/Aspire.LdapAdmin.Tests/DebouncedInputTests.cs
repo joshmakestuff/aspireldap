@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Aspire.LdapAdmin.Tests;
 
-public sealed class DebouncedInputTests : TestContext
+public sealed class DebouncedInputTests : BunitContext
 {
     [Fact]
     public async Task Debouncer_Runs_Only_The_Latest_Action()
@@ -62,7 +62,7 @@ public sealed class DebouncedInputTests : TestContext
     public void Input_Keeps_Raw_Typing_Local_And_Publishes_Only_The_Latest_Value()
     {
         List<string> published = [];
-        var cut = RenderComponent<DebouncedInput>(parameters => parameters
+        var cut = Render<DebouncedInput>(parameters => parameters
             .Add(p => p.Delay, TimeSpan.FromMilliseconds(50))
             .Add(p => p.ValueChanged, value => published.Add(value)));
 

@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Aspire.LdapAdmin.Tests;
 
-public sealed class OperationalAttributesPanelTests : TestContext
+public sealed class OperationalAttributesPanelTests : BunitContext
 {
     [Fact]
     public async Task A_late_read_cannot_replace_a_newer_entry_or_expose_edit_actions()
@@ -16,8 +16,8 @@ public sealed class OperationalAttributesPanelTests : TestContext
         Services.AddSingleton(new LdapAdminSettings());
         var first = new LdapEntry("cn=a,dc=example", []);
         var second = new LdapEntry("cn=b,dc=example", []);
-        var cut = RenderComponent<PanelHarness>(parameters => parameters.Add(p => p.Entry, first));
-        cut.SetParametersAndRender(parameters => parameters.Add(p => p.Entry, second));
+        var cut = Render<PanelHarness>(parameters => parameters.Add(p => p.Entry, first));
+        cut.Render(parameters => parameters.Add(p => p.Entry, second));
         await cut.InvokeAsync(() => cut.Instance.Reads[second.Dn].SetResult(Operational(second.Dn, "newer-value")));
         cut.WaitForAssertion(() => Assert.Contains("newer-value", cut.Markup, StringComparison.Ordinal));
         var rendered = cut.RenderCount;
