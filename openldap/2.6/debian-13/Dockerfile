@@ -19,7 +19,7 @@
 # rebuild can pick up Debian point-release security fixes without a source change. For a
 # dev-time image that drift is accepted; the digest fixes the base, the slapd assertion
 # pins the 2.6 contract, and the integration suite gates behavior.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 LABEL org.opencontainers.image.title="openldap" \
       org.opencontainers.image.description="OpenLDAP server based on stock Debian packages" \
