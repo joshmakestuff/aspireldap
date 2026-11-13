@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
     <ProjectReference Include="..\Aspire.Hosting.OpenLdap\Aspire.Hosting.OpenLdap.csproj" />
   </ItemGroup>
 
