@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <!--
     Minimal AppHost used only by the test project: a plain OpenLDAP resource with no TLS,
@@ -14,6 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
     <ProjectReference Include="..\Aspire.Hosting.OpenLdap\Aspire.Hosting.OpenLdap.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\Aspire.OpenLdap.Testing\Aspire.OpenLdap.Testing.csproj" IsAspireProjectResource="false" />
   </ItemGroup>

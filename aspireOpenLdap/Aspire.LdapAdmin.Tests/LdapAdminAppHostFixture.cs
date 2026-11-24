@@ -135,7 +135,7 @@ public sealed class LdapAdminAppHostFixture : IAsyncLifetime
             Schema = _host.Services.GetRequiredService<LdapSchemaService>();
             Contexts = _host.Services.GetRequiredService<LdapServerContextService>();
             var admin = app.Services.GetRequiredService<DistributedApplicationModel>()
-                .Resources.OfType<ProjectResource>().Single(resource => resource.Name == AdminResourceName);
+                .Resources.OfType<Aspire.Hosting.Dotnet.DotnetProjectResource>().Single(resource => resource.Name == AdminResourceName);
             Api = new HttpClient { BaseAddress = new Uri(new EndpointReference(admin, "http").Url) };
             _app = app;
         }

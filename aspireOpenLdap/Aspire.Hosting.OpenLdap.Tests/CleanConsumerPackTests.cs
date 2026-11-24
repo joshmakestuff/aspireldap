@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text;
-using System.Text.Json;
+using System.Xml.Linq;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -54,6 +54,7 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
                 solutionDir,
                 [
                     "pack",
+                    "--disable-build-servers",
                     Path.Combine(solutionDir, "Aspire.Hosting.OpenLdap", "Aspire.Hosting.OpenLdap.csproj"),
                     "-c", "Release",
                     $"-p:Version={version}",
@@ -62,14 +63,21 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
                 cancellationToken);
             Assert.True(pack.ExitCode == 0, $"dotnet pack failed:{Environment.NewLine}{pack.Output}");
 
-            ScaffoldConsumer(consumerDir, feedDir, version, ReadAppHostSdkVersion(solutionDir));
+            ScaffoldConsumer(consumerDir, feedDir, version, ReadAppHostVersion(solutionDir));
+
+            var build = await RunDotnetAsync(consumerDir,
+                ["build", "-c", "Release", "--disable-build-servers"], cancellationToken);
+            Assert.True(build.ExitCode == 0, $"consumer build failed:{Environment.NewLine}{build.Output}");
 
             // The consumer's AppHost run boots a DCP host and builds the bundled OpenLDAP and
             // admin images — hold the docker gate for the whole run, like every other AppHost.
             DockerResult run;
             using (await DockerHostGate.AcquireAsync(cancellationToken))
             {
-                run = await RunDotnetAsync(consumerDir, ["run", "-c", "Release"], cancellationToken);
+                // Execute the verifier directly: Aspire 17 redirects dotnet run through the CLI,
+                // which owns the console and can select a different build configuration.
+                run = await RunDotnetAsync(consumerDir,
+                    [Path.Combine(consumerDir, "bin", "Release", "net10.0", "CleanConsumer.dll")], cancellationToken);
             }
 
             output.WriteLine(run.Output);
@@ -91,11 +99,11 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
 
     /// <summary>
     /// The consumer workspace: a nuget.config whose only sources are the just-packed local feed
-    /// (for this package) and nuget.org (for everything else), the same Aspire.AppHost.Sdk pin
+    /// (for this package) and nuget.org (for everything else), the same Aspire.Hosting.AppHost pin
     /// the repo builds with, and an AppHost whose program verifies the running resources itself.
     /// Nothing in it references the checkout.
     /// </summary>
-    private static void ScaffoldConsumer(string consumerDir, string feedDir, string version, string sdkVersion)
+    private static void ScaffoldConsumer(string consumerDir, string feedDir, string version, string appHostVersion)
     {
         File.WriteAllText(Path.Combine(consumerDir, "nuget.config"), $"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -116,16 +124,8 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
             </configuration>
             """);
 
-        File.WriteAllText(Path.Combine(consumerDir, "global.json"), $$"""
-            {
-              "msbuild-sdks": {
-                "Aspire.AppHost.Sdk": "{{sdkVersion}}"
-              }
-            }
-            """);
-
         File.WriteAllText(Path.Combine(consumerDir, "CleanConsumer.csproj"), $"""
-            <Project Sdk="Aspire.AppHost.Sdk">
+            <Project Sdk="Microsoft.NET.Sdk">
 
               <PropertyGroup>
                 <OutputType>Exe</OutputType>
@@ -135,6 +135,7 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
               </PropertyGroup>
 
               <ItemGroup>
+                <PackageReference Include="Aspire.Hosting.AppHost" Version="{appHostVersion}" />
                 <PackageReference Include="JoshMakeStuff.Aspire.Hosting.OpenLdap" Version="{version}" />
               </ItemGroup>
 
@@ -240,12 +241,14 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
         throw new InvalidOperationException("AspireOpenLdap.slnx not found above the test output directory.");
     }
 
-    /// <summary>The Aspire.AppHost.Sdk version the repo pins — reused so the consumer cannot drift.</summary>
-    private static string ReadAppHostSdkVersion(string solutionDir)
+    /// <summary>The AppHost package version the repo pins — reused so the consumer cannot drift.</summary>
+    private static string ReadAppHostVersion(string solutionDir)
     {
-        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(solutionDir, "global.json")));
-        return doc.RootElement.GetProperty("msbuild-sdks").GetProperty("Aspire.AppHost.Sdk").GetString()
-            ?? throw new InvalidOperationException("Aspire.AppHost.Sdk version missing from global.json.");
+        var doc = XDocument.Load(Path.Combine(solutionDir, "Directory.Packages.props"));
+        return doc.Descendants("PackageVersion")
+            .Single(element => (string?)element.Attribute("Include") == "Aspire.Hosting.AppHost")
+            .Attribute("Version")?.Value
+            ?? throw new InvalidOperationException("Aspire.Hosting.AppHost version missing from Directory.Packages.props.");
     }
 
     private static async Task<DockerResult> RunDotnetAsync(
@@ -258,6 +261,8 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        // Reused MSBuild nodes can outlive the command and retain redirected output pipes.
+        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         foreach (var arg in args)
         {
             psi.ArgumentList.Add(arg);

@@ -24,7 +24,7 @@ var ldap = builder.AddOpenLdap("openldap")
     // Just over one LDAP page (500) and the tree display cap (48).
     .WithFakePeople(501, ou: "hosts", seed: 82);
 
-builder.AddProject<Projects.Aspire_LdapAdmin_Web>("ldapadmin")
+builder.AddDotnetProject("ldapadmin", "../Aspire.LdapAdmin.Web/Aspire.LdapAdmin.Web.csproj")
     // Same configuration contract WithLdapAdmin() sets on the packaged container: the admin
     // host reads LdapAdmin:ConnectionName and binds with that connection string.
     .WithEnvironment("LdapAdmin__ConnectionName", "openldap")

@@ -19,10 +19,10 @@ public sealed class OperationalAttributesPanelTests : BunitContext
         var cut = Render<PanelHarness>(parameters => parameters.Add(p => p.Entry, first));
         cut.Render(parameters => parameters.Add(p => p.Entry, second));
         await cut.InvokeAsync(() => cut.Instance.Reads[second.Dn].SetResult(Operational(second.Dn, "newer-value")));
-        cut.WaitForAssertion(() => Assert.Contains("newer-value", cut.Markup, StringComparison.Ordinal));
+        await cut.WaitForAssertionAsync(() => Assert.Contains("newer-value", cut.Markup, StringComparison.Ordinal));
         var rendered = cut.RenderCount;
         await cut.InvokeAsync(() => cut.Instance.Reads[first.Dn].SetResult(Operational(first.Dn, "stale-value")));
-        cut.WaitForState(() => cut.RenderCount > rendered);
+        await cut.WaitForStateAsync(() => cut.RenderCount > rendered);
         Assert.Contains("newer-value", cut.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain("stale-value", cut.Markup, StringComparison.Ordinal);
         Assert.Empty(cut.FindAll("button"));

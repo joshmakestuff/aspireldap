@@ -220,18 +220,26 @@ public sealed class BulkEditComponentTests : BunitContext
     public async Task Cancellation_finishes_the_dispatched_item_and_leaves_the_rest_pending()
     {
         var first = new TaskCompletionSource<LdapOperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
         BulkEditRunResult? lastRun = null;
-        var model = Model(_ => ++calls == 1 ? first.Task : Task.FromResult(LdapOperationResult.Ok()),
+        var model = Model(_ =>
+        {
+            calls++;
+            dispatched.TrySetResult();
+            return calls == 1 ? first.Task : Task.FromResult(LdapOperationResult.Ok());
+        },
             run => { lastRun = run; return Task.CompletedTask; });
         var cut = Render<BulkEditDialog>(parameters => parameters.Add(component => component.Model, model));
         SelectAttributePlan(cut);
 
-        cut.FindAll("button").Single(button => button.TextContent == "Apply changes").Click();
+        var apply = cut.FindAll("button").Single(button => button.TextContent == "Apply changes").ClickAsync(new());
+        await dispatched.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await cut.InvokeAsync(() => cut.FindComponent<ConsoleDialog>().Instance.CancelFromJs());
         first.SetResult(LdapOperationResult.Ok());
 
-        cut.WaitForAssertion(() => Assert.Contains("1 completed · 0 failed · 1 pending · cancelled", cut.Markup, StringComparison.Ordinal));
+        await apply;
+        Assert.Contains("1 completed · 0 failed · 1 pending · cancelled", cut.Markup, StringComparison.Ordinal);
         Assert.Equal(1, calls);
         Assert.True(lastRun!.Cancelled);
     }

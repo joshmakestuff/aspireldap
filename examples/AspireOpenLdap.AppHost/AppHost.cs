@@ -15,7 +15,7 @@ var ldap = builder.AddOpenLdap("openldap")
     .WithPhpLdapAdmin();
 
 // The API consumes the directory through the instrumented OpenLdapClient.
-builder.AddProject<Projects.AspireOpenLdap_Api>("api")
+builder.AddDotnetProject("api", "../AspireOpenLdap.Api/AspireOpenLdap.Api.csproj")
     .WithReference(ldap)
     .WaitFor(ldap);
 

@@ -45,7 +45,7 @@ public sealed class ColdHostingPackTests(ITestOutputHelper output)
             const string version = "0.0.1-coldpack";
             var feed = Path.Combine(workspace.FullName, "feed");
             await RunAsync("dotnet", source,
-                ["pack", "aspireOpenLdap/Aspire.Hosting.OpenLdap/Aspire.Hosting.OpenLdap.csproj",
+                ["pack", "aspireOpenLdap/Aspire.Hosting.OpenLdap/Aspire.Hosting.OpenLdap.csproj", "--disable-build-servers",
                  "-c", configuration, $"-p:Version={version}", "-p:ContinuousIntegrationBuild=true",
                  "-p:EnableSourceControlManagerQueries=false", "-p:EnableSourceLink=false", "-warnaserror", "-o", feed], cts.Token);
 
@@ -86,6 +86,8 @@ public sealed class ColdHostingPackTests(ITestOutputHelper output)
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        // Reused MSBuild nodes can outlive the command and retain redirected output pipes.
+        start.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         foreach (var argument in arguments)
         {
             start.ArgumentList.Add(argument);
