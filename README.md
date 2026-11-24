@@ -2,6 +2,11 @@
 
 .NET Aspire integrations for [OpenLDAP](https://www.openldap.org/) — run a real LDAP directory as part of your local Aspire app, and connect to it from your services with first-class DI, configuration, and health checks.
 
+Version `0.9.0-preview.1` targets .NET 10 and uses Aspire 17 and Microsoft.Extensions 11.
+Install the Aspire 17 CLI bundle before building or running an AppHost. AppHosts use
+`Microsoft.NET.Sdk` with `Aspire.Hosting.AppHost`; add `Aspire.Hosting.Dotnet` for
+path-based `AddDotnetProject` service registrations.
+
 The OpenLDAP container image is **built locally from a Dockerfile bundled in the hosting package**, so no external image registry is required.
 
 ## Packages
