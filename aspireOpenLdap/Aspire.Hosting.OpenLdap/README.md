@@ -14,6 +14,10 @@ dotnet add package JoshMakeStuff.Aspire.Hosting.OpenLdap
 
 Install this package in your **AppHost** project.
 
+The `0.9` preview targets .NET 10 and Aspire 17. Install the Aspire 17 CLI bundle,
+use `Microsoft.NET.Sdk` with an `Aspire.Hosting.AppHost` package reference, and add
+`Aspire.Hosting.Dotnet` for the `AddDotnetProject` registration shown below.
+
 ## Usage
 
 ```csharp
@@ -23,7 +27,7 @@ var ldap = builder.AddOpenLdap("ldap")
     .WithFakeDirectory(seed: 42)
     .WithLdapAdmin();
 
-builder.AddProject<Projects.MyApi>("api")
+builder.AddDotnetProject("api", "../MyApi/MyApi.csproj")
        .WithReference(ldap);
 
 builder.Build().Run();

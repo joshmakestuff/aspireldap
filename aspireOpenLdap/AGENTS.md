@@ -24,7 +24,7 @@ var ldap = builder.AddOpenLdap("ldap")           // base DN dc=example,dc=org, a
     .WithOrganizationalUnit("people")
     .WithUser("alice", password: "alice-pw", ou: "people", cn: "Alice Anderson", sn: "Anderson", mail: "alice@example.org");
 
-builder.AddProject<Projects.MyApi>("api")
+builder.AddDotnetProject("api", "../MyApi/MyApi.csproj")
     .WithReference(ldap)                          // injects ConnectionStrings:ldap
     .WaitFor(ldap);
 

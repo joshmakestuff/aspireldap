@@ -62,7 +62,7 @@ var ldap = builder.AddOpenLdap("openldap")
     // Bundled LdapAdmin UI — browse and edit the directory from the Aspire dashboard.
     .WithLdapAdmin();
 
-builder.AddProject<Projects.MyApi>("api")
+builder.AddDotnetProject("api", "../MyApi/MyApi.csproj")
        .WithReference(ldap);
 
 builder.Build().Run();
