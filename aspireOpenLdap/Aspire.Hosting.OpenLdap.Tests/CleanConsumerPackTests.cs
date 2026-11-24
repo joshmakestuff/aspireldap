@@ -65,12 +65,19 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
 
             ScaffoldConsumer(consumerDir, feedDir, version, ReadAppHostVersion(solutionDir));
 
+            var build = await RunDotnetAsync(consumerDir,
+                ["build", "-c", "Release", "--disable-build-servers"], cancellationToken);
+            Assert.True(build.ExitCode == 0, $"consumer build failed:{Environment.NewLine}{build.Output}");
+
             // The consumer's AppHost run boots a DCP host and builds the bundled OpenLDAP and
             // admin images — hold the docker gate for the whole run, like every other AppHost.
             DockerResult run;
             using (await DockerHostGate.AcquireAsync(cancellationToken))
             {
-                run = await RunDotnetAsync(consumerDir, ["run", "-c", "Release"], cancellationToken);
+                // Execute the verifier directly: Aspire 17 redirects dotnet run through the CLI,
+                // which owns the console and can select a different build configuration.
+                run = await RunDotnetAsync(consumerDir,
+                    [Path.Combine(consumerDir, "bin", "Release", "net10.0", "CleanConsumer.dll")], cancellationToken);
             }
 
             output.WriteLine(run.Output);
