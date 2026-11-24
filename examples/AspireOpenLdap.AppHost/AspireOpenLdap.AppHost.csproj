@@ -12,7 +12,7 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" Version="17.0.0" />
     <PackageReference Include="Aspire.Hosting.Dotnet" Version="17.0.0" />
-    <ProjectReference Include="..\..\aspireOpenLdap\Aspire.Hosting.OpenLdap\Aspire.Hosting.OpenLdap.csproj" IsAspireProjectResource="false" />
+    <PackageReference Include="JoshMakeStuff.Aspire.Hosting.OpenLdap" Version="0.9.0-preview.1" />
   </ItemGroup>
 
 </Project>

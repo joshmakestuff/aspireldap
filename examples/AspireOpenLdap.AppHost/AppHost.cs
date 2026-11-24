@@ -12,7 +12,7 @@ var ldap = builder.AddOpenLdap("openldap")
     .WithUser("alice", password: "alice-pw", ou: "people", cn: "Alice Anderson", sn: "Anderson", mail: "alice@example.org")
     .WithUser("bob", password: "bob-pw", ou: "people", cn: "Bob Brown", sn: "Brown", mail: "bob@example.org")
     .WithGroup("developers", members: ["alice", "bob"], ou: "groups")
-    .WithPhpLdapAdmin();
+    .WithLdapAdmin();
 
 // The API consumes the directory through the instrumented OpenLdapClient.
 builder.AddDotnetProject("api", "../AspireOpenLdap.Api/AspireOpenLdap.Api.csproj")
