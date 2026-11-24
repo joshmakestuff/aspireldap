@@ -54,6 +54,7 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
                 solutionDir,
                 [
                     "pack",
+                    "--disable-build-servers",
                     Path.Combine(solutionDir, "Aspire.Hosting.OpenLdap", "Aspire.Hosting.OpenLdap.csproj"),
                     "-c", "Release",
                     $"-p:Version={version}",
@@ -253,6 +254,8 @@ public sealed class CleanConsumerPackTests(ITestOutputHelper output)
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        // Reused MSBuild nodes can outlive the command and retain redirected output pipes.
+        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         foreach (var arg in args)
         {
             psi.ArgumentList.Add(arg);
