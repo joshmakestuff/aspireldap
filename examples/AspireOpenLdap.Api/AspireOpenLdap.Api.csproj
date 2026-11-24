@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AspireOpenLdap.ServiceDefaults\AspireOpenLdap.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\..\aspireOpenLdap\Aspire.OpenLdap\Aspire.OpenLdap.csproj" />
+    <PackageReference Include="JoshMakeStuff.Aspire.OpenLdap" Version="0.9.0-preview.1" />
   </ItemGroup>
 
 </Project>

@@ -99,7 +99,7 @@ Both packages ship a condensed agent-facing API reference — [aspireOpenLdap/AG
 
 ## Examples
 
-A runnable source-tree sample lives in [`examples/`](examples/): an AppHost running OpenLDAP plus a minimal Web API that queries it through the instrumented `OpenLdapClient`. It uses phpLDAPadmin because the source sample project-references the hosting integration; the bundled LdapAdmin payload is delivered to package consumers. Run it and watch `LDAP search` spans (nested under each HTTP request) and `db.client.operation.duration` metrics appear in the Aspire dashboard:
+A runnable sample lives in [`examples/`](examples/): an AppHost running OpenLDAP, the bundled LdapAdmin interface, and a minimal Web API that queries the directory through the instrumented `OpenLdapClient`. It consumes the published hosting and client packages. Open the `openldap-ldapadmin` endpoint from the Aspire dashboard to browse and edit the seeded directory. API requests emit `LDAP search` spans (nested under each HTTP request) and `db.client.operation.duration` metrics in the dashboard:
 
 ```sh
 aspire run --apphost examples/AspireOpenLdap.AppHost/AspireOpenLdap.AppHost.csproj
