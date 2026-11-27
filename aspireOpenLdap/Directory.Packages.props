@@ -19,8 +19,8 @@
 
   <!-- LDIF (RFC 2849) reading/writing + fake directory data generation -->
   <ItemGroup>
-    <PackageVersion Include="LdifDotNet" Version="0.8.0" />
-    <PackageVersion Include="LdifDotNet.Generator" Version="0.8.0" />
+    <PackageVersion Include="LdifDotNet" Version="0.8.1" />
+    <PackageVersion Include="LdifDotNet.Generator" Version="0.8.1" />
     <PackageVersion Include="LdifDotNet.Schema" Version="0.8.0" />
   </ItemGroup>
 
@@ -39,7 +39,7 @@
   <!-- Build / packaging -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="11.0.100" />
-    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.341" />
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.342" />
   </ItemGroup>
 
   <!-- Test -->
